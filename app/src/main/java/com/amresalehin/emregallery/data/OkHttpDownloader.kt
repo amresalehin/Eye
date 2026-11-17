@@ -898,7 +898,7 @@ object OkHttpDownloader {
         headers: Map<String, String>? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): File? {
-        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, headers, onProgress)
+        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, headers, onProgress = onProgress)
         return res.file
     }
 }

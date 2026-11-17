@@ -1409,18 +1409,6 @@ object MediaClassifier {
     fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
         val trimmed = input.trim()
         if (trimmed.isBlank()) return ""
-        return if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
-            trimmed
-        } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {
-            "https://$trimmed"
-        } else {
-            "${searchEngine.searchUrl}${URLEncoder.encode(trimmed, "UTF-8")}"
-        }
-    }
-
-    fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
-        val trimmed = input.trim()
-        if (trimmed.isBlank()) return ""
         return if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
             trimmed
         } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {

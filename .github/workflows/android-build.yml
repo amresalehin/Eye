@@ -42,8 +42,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # The repository contains prior Kotlin incremental-cache corruption traces.
+      # A clean, non-incremental compiler invocation prevents stale cache state
+      # from being reused across builds on a runner/workspace.
       - name: Run unit tests and assemble debug APK
-        run: bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: bash ./gradlew --no-daemon --no-build-cache -Pkotlin.incremental=false testDebugUnitTest assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

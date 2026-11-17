@@ -1193,26 +1193,29 @@ fun GalleryApp() {
                         initialStackForDetail = inboxInitialStack,
                         onBack = { performBackNavigation() },
                         onOpenMediaItem = { uri ->
+                            val file = java.io.File(uri.removePrefix("file://"))
+                            val fallbackName = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
+                            val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { uri })
                             val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
-                            val targetItem = match ?: run {
-                                val file = java.io.File(uri)
-                                val name = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
-                                val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                            name.endsWith(".webm", ignoreCase = true) ||
-                                            name.endsWith(".mkv", ignoreCase = true) ||
-                                            name.endsWith(".mov", ignoreCase = true)
+                            val targetItem = if (match != null) {
+                                if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
+                                    match.copy(mimeType = classified.mimeType)
+                                } else {
+                                    match
+                                }
+                            } else {
                                 MediaItem(
                                     id = uri.hashCode().toLong(),
                                     uri = uri,
-                                    name = name,
-                                    mimeType = if (isVid) "video/*" else "image/*",
+                                    name = fallbackName,
+                                    mimeType = classified.mimeType,
                                     dateAddedSeconds = System.currentTimeMillis() / 1000,
                                     dateTakenMillis = System.currentTimeMillis(),
                                     sizeBytes = if (file.exists()) file.length() else 0L,
                                     width = 0,
                                     height = 0,
                                     relativePath = "",
-                                    isVideo = isVid
+                                    isVideo = classified.isVideo
                                 )
                             }
                             openMediaInViewer(targetItem, listOf(targetItem))
@@ -1220,25 +1223,29 @@ fun GalleryApp() {
                         onOpenMediaWithList = { uri, allUris ->
                             val safeUris = if (allUris.contains(uri)) allUris else (listOf(uri) + allUris)
                             val viewerItems = safeUris.map { u ->
-                                media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) } ?: run {
-                                    val file = java.io.File(u)
-                                    val name = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
-                                    val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                                name.endsWith(".webm", ignoreCase = true) ||
-                                                name.endsWith(".mkv", ignoreCase = true) ||
-                                                name.endsWith(".mov", ignoreCase = true)
+                                val file = java.io.File(u.removePrefix("file://"))
+                                val fallbackName = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
+                                val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { u })
+                                val match = media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) }
+                                if (match != null) {
+                                    if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
+                                        match.copy(mimeType = classified.mimeType)
+                                    } else {
+                                        match
+                                    }
+                                } else {
                                     MediaItem(
                                         id = u.hashCode().toLong(),
                                         uri = u,
-                                        name = name,
-                                        mimeType = if (isVid) "video/*" else "image/*",
+                                        name = fallbackName,
+                                        mimeType = classified.mimeType,
                                         dateAddedSeconds = System.currentTimeMillis() / 1000,
                                         dateTakenMillis = System.currentTimeMillis(),
                                         sizeBytes = if (file.exists()) file.length() else 0L,
                                         width = 0,
                                         height = 0,
                                         relativePath = "",
-                                        isVideo = isVid
+                                        isVideo = classified.isVideo
                                     )
                                 }
                             }
@@ -1720,7 +1727,7 @@ private fun shareMultipleMediaItems(context: android.content.Context, items: Lis
             context.startActivity(
                 Intent.createChooser(
                     Intent(Intent.ACTION_SEND).apply {
-                        type = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
+                        type = item.mimeType ?: com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(item.name.ifBlank { item.uri }).mimeType
                         putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     },

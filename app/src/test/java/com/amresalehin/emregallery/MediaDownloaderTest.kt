@@ -1800,4 +1800,96 @@ class MediaDownloaderTest {
         assertTrue(scrollScript.contains("behavior: 'instant'"))
         assertFalse(scrollScript.contains("behavior: 'smooth'"))
     }
+
+    @Test
+    fun testDimensionFallbackLabelsAndAudioViewerMimeTypes() {
+        // 1. formatScrapedMediaDimensionOrSize never returns "40 × 40"
+        val unknownImage = ScrapedMediaItem(
+            id = "img_unknown",
+            url = "https://example.com/assets/photo.jpg",
+            title = "photo.jpg",
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            mimeType = "image/jpeg",
+            resolutionHint = null,
+            sizeBytes = null,
+            source = "DOM"
+        )
+        val labelUnknown = com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(unknownImage)
+        org.junit.Assert.assertNotEquals("40 × 40", labelUnknown)
+        assertEquals("JPG", labelUnknown)
+
+        // Generic resolutionHint ("Network") with known sizeBytes falls back to formatted size
+        val sizedVideo = ScrapedMediaItem(
+            id = "vid_sized",
+            url = "https://example.com/video/clip.mp4",
+            title = "clip.mp4",
+            category = MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4",
+            isVideo = true,
+            resolutionHint = "Network",
+            sizeBytes = 2L * 1024L * 1024L,
+            source = "yt-dlp"
+        )
+        val labelSized = com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(sizedVideo)
+        assertEquals("2.0 MB", labelSized)
+
+        // Probed dynamic dimensions take priority
+        val dynamicMap = mapOf("img_unknown" to (1920 to 1080))
+        assertEquals(
+            "1920 × 1080",
+            com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(unknownImage, dynamicMap)
+        )
+
+        // 2. MediaClassifier.resolveLocalMediaMimeType maps audio, video, and image files accurately
+        val mp3Class = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/song.mp3")
+        assertTrue(mp3Class.isAudio)
+        assertFalse(mp3Class.isVideo)
+        assertEquals("audio/mpeg", mp3Class.mimeType)
+        assertEquals("MP3", mp3Class.format)
+
+        val m4aClass = MediaClassifier.resolveLocalMediaMimeType("file:///data/user/0/pkg/files/track.m4a")
+        assertTrue(m4aClass.isAudio)
+        assertEquals("audio/mp4", m4aClass.mimeType)
+
+        val opusClass = MediaClassifier.resolveLocalMediaMimeType("voice_note.opus")
+        assertTrue(opusClass.isAudio)
+        assertEquals("audio/opus", opusClass.mimeType)
+
+        val flacClass = MediaClassifier.resolveLocalMediaMimeType("lossless.flac")
+        assertTrue(flacClass.isAudio)
+        assertEquals("audio/flac", flacClass.mimeType)
+
+        val mp4Class = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/movie.mp4")
+        assertTrue(mp4Class.isVideo)
+        assertFalse(mp4Class.isAudio)
+        assertEquals("video/mp4", mp4Class.mimeType)
+
+        val webpClass = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/cover.webp")
+        assertFalse(webpClass.isVideo)
+        assertFalse(webpClass.isAudio)
+        assertEquals("image/webp", webpClass.mimeType)
+
+        assertTrue(MediaClassifier.isAudioMimeOrUri("image/*", "/data/downloads/podcast.mp3"))
+        assertTrue(MediaClassifier.isAudioMimeOrUri("audio/mp4", "/data/downloads/unknown_file"))
+        assertFalse(MediaClassifier.isAudioMimeOrUri("video/mp4", "/data/downloads/video.mp4"))
+    }
+
+    @Test
+    fun testReleaseProguardKeepBridges() {
+        // Verify PythonProgressBridge, AndroidMediaMuxer, and EmreMediaBridge carry @Keep for R8/ProGuard safety
+        assertTrue(
+            com.amresalehin.emregallery.data.PythonProgressBridge::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+        assertTrue(
+            com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+        assertTrue(
+            com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+    }
 }

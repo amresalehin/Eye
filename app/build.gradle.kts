@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.emregallery.xytkpq"
+        applicationId = "com.amresalehin.emregallery"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

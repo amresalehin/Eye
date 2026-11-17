@@ -1900,14 +1900,7 @@ fun DownloaderMediaCard(
     modifier: Modifier = Modifier,
     isDownloaded: Boolean = false
 ) {
-    val parsedDim = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item).let { (w, h) ->
-        if (w != null && h != null) (w to h) else null
-    }
-    val dimText = if (parsedDim != null && parsedDim.first > 0 && parsedDim.second > 0) {
-        "${parsedDim.first} × ${parsedDim.second}"
-    } else {
-        item.resolutionHint ?: "40 × 40"
-    }
+    val dimText = formatScrapedMediaDimensionOrSize(item, dynamicDimensions)
     val categoryText = when {
         item.isVideo -> "Videos"
         item.isAudio -> "Audio"
@@ -1945,13 +1938,36 @@ fun DownloaderMediaCard(
                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .background(Color(0xFFE9ECEF))
             ) {
-                val previewUrl = item.thumbnailUrl ?: item.url
-                AsyncImage(
-                    model = previewUrl,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                val isAudioWithoutArt = (item.isAudio || item.category == MediaCategory.AUDIO) && item.thumbnailUrl.isNullOrBlank()
+                if (isAudioWithoutArt) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF212529).copy(alpha = 0.08f),
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Audiotrack,
+                                    contentDescription = item.title,
+                                    tint = Color(0xFF212529),
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val previewUrl = item.thumbnailUrl ?: item.url
+                    AsyncImage(
+                        model = previewUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 // Top-Left Format Pill
                 Surface(

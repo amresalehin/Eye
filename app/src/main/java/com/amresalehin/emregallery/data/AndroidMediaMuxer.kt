@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.data
 
 import android.media.MediaCodec
+import androidx.annotation.Keep
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -13,6 +14,7 @@ import java.nio.ByteBuffer
  * Losslessly merges separate DASH video-only (.mp4) and audio-only (.m4a / .mp4 / .aac) streams
  * without requiring an external FFmpeg binary.
  */
+@Keep
 object AndroidMediaMuxer {
     private const val TAG = "AndroidMediaMuxer"
     private const val DEFAULT_BUFFER_SIZE = 1024 * 1024 // 1 MB sample buffer

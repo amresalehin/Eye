@@ -126,10 +126,15 @@ fun ViewerScreen(
     // Switching videos retains user's paused or playing intent.
     var sessionPlayIntent by remember { mutableStateOf(true) }
 
-    // Video playback management with intent continuity
+    val isAudioItem = remember(item.uri, item.name, item.mimeType) {
+        com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(item.mimeType, item.name.ifBlank { item.uri })
+    }
+    val isPlayableMedia = item.isVideo || isAudioItem
+
+    // Video & Audio playback management with intent continuity
     val videoState = rememberViewerVideoState(
         uri = item.uri,
-        isVideo = item.isVideo,
+        isVideo = isPlayableMedia,
         showControls = showControls,
         sessionPlayIntent = sessionPlayIntent,
         onPlayIntentChange = { sessionPlayIntent = it }
@@ -301,7 +306,10 @@ fun ViewerScreen(
     if (isStoryMode) {
         val currentMediaList = currentStoryItems
         val currentActiveItem = currentMediaList.getOrNull(pagerState.currentPage) ?: item
-        val isCurrentItemVideo = currentActiveItem.isVideo
+        val isCurrentItemVideo = currentActiveItem.isVideo || com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(
+            currentActiveItem.mimeType,
+            currentActiveItem.name.ifBlank { currentActiveItem.uri }
+        )
         val isPaused = isStoryHolding || showDetails || showMore || confirmMoveToBin || confirmPermanentDelete || isCurrentZoomed || isClosing || showEndOfStory || (isCurrentItemVideo && !videoState.isPlaying)
 
         LaunchedEffect(
@@ -458,11 +466,18 @@ fun ViewerScreen(
                 val isCurrent = pageIndex == pagerState.currentPage
                 val currentBounds = if (isCurrent) (targetBounds ?: ThumbnailBoundsTracker.getBounds(currentItem.uri)) else null
 
+                val isCurrentAudio = com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(
+                    currentItem.mimeType,
+                    currentItem.name.ifBlank { currentItem.uri }
+                )
+                val isCurrentPlayable = currentItem.isVideo || isCurrentAudio
+
                 ZoomableMediaItem(
                     item = currentItem,
                     isCurrentPage = isCurrent,
-                    isVideo = currentItem.isVideo,
-                    videoState = if (currentItem.isVideo && currentItem.uri == item.uri) videoState else null,
+                    isVideo = isCurrentPlayable,
+                    isAudio = isCurrentAudio,
+                    videoState = if (isCurrentPlayable && currentItem.uri == item.uri) videoState else null,
                     touchSlop = viewConfig.scaledTouchSlop.toFloat(),
                     minFlingVelocity = minFlingVelocity,
                     onToggleControls = {
@@ -625,7 +640,7 @@ fun ViewerScreen(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (item.isVideo) {
+                    if (isPlayableMedia) {
                         VideoPlayerControlsBar(
                             videoState = videoState,
                             modifier = Modifier
@@ -795,6 +810,7 @@ private fun ZoomableMediaItem(
     item: MediaItem,
     isCurrentPage: Boolean,
     isVideo: Boolean,
+    isAudio: Boolean = false,
     videoState: ViewerVideoState?,
     touchSlop: Float,
     minFlingVelocity: Float,
@@ -1175,25 +1191,60 @@ private fun ZoomableMediaItem(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = item.name,
-                        onSuccess = { state ->
-                            val d = state.result.drawable
-                            val w = if (d.intrinsicWidth > 0) d.intrinsicWidth.toFloat() else state.painter.intrinsicSize.width
-                            val h = if (d.intrinsicHeight > 0) d.intrinsicHeight.toFloat() else state.painter.intrinsicSize.height
-                            if (w > 0f && h > 0f && !w.isNaN() && !h.isNaN()) {
-                                intrinsicWidth = w.roundToInt()
-                                intrinsicHeight = h.roundToInt()
+                    if (isAudio) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    tonalElevation = 4.dp,
+                                    modifier = Modifier.size(120.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Audiotrack,
+                                            contentDescription = item.name,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(56.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 2
+                                )
                             }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
+                        }
+                    } else {
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = item.name,
+                            onSuccess = { state ->
+                                val d = state.result.drawable
+                                val w = if (d.intrinsicWidth > 0) d.intrinsicWidth.toFloat() else state.painter.intrinsicSize.width
+                                val h = if (d.intrinsicHeight > 0) d.intrinsicHeight.toFloat() else state.painter.intrinsicSize.height
+                                if (w > 0f && h > 0f && !w.isNaN() && !h.isNaN()) {
+                                    intrinsicWidth = w.roundToInt()
+                                    intrinsicHeight = h.roundToInt()
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
 
-                    // Video Surface when current item is a video
-                    if (isVideo && videoState != null) {
-                        VideoPlayerSurface(videoState = videoState)
+                        // Video Surface when current item is a video
+                        if (isVideo && videoState != null) {
+                            VideoPlayerSurface(videoState = videoState)
+                        }
                     }
                 }
             }
@@ -1236,7 +1287,7 @@ private fun shareMediaItem(context: Context, item: MediaItem) {
         context.startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).apply {
-                    type = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
+                    type = item.mimeType ?: com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(item.name.ifBlank { item.uri }).mimeType
                     putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 },

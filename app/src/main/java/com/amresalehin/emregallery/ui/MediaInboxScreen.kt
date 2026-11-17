@@ -1026,9 +1026,10 @@ fun ImageStackCard(
         SimpleDateFormat("MMM dd, yyyy", Locale.US).format(Date(stack.timestampMillis))
     }
 
-    // Real single hero cover image from stack items (prefer image, fallback to first item)
+    // Real single hero cover image from stack items (prefer image, fallback to video, then audio)
     val coverItem = remember(stack.items) {
-        stack.items.firstOrNull { !it.isVideo && it.localUri.isNotBlank() }
+        stack.items.firstOrNull { !it.isVideo && !it.isAudio && it.localUri.isNotBlank() }
+            ?: stack.items.firstOrNull { !it.isAudio && it.localUri.isNotBlank() }
             ?: stack.items.firstOrNull { it.localUri.isNotBlank() }
             ?: stack.items.firstOrNull()
     }
@@ -1095,7 +1096,19 @@ fun ImageStackCard(
                         .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 16.dp, bottomEnd = 16.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 ) {
-                    if (coverImageModel != null) {
+                    if (coverItem?.isAudio == true) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Audiotrack,
+                                contentDescription = stack.title,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                    } else if (coverImageModel != null) {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(coverImageModel)
@@ -1303,7 +1316,12 @@ fun MediaStackDetailTab(
     val extractedDescription = remember(stack.description, activeItem, items, domain, formattedTotalSize) {
         if (activeItem != null) {
             val formatStr = if (activeItem.format.isNotBlank()) "${activeItem.format} format" else "media file"
-            val typeStr = if (activeItem.isVideo) "Video" else if (activeItem.isStream) "Live Stream" else "Image"
+            val typeStr = when {
+                activeItem.isAudio -> "Audio"
+                activeItem.isVideo -> "Video"
+                activeItem.isStream -> "Live Stream"
+                else -> "Image"
+            }
             val itemSizeStr = if (activeItem.sizeBytes > 0) {
                 when {
                     activeItem.sizeBytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", activeItem.sizeBytes / (1024f * 1024f))
@@ -1844,7 +1862,14 @@ fun MediaStackDetailTab(
                                         DetailTagChip(label = activeItem?.format?.ifBlank { "MEDIA" } ?: "MEDIA")
                                     }
                                     item {
-                                        DetailTagChip(label = if (activeItem?.isVideo == true) "Video" else "Image")
+                                        DetailTagChip(
+                                            label = when {
+                                                activeItem?.isAudio == true -> "Audio"
+                                                activeItem?.isStream == true -> "Stream"
+                                                activeItem?.isVideo == true -> "Video"
+                                                else -> "Image"
+                                            }
+                                        )
                                     }
                                     item {
                                         DetailTagChip(label = formattedTotalSize)
@@ -1978,17 +2003,57 @@ fun RealDeckMediaCard(
                     builder.build()
                 }
 
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = item.title,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(24.dp)),
-                    contentScale = ContentScale.Fit
-                )
+                if (item.isAudio) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                                modifier = Modifier.size(76.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Audiotrack,
+                                        contentDescription = item.title,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(38.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                } else {
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = item.title,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(24.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
 
-                if (item.isVideo || item.isStream) {
+                if (item.isVideo || item.isStream || item.isAudio) {
                     Surface(
                         shape = CircleShape,
                         color = Color.Black.copy(alpha = 0.6f),
@@ -2014,7 +2079,11 @@ fun RealDeckMediaCard(
                             .padding(14.dp)
                     ) {
                         Text(
-                            text = if (item.isStream) "STREAM" else item.format.ifBlank { "VIDEO" },
+                            text = when {
+                                item.isStream -> "STREAM"
+                                item.isAudio -> item.format.ifBlank { "AUDIO" }
+                                else -> item.format.ifBlank { "VIDEO" }
+                            },
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,

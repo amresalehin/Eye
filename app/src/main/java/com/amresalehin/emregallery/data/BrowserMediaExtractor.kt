@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.data
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import androidx.annotation.Keep
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.net.http.SslError
@@ -493,7 +494,9 @@ class BrowserMediaExtractor(private val context: Context) {
         }
     }
 
+    @Keep
     class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
+        @Keep
         @android.webkit.JavascriptInterface
         fun reportMedia(url: String?) {
             if (!url.isNullOrBlank()) {

@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.data
 
 import android.content.Context
+import androidx.annotation.Keep
 import android.os.Environment
 import android.util.Log
 import com.chaquo.python.Python
@@ -51,9 +52,11 @@ data class GalleryDlExtractResult(
 /**
  * Callback bridge invoked from Python (`gallery_dl_runner.py`) during yt-dlp and requests downloads.
  */
+@Keep
 class PythonProgressBridge(
     private val onUpdate: (bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit
 ) {
+    @Keep
     @Suppress("unused")
     fun onProgress(bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) {
         onUpdate(bytesRead, totalBytes, speedBytesPerSec)

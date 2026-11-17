@@ -433,6 +433,58 @@ fun parseScrapedMediaDimensions(item: ScrapedMediaItem): Pair<Int?, Int?> {
     return Pair(null, null)
 }
 
+private val NON_DIMENSION_RESOLUTION_HINTS = setOf(
+    "network", "dom", "html", "css", "srcset", "iframe", "opengraph", "poster",
+    "full link", "audio", "video", "image", "stream", "json-ld", "json-ld-thumb",
+    "json-ld-image", "background", "meta", "link"
+)
+
+/**
+ * Formats a scraped media item's primary metadata badge for DownloaderMediaCard:
+ * 1. Exact dimensions ("W × H" or "Ww") when probed or parsed from URL/hint.
+ * 2. Explicit resolution hint (e.g. "1080p", "4K") when non-generic.
+ * 3. Known file size (e.g. "2.4 MB", "340 KB") when sizeBytes or probed Content-Length is available.
+ * 4. Clean source or format label (e.g. "yt-dlp", "MP3", "MP4") without dummy dimension placeholders.
+ */
+fun formatScrapedMediaDimensionOrSize(
+    item: ScrapedMediaItem,
+    dynamicDimensions: Map<String, Pair<Int, Int>> = emptyMap()
+): String {
+    val probed = dynamicDimensions[item.id] ?: ImageDimensionProber.getCached(item.url)
+    if (probed != null && probed.first > 0 && probed.second > 0) {
+        return "${probed.first} × ${probed.second}"
+    }
+
+    val (parsedW, parsedH) = parseScrapedMediaDimensions(item)
+    if (parsedW != null && parsedH != null && parsedW > 0 && parsedH > 0) {
+        return "$parsedW × $parsedH"
+    }
+    if (parsedW != null && parsedW > 0) {
+        return "${parsedW}w"
+    }
+
+    val hint = item.resolutionHint?.trim()
+    if (!hint.isNullOrBlank() && hint.lowercase(Locale.ROOT) !in NON_DIMENSION_RESOLUTION_HINTS) {
+        return hint
+    }
+
+    val knownBytes = item.sizeBytes?.takeIf { it > 0L }
+        ?: ImageDimensionProber.getCachedSize(item.url)?.takeIf { it > 0L }
+    if (knownBytes != null) {
+        return DownloadActivityManager.formatBytes(knownBytes)
+    }
+
+    val formatClean = item.format.trim().uppercase(Locale.ROOT)
+    return when {
+        item.source.isNotBlank() && !item.source.equals("DOM", ignoreCase = true) -> item.source
+        formatClean.isNotBlank() -> formatClean
+        item.isAudio || item.category == MediaCategory.AUDIO -> "Audio"
+        item.isVideo || item.category == MediaCategory.VIDEOS -> "Video"
+        item.isStream || item.category == MediaCategory.STREAMS -> "Stream"
+        else -> "Image"
+    }
+}
+
 /**
  * Evaluates whether a media item satisfies the active dimension filter.
  */

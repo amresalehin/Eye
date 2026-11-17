@@ -1878,19 +1878,27 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testReleaseProguardKeepBridges() {
-        // Verify PythonProgressBridge, AndroidMediaMuxer, and EmreMediaBridge carry @Keep for R8/ProGuard safety
+    fun testReleaseBridgeEntryPointsRemainExposed() {
+        // AndroidX @Keep has CLASS retention, so Java reflection cannot see it.
+        // Verify the JNI bridge methods remain present and the WebView callback retains
+        // its runtime-visible @JavascriptInterface annotation instead.
+        val progressCallback = com.amresalehin.emregallery.data.PythonProgressBridge::class.java
+            .getDeclaredMethod(
+                "onProgress",
+                java.lang.Long.TYPE,
+                java.lang.Long.TYPE,
+                java.lang.Long.TYPE
+            )
+        assertNotNull(progressCallback)
+
+        val muxerBridge = com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java
+            .getDeclaredMethod("resolveMuxerOutputFormat", String::class.java, String::class.java)
+        assertNotNull(muxerBridge)
+
+        val webViewCallback = com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java
+            .getDeclaredMethod("reportMedia", String::class.java)
         assertTrue(
-            com.amresalehin.emregallery.data.PythonProgressBridge::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
-        )
-        assertTrue(
-            com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
-        )
-        assertTrue(
-            com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+            webViewCallback.isAnnotationPresent(android.webkit.JavascriptInterface::class.java)
         )
     }
 

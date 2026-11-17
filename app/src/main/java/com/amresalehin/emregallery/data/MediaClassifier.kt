@@ -1418,68 +1418,74 @@ object MediaClassifier {
         }
     }
 
-    /**
-     * Resolves a local file path, URI, or filename into an accurate ClassificationResult
-     * with specific audio/*, video/*, or image/* MIME types for ViewerScreen and Share intents.
-     */
-    fun resolveLocalMediaMimeType(uriOrName: String): ClassificationResult {
-        val clean = uriOrName.trim()
-            .substringBefore('#')
-            .substringBefore('?')
-        val fileName = clean.substringAfterLast('/')
-        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
-
-        return when (ext) {
-            "mp3" -> ClassificationResult(MediaCategory.AUDIO, "MP3", "audio/mpeg", isVideo = false, isAudio = true, isStream = false)
-            "m4a" -> ClassificationResult(MediaCategory.AUDIO, "M4A", "audio/mp4", isVideo = false, isAudio = true, isStream = false)
-            "aac" -> ClassificationResult(MediaCategory.AUDIO, "AAC", "audio/aac", isVideo = false, isAudio = true, isStream = false)
-            "wav" -> ClassificationResult(MediaCategory.AUDIO, "WAV", "audio/wav", isVideo = false, isAudio = true, isStream = false)
-            "ogg", "oga" -> ClassificationResult(MediaCategory.AUDIO, "OGG", "audio/ogg", isVideo = false, isAudio = true, isStream = false)
-            "opus" -> ClassificationResult(MediaCategory.AUDIO, "OPUS", "audio/opus", isVideo = false, isAudio = true, isStream = false)
-            "flac" -> ClassificationResult(MediaCategory.AUDIO, "FLAC", "audio/flac", isVideo = false, isAudio = true, isStream = false)
-            "wma" -> ClassificationResult(MediaCategory.AUDIO, "WMA", "audio/x-ms-wma", isVideo = false, isAudio = true, isStream = false)
-            "mp4", "m4v" -> ClassificationResult(MediaCategory.VIDEOS, "MP4", "video/mp4", isVideo = true, isAudio = false, isStream = false)
-            "webm" -> ClassificationResult(MediaCategory.VIDEOS, "WEBM", "video/webm", isVideo = true, isAudio = false, isStream = false)
-            "mkv" -> ClassificationResult(MediaCategory.VIDEOS, "MKV", "video/x-matroska", isVideo = true, isAudio = false, isStream = false)
-            "mov" -> ClassificationResult(MediaCategory.VIDEOS, "MOV", "video/quicktime", isVideo = true, isAudio = false, isStream = false)
-            "avi" -> ClassificationResult(MediaCategory.VIDEOS, "AVI", "video/x-msvideo", isVideo = true, isAudio = false, isStream = false)
-            "flv" -> ClassificationResult(MediaCategory.VIDEOS, "FLV", "video/x-flv", isVideo = true, isAudio = false, isStream = false)
-            "3gp" -> ClassificationResult(MediaCategory.VIDEOS, "3GP", "video/3gpp", isVideo = true, isAudio = false, isStream = false)
-            "ts" -> ClassificationResult(MediaCategory.VIDEOS, "TS", "video/mp2t", isVideo = true, isAudio = false, isStream = false)
-            "m3u8" -> ClassificationResult(MediaCategory.STREAMS, "HLS (m3u8)", "application/x-mpegURL", isVideo = true, isAudio = false, isStream = true)
-            "mpd" -> ClassificationResult(MediaCategory.STREAMS, "DASH (mpd)", "application/dash+xml", isVideo = true, isAudio = false, isStream = true)
-            "png" -> ClassificationResult(MediaCategory.IMAGES, "PNG", "image/png", isVideo = false, isAudio = false, isStream = false)
-            "webp" -> ClassificationResult(MediaCategory.IMAGES, "WEBP", "image/webp", isVideo = false, isAudio = false, isStream = false)
-            "gif" -> ClassificationResult(MediaCategory.IMAGES, "GIF", "image/gif", isVideo = false, isAudio = false, isStream = false)
-            "svg" -> ClassificationResult(MediaCategory.IMAGES, "SVG", "image/svg+xml", isVideo = false, isAudio = false, isStream = false)
-            "avif" -> ClassificationResult(MediaCategory.IMAGES, "AVIF", "image/avif", isVideo = false, isAudio = false, isStream = false)
-            "bmp" -> ClassificationResult(MediaCategory.IMAGES, "BMP", "image/bmp", isVideo = false, isAudio = false, isStream = false)
-            "heic", "heif" -> ClassificationResult(MediaCategory.IMAGES, "HEIC", "image/heif", isVideo = false, isAudio = false, isStream = false)
-            else -> ClassificationResult(MediaCategory.IMAGES, "JPG", "image/jpeg", isVideo = false, isAudio = false, isStream = false)
+    fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
+        val trimmed = input.trim()
+        if (trimmed.isBlank()) return ""
+        return if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
+            trimmed
+        } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {
+            "https://$trimmed"
+        } else {
+            searchEngine.searchUrl + URLEncoder.encode(trimmed, "UTF-8")
         }
     }
 
     /**
-     * Checks whether a media item's MIME type or URI/filename corresponds to an audio file.
+     * Resolve a local path, URI, or filename to a media classification.
+     * MIME hints take precedence over extension inference when supplied.
      */
-    fun isAudioMimeOrUri(mimeType: String?, uriOrName: String): Boolean {
-        if (mimeType?.startsWith("audio/", ignoreCase = true) == true) return true
-        return resolveLocalMediaMimeType(uriOrName).isAudio
+    fun resolveLocalMediaMimeType(uriOrName: String): ClassificationResult {
+        val clean = uriOrName.trim().substringBefore('#').substringBefore('?')
+        val extension = clean.substringAfterLast('/').substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val mime = when (extension) {
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "wav" -> "audio/wav"
+            "ogg", "oga" -> "audio/ogg"
+            "opus" -> "audio/opus"
+            "flac" -> "audio/flac"
+            "wma" -> "audio/x-ms-wma"
+            "mp4", "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "flv" -> "video/x-flv"
+            "3gp" -> "video/3gpp"
+            "ts" -> "video/mp2t"
+            "m3u8" -> "application/x-mpegURL"
+            "mpd" -> "application/dash+xml"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "svg" -> "image/svg+xml"
+            "avif" -> "image/avif"
+            "bmp" -> "image/bmp"
+            "heic", "heif" -> "image/heif"
+            else -> "image/jpeg"
+        }
+        return classify(clean, mime)
     }
-}
 
-enum class BrowserSearchEngine(val label: String, val shortLabel: String, val searchUrl: String) {
-    DUCKDUCKGO("DuckDuckGo", "DDG", "https://duckduckgo.com/?q="),
-    GOOGLE("Google", "Google", "https://www.google.com/search?q="),
-    BING("Bing", "Bing", "https://www.bing.com/search?q="),
-    WIKIPEDIA("Wikipedia", "Wiki", "https://en.wikipedia.org/wiki/Special:Search?search=")
-}
+    fun isAudioMimeOrUri(mimeType: String?, uriOrName: String): Boolean =
+        mimeType?.startsWith("audio/", ignoreCase = true) == true ||
+            resolveLocalMediaMimeType(uriOrName).isAudio
 
-data class ClassificationResult(
-    val category: MediaCategory,
-    val format: String,
-    val mimeType: String,
-    val isVideo: Boolean,
-    val isAudio: Boolean,
-    val isStream: Boolean
-)
+    /** Existing search engine choices are persisted by enum name. */
+    enum class BrowserSearchEngine(val label: String, val shortLabel: String, val searchUrl: String) {
+        DUCKDUCKGO("DuckDuckGo", "DDG", "https://duckduckgo.com/?q="),
+        GOOGLE("Google", "Google", "https://www.google.com/search?q="),
+        BING("Bing", "Bing", "https://www.bing.com/search?q="),
+        WIKIPEDIA("Wikipedia", "Wiki", "https://en.wikipedia.org/wiki/Special:Search?search=")
+    }
+
+    data class ClassificationResult(
+        val category: MediaCategory,
+        val format: String,
+        val mimeType: String,
+        val isVideo: Boolean,
+        val isAudio: Boolean,
+        val isStream: Boolean
+    )
+}

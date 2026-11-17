@@ -2,17 +2,7 @@ name: Android build
 
 on:
   push:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
   pull_request:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
   workflow_dispatch:
 
 permissions:
@@ -58,7 +48,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: emre-gallery-debug-${{ github.sha }}
+          name: emre-gallery-debug-${{ github.sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

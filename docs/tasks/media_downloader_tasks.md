@@ -46,11 +46,11 @@
 
 ## Phase 3: UX, Dark Mode & Media Handling
 
-* \[ \] **T3.1 Convert `DownloaderResultsPage` & `DownloaderMediaCard` to Material 3 theme tokens**
+* \[x\] **T3.1 Convert `DownloaderResultsPage` & `DownloaderMediaCard` to Material 3 theme tokens**
 
   * Replace hardcoded light-mode hex colors (`0xFFF1F3F5`, `0xFFE9ECEF`, `0xFFF8F9FA`, `0xFF212529`, `0xFF495057`, `0xFF6C757D`) in `DownloaderComponents.kt` with `MaterialTheme.colorScheme` tokens.
 
-* \[ \] **T3.2 Make `ShareReceiverActivity` a translucent bottom sheet**
+* \[x\] **T3.2 Make `ShareReceiverActivity` a translucent bottom sheet**
 
   * Update `ShareReceiverScreen` (`ShareReceiverActivity.kt:128`) to present a rounded bottom-anchored sheet over a dim scrim with tap-outside dismissal and a 1-tap quick download flow for single-media shares.
 
@@ -68,11 +68,11 @@
 
 ## Phase 4: Customizability & Persistent Settings
 
-* \[ \] **T4.1 Create `DownloaderPreferencesManager` & expose via `PreferencesRepository`**
+* \[x\] **T4.1 Create `DownloaderPreferencesManager` & expose via `PreferencesRepository`**
 
   * Add `app/src/main/java/com/amresalehin/emregallery/data/preferences/DownloaderPreferencesManager.kt` storing:
 
-    * `videoQualityCap` (`BEST`, `1080P`, `720P`, `480P`, `360P`)
+    * `videoQualityCap` (`BEST`, `8K`, `4K`, `2K`, `1080P`, `720P`, `480P`, `360P`)
 
     * `audioOnlyMode` + `preferredAudioFormat` (`M4A`, `MP3`, `OPUS`)
 
@@ -86,13 +86,13 @@
 
     * `searchEngine` (`BrowserSearchEngine`)
 
-* \[ \] **T4.2 Add Min KB filter UI & Quality/Audio-Only picker**
+* \[x\] **T4.2 Add Min KB filter UI & Quality/Audio-Only picker**
 
   * Add the missing `"Hide media smaller than __ KB"` control to `DownloaderResultsPage`'s filter drawer (`DownloaderComponents.kt:1548`).
 
   * Add a compact Quality / Audio-Only selector pill on `DownloaderResultsPage` and `ShareReceiverActivity`.
 
-* \[ \] **T4.3 Add Downloader Settings sheet & wire preferences into workers/browser**
+* \[x\] **T4.3 Add Downloader Settings sheet & wire preferences into workers/browser**
 
   * Add a Downloader Settings bottom sheet accessible from `DownloaderSearchMainPage` and `DownloaderActivityPage`.
 
@@ -103,6 +103,7 @@
 * \[x\] **T5.1 Add unit tests for Phase 1 & Phase 2 fixes**
 
   * Expanded `MediaDownloaderTest.kt` and `MediaDeduplicationPureUnitTest.kt` to cover `GalleryDlEngine` provenance attribution, Reddit/X `YtDlpProvider` matching, `AndroidMediaMuxer` Reddit audio resolution, `DualMediaExtractor.shouldSkipHeadlessBrowser`, `deduplicationKey` `itag`/`mime` stream separation, `MediaCaptureEngine` instant scroll, and `ImageDimensionProber` `Accept-Encoding: identity` header probing.
+
 * \[x\] **T5.2 Fix R8/ProGuard release rules, Manifest `READ_MEDIA_AUDIO`, and `applicationId`**
 
   * Added `@Keep` annotations and explicit ProGuard rules (`app/proguard-rules.pro`) for `PythonProgressBridge`, `AndroidMediaMuxer`, `GalleryDlEngine`, `BrowserMediaExtractor$EmreMediaBridge` (`@JavascriptInterface`), `MediaDownloadWorker`, Chaquopy, and ML Kit.

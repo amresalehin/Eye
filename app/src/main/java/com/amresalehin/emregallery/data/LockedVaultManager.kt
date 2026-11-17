@@ -149,19 +149,24 @@ class LockedVaultManager(private val context: Context) {
 
                 val insertedUri = context.contentResolver.insert(collection, cv)
                 if (insertedUri != null) {
+                    var bytesCopied = 0L
                     srcFile.inputStream().use { input ->
                         context.contentResolver.openOutputStream(insertedUri)?.use { output ->
-                            input.copyTo(output)
+                            bytesCopied = input.copyTo(output)
                         }
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        cv.clear()
-                        cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        context.contentResolver.update(insertedUri, cv, null, null)
+                    if (bytesCopied > 0L) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            cv.clear()
+                            cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            context.contentResolver.update(insertedUri, cv, null, null)
+                        }
+                        srcFile.delete()
+                        currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
+                        restoredUris.add(insertedUri.toString())
+                    } else {
+                        runCatching { context.contentResolver.delete(insertedUri, null, null) }
                     }
-                    srcFile.delete()
-                    currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
-                    restoredUris.add(insertedUri.toString())
                 }
             } catch (_: Exception) {
             }

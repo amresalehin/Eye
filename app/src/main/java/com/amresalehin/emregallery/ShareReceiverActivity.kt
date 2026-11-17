@@ -18,6 +18,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -145,27 +149,73 @@ private fun ShareReceiverScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("share_receiver_root")
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            )
+            .testTag("share_receiver_root"),
+        contentAlignment = androidx.compose.ui.Alignment.BottomCenter
     ) {
-        DownloaderResultsPage(
-            targetUrl = url,
-            onBack = onDismiss,
-            onOpenBrowser = { browserUrl ->
-                liveBrowserUrl = browserUrl
-                showLiveBrowser = true
-            },
-            onDownloadComplete = { count ->
-                onDownloadComplete()
-            },
-            onViewSavedLibrary = {
-                val mainIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        androidx.compose.material3.Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                topStart = androidx.compose.ui.unit.Dp(28f),
+                topEnd = androidx.compose.ui.unit.Dp(28f)
+            ),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+            tonalElevation = androidx.compose.ui.unit.Dp(6f),
+            shadowElevation = androidx.compose.ui.unit.Dp(16f),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = androidx.compose.ui.unit.Dp(96f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { /* consume clicks inside bottom sheet */ }
+                )
+                .testTag("share_receiver_bottom_sheet")
+        ) {
+            androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                // Drag handle pill at top of translucent bottom sheet
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = androidx.compose.ui.unit.Dp(10f), bottom = androidx.compose.ui.unit.Dp(2f)),
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(androidx.compose.ui.unit.Dp(38f))
+                            .height(androidx.compose.ui.unit.Dp(4f))
+                            .background(
+                                androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                androidx.compose.foundation.shape.CircleShape
+                            )
+                    )
                 }
-                context.startActivity(mainIntent)
-                onDismiss()
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+
+                DownloaderResultsPage(
+                    targetUrl = url,
+                    onBack = onDismiss,
+                    onOpenBrowser = { browserUrl ->
+                        liveBrowserUrl = browserUrl
+                        showLiveBrowser = true
+                    },
+                    onDownloadComplete = { _ ->
+                        onDownloadComplete()
+                    },
+                    onViewSavedLibrary = {
+                        val mainIntent = Intent(context, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                        context.startActivity(mainIntent)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
 
         if (showLiveBrowser) {
             FullScreenBrowserView(

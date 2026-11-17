@@ -283,19 +283,27 @@ object OkHttpDownloader {
     /**
      * Resolves and ensures existence of the target storage directory (public Downloads or app external storage).
      */
-    fun getTargetStorageDir(context: Context): File {
+    fun getTargetStorageDir(context: Context, subfolder: String? = null): File {
         val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val emreGalleryDir = File(publicDownloads, "Emre Gallery")
         if (!emreGalleryDir.exists()) {
             emreGalleryDir.mkdirs()
         }
-        return if (emreGalleryDir.exists() && emreGalleryDir.canWrite()) {
+        val baseDir = if (emreGalleryDir.exists() && emreGalleryDir.canWrite()) {
             emreGalleryDir
         } else {
             val appExternal = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             val fallbackFolder = File(appExternal ?: context.filesDir, "Emre Gallery")
             if (!fallbackFolder.exists()) fallbackFolder.mkdirs()
             fallbackFolder
+        }
+        val cleanSub = subfolder?.trim()?.takeIf { it.isNotEmpty() }
+        return if (cleanSub != null) {
+            val subDir = File(baseDir, cleanSub)
+            if (!subDir.exists()) subDir.mkdirs()
+            if (subDir.exists() && subDir.canWrite()) subDir else baseDir
+        } else {
+            baseDir
         }
     }
 
@@ -309,6 +317,7 @@ object OkHttpDownloader {
         referer: String? = null,
         downloadId: String? = null,
         headers: Map<String, String>? = null,
+        subfolder: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): DownloadResult = withContext(Dispatchers.IO) {
         // Handle Base64 inline data URIs directly without network calls
@@ -316,7 +325,7 @@ object OkHttpDownloader {
             return@withContext downloadDataUriMedia(context, mediaUrl, fileName, downloadId)
         }
 
-        val targetDir = getTargetStorageDir(context)
+        val targetDir = getTargetStorageDir(context, subfolder)
 
         val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         val deterministicBase = if (!downloadId.isNullOrBlank()) {

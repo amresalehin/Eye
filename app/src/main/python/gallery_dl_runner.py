@@ -284,19 +284,42 @@ def extract_gallery_dl(url, options_json="{}"):
         "items": items
     })
 
-def _select_best_ytdlp_formats(formats, max_height=None):
+def _get_android_sdk_int():
+    try:
+        from java import jclass
+        ver_cls = jclass("android.os.Build$VERSION")
+        return int(getattr(ver_cls, "SDK_INT", 34))
+    except Exception:
+        return 34
+
+def _is_webm_pair(video_fmt, audio_fmt=None):
+    v_ext = ((video_fmt or {}).get("ext") or "").lower()
+    v_codec = ((video_fmt or {}).get("vcodec") or "").lower()
+    a_codec = ((audio_fmt or {}).get("acodec") or "").lower()
+    return (
+        v_ext == "webm"
+        or v_codec.startswith(("vp9", "vp09", "vp8"))
+        or a_codec.startswith(("opus", "vorbis"))
+    )
+
+def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
     """
-    Analyzes yt-dlp formats list and selects either:
-    - ('muxed', muxed_fmt, None) when a high-quality pre-muxed stream (video+audio) exists, or
-    - ('split', video_fmt, audio_fmt) when separate DASH video + audio tracks provide superior quality or are the only way to get audio.
+    Analyzes yt-dlp formats list across all resolutions (up to 2K/4K/8K) and selects either:
+    - ('muxed', muxed_fmt, None) when a pre-muxed stream matches the highest available resolution, or
+    - ('split', video_fmt, audio_fmt) pairing either:
+        * MP4 container family: H.264/HEVC (and AV1 on Android 14+ / API 34+) video + M4A/AAC audio, or
+        * WebM container family: VP9/VP8 2K/4K/8K video + Opus/Vorbis audio (supported via MUXER_OUTPUT_WEBM on API 26+).
     Never selects a silent video-only format when audio tracks exist.
     """
     if not formats:
         return ("default", None, None)
 
+    if sdk_int is None:
+        sdk_int = _get_android_sdk_int()
+
     def _height_ok(f):
         h = f.get("height")
-        if max_height and h and int(h) > int(max_height):
+        if max_height and int(max_height) > 0 and h and int(h) > int(max_height):
             return False
         return True
 
@@ -320,24 +343,44 @@ def _select_best_ytdlp_formats(formats, max_height=None):
         and f.get("vcodec") in (None, "none")
     ]
 
-    # Prefer MP4/AVC/HEVC video and M4A/AAC audio for native Android MediaMuxer compatibility
+    # 1. MP4 Family (MUXER_OUTPUT_MPEG_4): AVC, HEVC, MP4V, plus AV1 on Android 14+ (API 34+)
     def _is_mp4_compatible_video(f):
         ext = (f.get("ext") or "").lower()
         vc = (f.get("vcodec") or "").lower()
+        if vc.startswith(("vp9", "vp09", "vp8")):
+            return False
+        if vc.startswith("av01"):
+            return int(sdk_int) >= 34
         return ext in ("mp4", "m4v", "mov") or vc.startswith(("avc", "h264", "hev", "hvc", "mp4v"))
 
     def _is_mp4_compatible_audio(f):
         ext = (f.get("ext") or "").lower()
         ac = (f.get("acodec") or "").lower()
+        if ac.startswith(("opus", "vorbis")):
+            return False
         return ext in ("m4a", "mp4", "aac") or ac.startswith(("mp4a", "aac"))
+
+    # 2. WebM Family (MUXER_OUTPUT_WEBM): VP9 / VP09 / VP8 video + Opus / Vorbis audio (4K/8K YouTube/Vimeo)
+    def _is_webm_compatible_video(f):
+        ext = (f.get("ext") or "").lower()
+        vc = (f.get("vcodec") or "").lower()
+        return vc.startswith(("vp9", "vp09", "vp8")) or (ext == "webm" and not vc.startswith("av01"))
+
+    def _is_webm_compatible_audio(f):
+        ext = (f.get("ext") or "").lower()
+        ac = (f.get("acodec") or "").lower()
+        return ac.startswith(("opus", "vorbis")) or ext in ("webm", "ogg")
 
     mp4_videos = [f for f in video_only if _is_mp4_compatible_video(f)]
     mp4_audios = [f for f in audio_only if _is_mp4_compatible_audio(f)]
+    webm_videos = [f for f in video_only if _is_webm_compatible_video(f)]
+    webm_audios = [f for f in audio_only if _is_webm_compatible_audio(f)]
 
     def _video_score(f):
         return (
             int(f.get("height") or 0),
             int(f.get("width") or 0),
+            float(f.get("fps") or 0.0),
             float(f.get("tbr") or f.get("vbr") or 0.0),
             int(f.get("filesize") or f.get("filesize_approx") or 0)
         )
@@ -351,24 +394,40 @@ def _select_best_ytdlp_formats(formats, max_height=None):
 
     best_muxed = max(muxed, key=_video_score) if muxed else None
     best_mp4_video = max(mp4_videos, key=_video_score) if mp4_videos else None
-    best_mp4_audio = max(mp4_audios, key=_audio_score) if mp4_audios else (max(audio_only, key=_audio_score) if audio_only else None)
+    best_mp4_audio = max(mp4_audios, key=_audio_score) if mp4_audios else None
+    best_webm_video = max(webm_videos, key=_video_score) if webm_videos else None
+    best_webm_audio = max(webm_audios, key=_audio_score) if webm_audios else None
 
+    # Pick the highest-resolution valid (video, audio) split pair across MP4 and WebM families
+    split_candidates = []
     if best_mp4_video and best_mp4_audio:
+        # Tie-breaker +1 prefers MP4 when MP4 and WebM have identical height/width/fps
+        split_candidates.append((_video_score(best_mp4_video) + (1,), best_mp4_video, best_mp4_audio))
+    if best_webm_video and best_webm_audio:
+        split_candidates.append((_video_score(best_webm_video) + (0,), best_webm_video, best_webm_audio))
+    if not split_candidates and best_mp4_video and audio_only:
+        fallback_audio = max(audio_only, key=_audio_score)
+        split_candidates.append((_video_score(best_mp4_video) + (0,), best_mp4_video, fallback_audio))
+
+    best_split_pair = max(split_candidates, key=lambda c: c[0]) if split_candidates else None
+
+    if best_split_pair:
+        _, split_v, split_a = best_split_pair
         muxed_h = int(best_muxed.get("height") or 0) if best_muxed else 0
-        split_h = int(best_mp4_video.get("height") or 0)
-        # Use split DASH muxing when no pre-muxed stream exists or when split DASH offers higher resolution (e.g. 720p/1080p vs 360p)
+        split_h = int(split_v.get("height") or 0)
         if not best_muxed or split_h > muxed_h:
-            return ("split", best_mp4_video, best_mp4_audio)
+            return ("split", split_v, split_a)
 
     if best_muxed:
         return ("muxed", best_muxed, None)
 
-    if best_mp4_video and best_mp4_audio:
-        return ("split", best_mp4_video, best_mp4_audio)
+    if best_split_pair:
+        _, split_v, split_a = best_split_pair
+        return ("split", split_v, split_a)
 
     # Only if the media genuinely has no audio tracks on the server (e.g. silent GIF/clip)
     if not audio_only and video_only:
-        best_silent = max(mp4_videos or video_only, key=_video_score)
+        best_silent = max(mp4_videos or webm_videos or video_only, key=_video_score)
         return ("muxed", best_silent, None)
 
     return ("default", None, None)
@@ -429,7 +488,10 @@ def extract_yt_dlp(url, options_json="{}"):
                     mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats, max_height=max_height)
 
                     v_title = entry.get("title") or entry.get("id") or f"media_{len(items) + 1}"
-                    v_ext = "mp4" if mode == "split" else ((primary_fmt or entry).get("ext") or "mp4")
+                    if mode == "split":
+                        v_ext = "webm" if _is_webm_pair(primary_fmt, secondary_fmt) else "mp4"
+                    else:
+                        v_ext = (primary_fmt or entry).get("ext") or "mp4"
                     if v_ext in ("m3u8", "mpd", "unknown_video"):
                         v_ext = "mp4"
                     item_title = f"{v_title}.{v_ext}" if not v_title.endswith(f".{v_ext}") else v_title
@@ -539,7 +601,7 @@ def extract_media(url, options_json="{}"):
         "items": all_items
     })
 
-def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=None, progress_callback=None):
+def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=None, progress_callback=None, max_height=0, audio_only=False):
     """
     Downloads a video/stream with yt-dlp, ensuring audio is always preserved:
     1. Probes available formats for media_url (or referer if media_url is a raw v.redd.it DASH video).
@@ -570,25 +632,45 @@ def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=N
         info = None
 
     formats = (info or {}).get("formats") or []
+    if audio_only:
+        a_opts = {
+            "outtmpl": target_path,
+            "quiet": True,
+            "no_warnings": True,
+            "continuedl": True,
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+            "socket_timeout": 30,
+            "http_headers": http_headers,
+            "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 1.0)]
+        }
+        with yt_dlp.YoutubeDL(a_opts) as ydl_a:
+            ydl_a.download([probe_url])
+        return os.path.exists(target_path) and os.path.getsize(target_path) > 0
+    if max_height and max_height > 0:
+        capped = [f for f in formats if not f.get("height") or int(f.get("height") or 0) <= max_height]
+        if capped:
+            formats = capped
     mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats)
 
-    # Case A: Split DASH video + audio tracks (e.g. Reddit v.redd.it, 1080p YouTube, Instagram Reels)
+    # Case A: Split DASH video + audio tracks (up to 2K/4K/8K MP4 or WebM VP9+Opus, Reddit v.redd.it, YouTube, Reels)
     if mode == "split" and primary_fmt and secondary_fmt:
         video_fmt_id = primary_fmt.get("format_id")
         audio_fmt_id = secondary_fmt.get("format_id")
-        video_part_path = target_path + ".video_part.mp4"
-        audio_part_path = target_path + ".audio_part.m4a"
+        is_webm = _is_webm_pair(primary_fmt, secondary_fmt)
+        video_part_path = target_path + (".video_part.webm" if is_webm else ".video_part.mp4")
+        audio_part_path = target_path + (".audio_part.webm" if is_webm else ".audio_part.m4a")
         try:
             for p in (video_part_path, audio_part_path):
                 if os.path.exists(p):
                     os.remove(p)
 
+            v_fallback = "bestvideo[ext=webm]/bestvideo" if is_webm else "bestvideo[ext=mp4]/bestvideo"
             v_opts = {
                 "outtmpl": video_part_path,
                 "quiet": True,
                 "no_warnings": True,
                 "continuedl": True,
-                "format": f"{video_fmt_id}/bestvideo[ext=mp4]/bestvideo",
+                "format": f"{video_fmt_id}/{v_fallback}",
                 "socket_timeout": 30,
                 "http_headers": http_headers,
                 "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 0.78)]
@@ -596,12 +678,13 @@ def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=N
             with yt_dlp.YoutubeDL(v_opts) as ydl_v:
                 ydl_v.download([probe_url])
 
+            a_fallback = "bestaudio[acodec^=opus]/bestaudio[ext=webm]/bestaudio" if is_webm else "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio"
             a_opts = {
                 "outtmpl": audio_part_path,
                 "quiet": True,
                 "no_warnings": True,
                 "continuedl": True,
-                "format": f"{audio_fmt_id}/bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio",
+                "format": f"{audio_fmt_id}/{a_fallback}",
                 "socket_timeout": 30,
                 "http_headers": http_headers,
                 "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.78, 0.20)]
@@ -661,11 +744,15 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
     Never commits raw .m3u8/.mpd playlist text or silent video-only streams when audio is available.
     """
     extra_headers = {}
+    max_height = 0
+    audio_only = False
     if headers_json:
         try:
             parsed = json.loads(headers_json)
             if isinstance(parsed, dict):
-                extra_headers = parsed
+                max_height = int(parsed.pop("__max_height", 0) or 0)
+                audio_only = bool(parsed.pop("__audio_only", False))
+                extra_headers = {str(k): str(v) for k, v in parsed.items() if not str(k).startswith("__")}
         except Exception:
             pass
 
@@ -684,7 +771,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 http_headers["Cookie"] = cookies
             http_headers.update(extra_headers)
 
-            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback):
+            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback, max_height=max_height, audio_only=audio_only):
                 return True
         except Exception:
             pass
@@ -785,7 +872,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 http_headers["Cookie"] = cookies
             http_headers.update(extra_headers)
 
-            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback):
+            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback, max_height=max_height, audio_only=audio_only):
                 return True
         except Exception:
             pass

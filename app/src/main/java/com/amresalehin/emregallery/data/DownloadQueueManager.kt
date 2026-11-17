@@ -21,9 +21,12 @@ import kotlin.math.abs
  */
 object DownloadQueueManager {
 
-    private val networkConstraints = Constraints.Builder()
-        .setRequiredNetworkType(NetworkType.CONNECTED)
-        .build()
+    fun buildNetworkConstraints(context: Context): Constraints {
+        val wifiOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isWifiOnlySync(context)
+        return Constraints.Builder()
+            .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+            .build()
+    }
 
     private val _inMemoryDownloading = kotlinx.coroutines.flow.MutableStateFlow(false)
     val inMemoryDownloading: kotlinx.coroutines.flow.StateFlow<Boolean> = _inMemoryDownloading
@@ -112,7 +115,7 @@ object DownloadQueueManager {
             .build()
 
         val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
-            .setConstraints(networkConstraints)
+            .setConstraints(buildNetworkConstraints(context))
             .setInputData(inputData)
             .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
             .addTag("item_${item.id}")
@@ -202,7 +205,7 @@ object DownloadQueueManager {
                 .build()
 
             val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
-                .setConstraints(networkConstraints)
+                .setConstraints(buildNetworkConstraints(context))
                 .setInputData(inputData)
                 .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
                 .addTag("item_${item.id}")

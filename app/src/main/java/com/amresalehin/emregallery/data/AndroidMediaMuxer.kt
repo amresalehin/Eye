@@ -1,23 +1,42 @@
 package com.amresalehin.emregallery.data
 
 import android.media.MediaCodec
-import androidx.annotation.Keep
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.util.Log
+import androidx.annotation.Keep
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.Locale
 
 /**
- * Lightweight on-device MP4 container muxer powered by Android's native [MediaExtractor] and [MediaMuxer].
- * Losslessly merges separate DASH video-only (.mp4) and audio-only (.m4a / .mp4 / .aac) streams
- * without requiring an external FFmpeg binary.
+ * High-resolution (up to 4K/8K) on-device container muxer powered by Android's native [MediaExtractor] and [MediaMuxer].
+ * Supports both:
+ * - [MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4] for H.264 (`avc1`), HEVC (`hev1`/`hvc1`), and AV1 (`av01`) video + AAC (`mp4a`) audio.
+ * - [MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM] for 2K/4K/8K VP9 (`vp09`/`vp9`) and VP8 video + Opus/Vorbis audio.
+ * Uses an 8 MB sample buffer and timestamp-interleaved sample writing so 4K 60fps and 8K IDR keyframes never truncate.
  */
 @Keep
 object AndroidMediaMuxer {
     private const val TAG = "AndroidMediaMuxer"
-    private const val DEFAULT_BUFFER_SIZE = 1024 * 1024 // 1 MB sample buffer
+    const val DEFAULT_BUFFER_SIZE = 8 * 1024 * 1024 // 8 MB buffer for 4K/8K IDR keyframes
+
+    /**
+     * Determines the appropriate [MediaMuxer.OutputFormat] based on the video and audio MIME types.
+     */
+    @JvmStatic
+    fun resolveMuxerOutputFormat(videoMime: String?, audioMime: String?): Int {
+        val v = videoMime?.lowercase(Locale.ROOT).orEmpty()
+        val a = audioMime?.lowercase(Locale.ROOT).orEmpty()
+        val isWebmVideo = v.contains("vp9") || v.contains("vp8") || v.contains("x-vnd.on2")
+        val isWebmAudio = a.contains("opus") || a.contains("vorbis")
+        return if (isWebmVideo || isWebmAudio) {
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+        } else {
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+        }
+    }
 
     /**
      * Checks whether the given media file contains at least one audio track.
@@ -30,7 +49,7 @@ object AndroidMediaMuxer {
             extractor.setDataSource(file.absolutePath)
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase() ?: continue
+                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase(Locale.ROOT) ?: continue
                 if (mime.startsWith("audio/")) {
                     return true
                 }
@@ -54,7 +73,7 @@ object AndroidMediaMuxer {
             extractor.setDataSource(file.absolutePath)
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase() ?: continue
+                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase(Locale.ROOT) ?: continue
                 if (mime.startsWith("video/")) {
                     return true
                 }
@@ -77,7 +96,8 @@ object AndroidMediaMuxer {
 
     /**
      * Losslessly muxes the primary video track from [videoFile] and the primary audio track from [audioFile]
-     * into [outputFile] using [MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4].
+     * into [outputFile] using either [MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4] or [MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM].
+     * Interleaves samples by presentation timestamp (`presentationTimeUs`) for WebM cluster compliance and MP4 fast-start.
      */
     @JvmStatic
     fun muxVideoAndAudio(videoFile: File, audioFile: File, outputFile: File): Boolean {
@@ -90,15 +110,11 @@ object AndroidMediaMuxer {
             return false
         }
 
-        val tempMuxFile = File(
-            outputFile.parentFile ?: videoFile.parentFile,
-            "${outputFile.name}.muxing_${System.currentTimeMillis()}.mp4"
-        )
-
         val videoExtractor = MediaExtractor()
         val audioExtractor = MediaExtractor()
         var muxer: MediaMuxer? = null
         var muxerStarted = false
+        var tempMuxFile: File? = null
 
         return try {
             videoExtractor.setDataSource(videoFile.absolutePath)
@@ -106,24 +122,28 @@ object AndroidMediaMuxer {
 
             var videoTrackIndex = -1
             var videoFormat: MediaFormat? = null
+            var videoMime = ""
             for (i in 0 until videoExtractor.trackCount) {
                 val format = videoExtractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase() ?: ""
+                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase(Locale.ROOT) ?: ""
                 if (mime.startsWith("video/")) {
                     videoTrackIndex = i
                     videoFormat = format
+                    videoMime = mime
                     break
                 }
             }
 
             var audioTrackIndex = -1
             var audioFormat: MediaFormat? = null
+            var audioMime = ""
             for (i in 0 until audioExtractor.trackCount) {
                 val format = audioExtractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase() ?: ""
+                val mime = format.getString(MediaFormat.KEY_MIME)?.lowercase(Locale.ROOT) ?: ""
                 if (mime.startsWith("audio/")) {
                     audioTrackIndex = i
                     audioFormat = format
+                    audioMime = mime
                     break
                 }
             }
@@ -136,9 +156,17 @@ object AndroidMediaMuxer {
             videoExtractor.selectTrack(videoTrackIndex)
             audioExtractor.selectTrack(audioTrackIndex)
 
-            muxer = MediaMuxer(tempMuxFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val outputFormat = resolveMuxerOutputFormat(videoMime, audioMime)
+            val extSuffix = if (outputFormat == MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM) "webm" else "mp4"
+            val stagingFile = File(
+                outputFile.parentFile ?: videoFile.parentFile,
+                "${outputFile.name}.muxing_${System.currentTimeMillis()}.$extSuffix"
+            )
+            tempMuxFile = stagingFile
 
-            if (videoFormat.containsKey(MediaFormat.KEY_ROTATION)) {
+            muxer = MediaMuxer(stagingFile.absolutePath, outputFormat)
+
+            if (outputFormat == MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4 && videoFormat.containsKey(MediaFormat.KEY_ROTATION)) {
                 runCatching {
                     val rotation = videoFormat.getInteger(MediaFormat.KEY_ROTATION)
                     muxer.setOrientationHint(rotation)
@@ -162,44 +190,62 @@ object AndroidMediaMuxer {
             val buffer = ByteBuffer.allocateDirect(bufferCapacity)
             val bufferInfo = MediaCodec.BufferInfo()
 
-            // 1. Copy all video samples
+            var videoEof = false
+            var audioEof = false
             var lastVideoPts = 0L
-            while (true) {
-                buffer.clear()
-                val sampleSize = videoExtractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
-
-                val rawPts = videoExtractor.sampleTime
-                val pts = if (rawPts < 0L) lastVideoPts else rawPts
-                lastVideoPts = maxOf(lastVideoPts, pts)
-
-                bufferInfo.offset = 0
-                bufferInfo.size = sampleSize
-                bufferInfo.presentationTimeUs = pts
-                bufferInfo.flags = mapExtractorFlags(videoExtractor.sampleFlags)
-
-                muxer.writeSampleData(outVideoTrack, buffer, bufferInfo)
-                videoExtractor.advance()
-            }
-
-            // 2. Copy all audio samples
             var lastAudioPts = 0L
-            while (true) {
+
+            // Interleave video and audio samples by presentation timestamp (required for WebM, optimal for MP4)
+            while (!videoEof || !audioEof) {
+                val nextVideoPts = if (!videoEof) videoExtractor.sampleTime else -1L
+                val nextAudioPts = if (!audioEof) audioExtractor.sampleTime else -1L
+
+                if (!videoEof && nextVideoPts < 0L) {
+                    videoEof = true
+                    continue
+                }
+                if (!audioEof && nextAudioPts < 0L) {
+                    audioEof = true
+                    continue
+                }
+                if (videoEof && audioEof) break
+
+                val writeVideoNext = when {
+                    audioEof -> true
+                    videoEof -> false
+                    else -> nextVideoPts <= nextAudioPts
+                }
+
                 buffer.clear()
-                val sampleSize = audioExtractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
-
-                val rawPts = audioExtractor.sampleTime
-                val pts = if (rawPts < 0L) lastAudioPts else rawPts
-                lastAudioPts = maxOf(lastAudioPts, pts)
-
-                bufferInfo.offset = 0
-                bufferInfo.size = sampleSize
-                bufferInfo.presentationTimeUs = pts
-                bufferInfo.flags = mapExtractorFlags(audioExtractor.sampleFlags)
-
-                muxer.writeSampleData(outAudioTrack, buffer, bufferInfo)
-                audioExtractor.advance()
+                if (writeVideoNext) {
+                    val sampleSize = videoExtractor.readSampleData(buffer, 0)
+                    if (sampleSize < 0) {
+                        videoEof = true
+                    } else {
+                        val pts = maxOf(lastVideoPts, nextVideoPts.coerceAtLeast(0L))
+                        lastVideoPts = pts
+                        bufferInfo.offset = 0
+                        bufferInfo.size = sampleSize
+                        bufferInfo.presentationTimeUs = pts
+                        bufferInfo.flags = mapExtractorFlags(videoExtractor.sampleFlags)
+                        muxer.writeSampleData(outVideoTrack, buffer, bufferInfo)
+                        videoExtractor.advance()
+                    }
+                } else {
+                    val sampleSize = audioExtractor.readSampleData(buffer, 0)
+                    if (sampleSize < 0) {
+                        audioEof = true
+                    } else {
+                        val pts = maxOf(lastAudioPts, nextAudioPts.coerceAtLeast(0L))
+                        lastAudioPts = pts
+                        bufferInfo.offset = 0
+                        bufferInfo.size = sampleSize
+                        bufferInfo.presentationTimeUs = pts
+                        bufferInfo.flags = mapExtractorFlags(audioExtractor.sampleFlags)
+                        muxer.writeSampleData(outAudioTrack, buffer, bufferInfo)
+                        audioExtractor.advance()
+                    }
+                }
             }
 
             muxer.stop()
@@ -207,15 +253,15 @@ object AndroidMediaMuxer {
             muxer.release()
             muxer = null
 
-            if (tempMuxFile.exists() && tempMuxFile.length() > 0L) {
-                if (outputFile.exists() && outputFile.absolutePath != tempMuxFile.absolutePath) {
+            if (stagingFile.exists() && stagingFile.length() > 0L) {
+                if (outputFile.exists() && outputFile.absolutePath != stagingFile.absolutePath) {
                     outputFile.delete()
                 }
-                val moved = if (tempMuxFile.renameTo(outputFile)) {
+                val moved = if (stagingFile.renameTo(outputFile)) {
                     true
                 } else {
-                    tempMuxFile.copyTo(outputFile, overwrite = true)
-                    tempMuxFile.delete()
+                    stagingFile.copyTo(outputFile, overwrite = true)
+                    stagingFile.delete()
                     true
                 }
                 if (moved && outputFile.exists() && outputFile.length() > 0L) {
@@ -227,7 +273,7 @@ object AndroidMediaMuxer {
             false
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to mux video and audio tracks", e)
-            runCatching { if (tempMuxFile.exists()) tempMuxFile.delete() }
+            runCatching { tempMuxFile?.let { if (it.exists()) it.delete() } }
             false
         } finally {
             runCatching { videoExtractor.release() }

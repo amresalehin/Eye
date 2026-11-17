@@ -1892,4 +1892,91 @@ class MediaDownloaderTest {
                 .isAnnotationPresent(androidx.annotation.Keep::class.java)
         )
     }
+
+    @Test
+    fun testDownloaderPreferencesAndSubfolderResolution() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = PreferencesRepository(context)
+
+        // 1. Video Quality Cap & Audio-Only persistence
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q720P)
+        prefs.setAudioOnlyMode(true)
+        assertEquals(
+            com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q720P,
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
+        )
+        assertTrue(com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context))
+
+        // 2. Subfolder organization modes (FLAT, BY_DOMAIN, BY_STACK)
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
+        assertNull(
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips"
+            )
+        )
+
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.BY_DOMAIN)
+        assertEquals(
+            "reddit.com",
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips"
+            )
+        )
+
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.BY_STACK)
+        assertEquals(
+            "Funny Clips",
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips!"
+            )
+        )
+
+        // 3. Wi-Fi Only constraint toggles WorkManager NetworkType between CONNECTED and UNMETERED
+        prefs.setWifiOnlyDownloads(false)
+        assertEquals(
+            androidx.work.NetworkType.CONNECTED,
+            com.amresalehin.emregallery.data.DownloadQueueManager.buildNetworkConstraints(context).requiredNetworkType
+        )
+        prefs.setWifiOnlyDownloads(true)
+        assertEquals(
+            androidx.work.NetworkType.UNMETERED,
+            com.amresalehin.emregallery.data.DownloadQueueManager.buildNetworkConstraints(context).requiredNetworkType
+        )
+
+        // 4. 8K (4320p), 4K (2160p), and 2K (1440p) quality caps and AndroidMediaMuxer container selection
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q8K)
+        assertEquals(4320, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q4K)
+        assertEquals(2160, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q2K)
+        assertEquals(1440, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/x-vnd.on2.vp9", "audio/opus")
+        )
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/hevc", "audio/mp4a-latm")
+        )
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/av01", "audio/mp4a-latm")
+        )
+        assertTrue(com.amresalehin.emregallery.data.AndroidMediaMuxer.DEFAULT_BUFFER_SIZE >= 8 * 1024 * 1024)
+
+        // Reset defaults
+        prefs.setWifiOnlyDownloads(false)
+        prefs.setAudioOnlyMode(false)
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST)
+    }
 }

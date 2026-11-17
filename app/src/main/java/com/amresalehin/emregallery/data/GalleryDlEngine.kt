@@ -358,10 +358,11 @@ object GalleryDlEngine {
         downloadId: String? = null,
         headers: Map<String, String>? = null,
         cookies: String? = null,
+        subfolder: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit)? = null
     ): File? = withContext(Dispatchers.IO) {
         try {
-            val dir = OkHttpDownloader.getTargetStorageDir(context)
+            val dir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val deterministicBase = if (!downloadId.isNullOrBlank()) {
                 val cleanId = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -378,11 +379,15 @@ object GalleryDlEngine {
 
             val userAgent = headers?.get("User-Agent") ?: OkHttpDownloader.DEFAULT_USER_AGENT
             val effectiveCookies = cookies ?: headers?.get("Cookie")
-            val headersJson = if (!headers.isNullOrEmpty()) {
+            val qualityCap = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
+            val audioOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context)
+            val headersJson = run {
                 val json = JSONObject()
-                headers.forEach { (k, v) -> json.put(k, v) }
+                headers?.forEach { (k, v) -> json.put(k, v) }
+                if (qualityCap.maxHeight > 0) json.put("__max_height", qualityCap.maxHeight)
+                if (audioOnly) json.put("__audio_only", true)
                 json.toString()
-            } else ""
+            }
 
             val progressBridge = if (onProgress != null) {
                 PythonProgressBridge(onProgress)
@@ -403,10 +408,14 @@ object GalleryDlEngine {
                     progressBridge
                 ).toBoolean()
 
-                val videoPartFile = File("${targetFile.absolutePath}.video_part.mp4")
-                val audioPartFile = File("${targetFile.absolutePath}.audio_part.m4a")
-                if (videoPartFile.exists() && audioPartFile.exists()) {
-                    AndroidMediaMuxer.muxVideoAndAudio(videoPartFile, audioPartFile, targetFile)
+                val mp4VideoPart = File("${targetFile.absolutePath}.video_part.mp4")
+                val mp4AudioPart = File("${targetFile.absolutePath}.audio_part.m4a")
+                val webmVideoPart = File("${targetFile.absolutePath}.video_part.webm")
+                val webmAudioPart = File("${targetFile.absolutePath}.audio_part.webm")
+                if (mp4VideoPart.exists() && mp4AudioPart.exists()) {
+                    AndroidMediaMuxer.muxVideoAndAudio(mp4VideoPart, mp4AudioPart, targetFile)
+                } else if (webmVideoPart.exists() && webmAudioPart.exists()) {
+                    AndroidMediaMuxer.muxVideoAndAudio(webmVideoPart, webmAudioPart, targetFile)
                 }
 
                 if (success && targetFile.exists() && targetFile.length() > 0L) {

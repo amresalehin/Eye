@@ -66,6 +66,9 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.*
+import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
+import com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode
+import com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -149,6 +152,9 @@ fun DownloaderSearchMainPage(
     val scope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
     val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
+    val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
+    val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(initial = DownloaderPreferencesManager.getSearchEngineSync(context))
+    var showDownloaderSettings by remember { mutableStateOf(false) }
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val repoStacks by inboxRepo.stacks.collectAsState()
     val effectiveStacks = remember(savedStacks, repoStacks) {
@@ -186,13 +192,7 @@ fun DownloaderSearchMainPage(
         if (trimmed.isBlank()) return
         keyboardController?.hide()
         focusManager.clearFocus()
-        val destinationUrl = if (trimmed.contains(".") && !trimmed.contains(" ") &&
-            (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true) ||
-                    trimmed.matches(Regex("^[a-zA-Z0-9-]+\\.[a-zA-Z]{2,}(/.*)?$")))) {
-            if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) trimmed else "https://$trimmed"
-        } else {
-            "https://www.google.com/search?q=" + java.net.URLEncoder.encode(trimmed, "UTF-8")
-        }
+        val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
         scope.launch {
             historyManager.recordVisit(destinationUrl)
         }
@@ -1010,12 +1010,23 @@ fun DownloaderResultsPage(
         }
     }
 
-    // Dimension & SVG Filters
+    val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
+    val persistedMinKb by downloaderPrefs.minKbFilter.collectAsState(initial = 1)
+    val persistedMinWidth by downloaderPrefs.minWidthFilter.collectAsState(initial = 0)
+    val persistedMinHeight by downloaderPrefs.minHeightFilter.collectAsState(initial = 0)
+    val persistedShowSvg by downloaderPrefs.showSvg.collectAsState(initial = false)
+    val videoQualityCap by downloaderPrefs.videoQualityCap.collectAsState(initial = DownloaderPreferencesManager.getVideoQualityCapSync(context))
+    val audioOnlyMode by downloaderPrefs.audioOnlyMode.collectAsState(initial = DownloaderPreferencesManager.isAudioOnlySync(context))
+    val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(initial = DownloaderPreferencesManager.getSearchEngineSync(context))
+
+    // Dimension & SVG Filters (synchronized with persistent DownloaderPreferencesManager)
     var showDimensionFilter by remember { mutableStateOf(false) }
-    var minWidthFilter by remember { mutableFloatStateOf(0f) }
-    var minHeightFilter by remember { mutableFloatStateOf(0f) }
-    var showSvg by remember { mutableStateOf(false) }
-    var minKbInput by remember { mutableStateOf("1") }
+    var minWidthFilter by remember(persistedMinWidth) { mutableFloatStateOf(persistedMinWidth.toFloat()) }
+    var minHeightFilter by remember(persistedMinHeight) { mutableFloatStateOf(persistedMinHeight.toFloat()) }
+    var showSvg by remember(persistedShowSvg) { mutableStateOf(persistedShowSvg) }
+    var minKbInput by remember(persistedMinKb) { mutableStateOf(persistedMinKb.toString()) }
+    var qualityMenuExpanded by remember { mutableStateOf(false) }
+    var showDownloaderSettings by remember { mutableStateOf(false) }
 
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
 
@@ -1054,7 +1065,7 @@ fun DownloaderResultsPage(
     fun performOpenInBrowser(target: String) {
         val trimmed = target.trim()
         if (trimmed.isNotBlank()) {
-            val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed)
+            val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
             isEditingUrl = false
             focusManager.clearFocus()
             keyboardController?.hide()
@@ -1469,7 +1480,7 @@ fun DownloaderResultsPage(
                         val isSelected = selectedFilter == categoryName
                         Surface(
                             shape = RoundedCornerShape(16.dp),
-                            color = if (isSelected) Color(0xFF212529) else Color(0xFFE9ECEF),
+                            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
                             modifier = Modifier
                                 .clickable {
                                     selectedFilter = if (isSelected) null else categoryName
@@ -1483,14 +1494,14 @@ fun DownloaderResultsPage(
                                 Icon(
                                     imageVector = icon,
                                     contentDescription = categoryName,
-                                    tint = if (isSelected) Color.White else Color(0xFF212529),
+                                    tint = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
                                     text = "$count",
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp,
-                                    color = if (isSelected) Color.White else Color(0xFF212529)
+                                    color = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -1504,21 +1515,121 @@ fun DownloaderResultsPage(
                     modifier = Modifier
                         .width(1.dp)
                         .height(20.dp)
-                        .background(Color(0xFFDEE2E6))
+                        .background(MaterialTheme.colorScheme.outlineVariant)
                 )
 
                 Spacer(Modifier.width(8.dp))
 
-                // Grouped Circular Controls: Sort, Filter, Select All
+                // Grouped Controls: Quality/Audio Picker, Sort, Filter, Select All, Settings
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Quality / Audio-Only Picker Pill
+                    Box {
+                        val activeQualityLabel = if (audioOnlyMode) "Audio" else when (videoQualityCap) {
+                            DownloaderVideoQuality.BEST -> "Best"
+                            DownloaderVideoQuality.Q8K -> "8K"
+                            DownloaderVideoQuality.Q4K -> "4K"
+                            DownloaderVideoQuality.Q2K -> "2K"
+                            DownloaderVideoQuality.Q1080P -> "1080p"
+                            DownloaderVideoQuality.Q720P -> "720p"
+                            DownloaderVideoQuality.Q480P -> "480p"
+                            DownloaderVideoQuality.Q360P -> "360p"
+                        }
+                        val isCustomQuality = audioOnlyMode || videoQualityCap != DownloaderVideoQuality.BEST
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isCustomQuality) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clickable { qualityMenuExpanded = true }
+                                .testTag("downloader_quality_picker_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (audioOnlyMode) Icons.Default.Audiotrack else Icons.Default.HighQuality,
+                                    contentDescription = "Quality & Audio mode",
+                                    tint = if (isCustomQuality) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = activeQualityLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCustomQuality) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = qualityMenuExpanded,
+                            onDismissRequest = { qualityMenuExpanded = false }
+                        ) {
+                            DownloaderVideoQuality.entries.forEach { q ->
+                                val selected = !audioOnlyMode && videoQualityCap == q
+                                DropdownMenuItem(
+                                    text = { Text(q.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (selected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        qualityMenuExpanded = false
+                                        scope.launch {
+                                            downloaderPrefs.setAudioOnlyMode(false)
+                                            downloaderPrefs.setVideoQualityCap(q)
+                                        }
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Audio Only (M4A/MP3)",
+                                        fontWeight = if (audioOnlyMode) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (audioOnlyMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    qualityMenuExpanded = false
+                                    scope.launch {
+                                        downloaderPrefs.setAudioOnlyMode(!audioOnlyMode)
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Downloader Settings…") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    qualityMenuExpanded = false
+                                    showDownloaderSettings = true
+                                }
+                            )
+                        }
+                    }
+
                     // Sort Control
                     Box {
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFFE9ECEF),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             modifier = Modifier
                                 .size(34.dp)
                                 .clickable { sortDropdownExpanded = true }
@@ -1528,7 +1639,7 @@ fun DownloaderResultsPage(
                                 Icon(
                                     imageVector = Icons.Default.SwapVert,
                                     contentDescription = "Sort",
-                                    tint = if (sortOption != "Default") Color(0xFF212529) else Color(0xFF495057),
+                                    tint = if (sortOption != "Default") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -1550,9 +1661,10 @@ fun DownloaderResultsPage(
                     }
 
                     // Dimension / Filter Control
+                    val hasActiveDimensionFilter = minWidthFilter > 0 || minHeightFilter > 0 || showSvg || (minKbInput.toIntOrNull() ?: 1) > 1
                     Surface(
                         shape = CircleShape,
-                        color = if (minWidthFilter > 0 || minHeightFilter > 0 || showSvg) Color(0xFF212529) else Color(0xFFE9ECEF),
+                        color = if (hasActiveDimensionFilter) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier
                             .size(34.dp)
                             .clickable { showDimensionFilter = !showDimensionFilter }
@@ -1562,7 +1674,7 @@ fun DownloaderResultsPage(
                             Icon(
                                 imageVector = Icons.Default.Tune,
                                 contentDescription = "Filter dimensions & size",
-                                tint = if (minWidthFilter > 0 || minHeightFilter > 0 || showSvg) Color.White else Color(0xFF495057),
+                                tint = if (hasActiveDimensionFilter) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -1571,7 +1683,7 @@ fun DownloaderResultsPage(
                     // Selection Checkbox Control
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFFE9ECEF),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier
                             .size(34.dp)
                             .clickable {
@@ -1585,7 +1697,7 @@ fun DownloaderResultsPage(
                             Icon(
                                 imageVector = if (isAllSelected) Icons.Default.Check else Icons.Default.CheckBoxOutlineBlank,
                                 contentDescription = "Select All",
-                                tint = Color(0xFF495057),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -1593,12 +1705,12 @@ fun DownloaderResultsPage(
                 }
             }
 
-            // Dimension Filter Drawer (Animated)
+            // Dimension & Size Filter Drawer (Animated, Dark-Mode Native, Persisted)
             AnimatedVisibility(visible = showDimensionFilter) {
                 Surface(
-                    color = Color(0xFFF8F9FA),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, Color(0xFFE9ECEF)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -1616,17 +1728,57 @@ fun DownloaderResultsPage(
                                 text = "Dimension & Size Filter",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF212529)
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            TextButton(onClick = {
-                                minWidthFilter = 0f
-                                minHeightFilter = 0f
-                                showSvg = false
-                                minKbInput = "1"
-                            }) {
-                                Text("Reset", color = Color(0xFF212529))
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = { showDownloaderSettings = true }) {
+                                    Text("Settings", color = MaterialTheme.colorScheme.primary)
+                                }
+                                TextButton(onClick = {
+                                    minWidthFilter = 0f
+                                    minHeightFilter = 0f
+                                    showSvg = false
+                                    minKbInput = "1"
+                                    scope.launch {
+                                        downloaderPrefs.setMinWidthFilter(0)
+                                        downloaderPrefs.setMinHeightFilter(0)
+                                        downloaderPrefs.setShowSvg(false)
+                                        downloaderPrefs.setMinKbFilter(1)
+                                    }
+                                }) {
+                                    Text("Reset", color = MaterialTheme.colorScheme.onSurface)
+                                }
                             }
                         }
+
+                        // Min File Size (KB) Filter Control
+                        val currentMinKb = minKbInput.toFloatOrNull()?.coerceIn(0f, 1024f) ?: 1f
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Hide media smaller than: ${if (currentMinKb <= 0f) "0 KB (All)" else "${currentMinKb.toInt()} KB"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Slider(
+                            value = currentMinKb,
+                            onValueChange = {
+                                val rounded = it.toInt()
+                                minKbInput = rounded.toString()
+                            },
+                            onValueChangeFinished = {
+                                scope.launch {
+                                    downloaderPrefs.setMinKbFilter(minKbInput.toIntOrNull() ?: 1)
+                                }
+                            },
+                            valueRange = 0f..512f,
+                            steps = 7,
+                            modifier = Modifier.fillMaxWidth().testTag("downloader_min_kb_slider")
+                        )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1635,12 +1787,15 @@ fun DownloaderResultsPage(
                             Text(
                                 text = "Min Width: ${if (minWidthFilter <= 0f) "Any" else "${minWidthFilter.toInt()}px"}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF495057)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Slider(
                             value = minWidthFilter,
                             onValueChange = { minWidthFilter = it },
+                            onValueChangeFinished = {
+                                scope.launch { downloaderPrefs.setMinWidthFilter(minWidthFilter.toInt()) }
+                            },
                             valueRange = 0f..3840f,
                             steps = 3,
                             modifier = Modifier.fillMaxWidth()
@@ -1653,12 +1808,15 @@ fun DownloaderResultsPage(
                             Text(
                                 text = "Min Height: ${if (minHeightFilter <= 0f) "Any" else "${minHeightFilter.toInt()}px"}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF495057)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Slider(
                             value = minHeightFilter,
                             onValueChange = { minHeightFilter = it },
+                            onValueChangeFinished = {
+                                scope.launch { downloaderPrefs.setMinHeightFilter(minHeightFilter.toInt()) }
+                            },
                             valueRange = 0f..2160f,
                             steps = 3,
                             modifier = Modifier.fillMaxWidth()
@@ -1669,11 +1827,24 @@ fun DownloaderResultsPage(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Show SVG images", style = MaterialTheme.typography.bodySmall, color = Color(0xFF495057))
-                            Switch(checked = showSvg, onCheckedChange = { showSvg = it })
+                            Text("Show SVG images", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Switch(
+                                checked = showSvg,
+                                onCheckedChange = {
+                                    showSvg = it
+                                    scope.launch { downloaderPrefs.setShowSvg(it) }
+                                }
+                            )
                         }
                     }
                 }
+            }
+
+            if (showDownloaderSettings) {
+                DownloaderSettingsBottomSheet(
+                    downloaderPrefs = downloaderPrefs,
+                    onDismiss = { showDownloaderSettings = false }
+                )
             }
 
             // 3. Media Grid Area with Floating Centered Download Pill
@@ -1746,19 +1917,19 @@ fun DownloaderResultsPage(
                             Icon(
                                 imageVector = if (isChallenge) Icons.Default.Shield else Icons.Default.SearchOff,
                                 contentDescription = null,
-                                tint = if (isChallenge) MaterialTheme.colorScheme.primary else Color(0xFF6C757D),
+                                tint = if (isChallenge) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(48.dp)
                             )
                             Text(
                                 text = if (isChallenge) "Verification Required" else "No media discovered",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF212529)
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             if (failureReason != null) {
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isChallenge) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color(0xFFF1F3F5),
+                                    color = if (isChallenge) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceContainerLow,
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                                 ) {
                                     Column(
@@ -1769,7 +1940,7 @@ fun DownloaderResultsPage(
                                             text = failureReason,
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Medium,
-                                            color = if (isChallenge) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFF495057),
+                                            color = if (isChallenge) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                             textAlign = TextAlign.Center
                                         )
                                         if (isChallenge) {
@@ -1787,7 +1958,7 @@ fun DownloaderResultsPage(
                                 Text(
                                     text = "The webpage might be dynamically protected, require login, or filter settings are excluding items.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF6C757D),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -1798,7 +1969,10 @@ fun DownloaderResultsPage(
                                         onOpenBrowser(activeUrl)
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212529))
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.onSurface,
+                                    contentColor = MaterialTheme.colorScheme.surface
+                                )
                             ) {
                                 Icon(Icons.Default.TravelExplore, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
@@ -1808,10 +1982,10 @@ fun DownloaderResultsPage(
                     }
                 }
 
-                // 6. Centered Floating Download Action Pill (Turns ticked on download, app default black and white)
+                // 6. Centered Floating Download Action Pill (Theme-aware black/white contrast)
                 Surface(
                     shape = RoundedCornerShape(24.dp),
-                    color = Color(0xFF212529),
+                    color = MaterialTheme.colorScheme.onSurface,
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1856,20 +2030,20 @@ fun DownloaderResultsPage(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(18.dp),
                                 strokeWidth = 2.dp,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.surface
                             )
                         } else if (isDownloaded) {
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Downloaded",
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.size(20.dp)
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.ArrowDownward,
                                 contentDescription = "Download selected",
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -1877,7 +2051,7 @@ fun DownloaderResultsPage(
                             text = "(${selectedItemIds.size})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.surface
                         )
                     }
                 }
@@ -1887,9 +2061,198 @@ fun DownloaderResultsPage(
 }
 
 /**
- * Clean, prominent media card conforming to the minimal Emre design language.
+ * Modal Bottom Sheet for configuring persistent Media Downloader preferences:
+ * - Default Video Quality Cap & Audio-Only mode
+ * - Subfolder organization (Flat, By Domain, By Stack Title)
+ * - Wi-Fi only downloads (NetworkType.UNMETERED)
+ * - Default Browser Search Engine
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DownloaderSettingsBottomSheet(
+    downloaderPrefs: DownloaderPreferencesManager,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val videoQuality by downloaderPrefs.videoQualityCap.collectAsState(initial = DownloaderVideoQuality.BEST)
+    val audioOnly by downloaderPrefs.audioOnlyMode.collectAsState(initial = false)
+    val subfolderMode by downloaderPrefs.subfolderMode.collectAsState(initial = DownloaderSubfolderMode.FLAT)
+    val wifiOnly by downloaderPrefs.wifiOnlyDownloads.collectAsState(initial = false)
+    val searchEngine by downloaderPrefs.searchEngine.collectAsState(initial = BrowserSearchEngine.DUCKDUCKGO)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Downloader Settings",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // 1. Video Quality Cap
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Preferred Video Quality",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(DownloaderVideoQuality.entries) { q ->
+                        FilterChip(
+                            selected = !audioOnly && videoQuality == q,
+                            onClick = {
+                                scope.launch {
+                                    downloaderPrefs.setAudioOnlyMode(false)
+                                    downloaderPrefs.setVideoQualityCap(q)
+                                }
+                            },
+                            label = { Text(q.label) }
+                        )
+                    }
+                }
+            }
+
+            // 2. Audio-Only Extraction Mode
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Audio-Only Mode",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Extract best audio stream (.m4a/.mp3) from social videos",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = audioOnly,
+                    onCheckedChange = { enabled ->
+                        scope.launch { downloaderPrefs.setAudioOnlyMode(enabled) }
+                    }
+                )
+            }
+
+            // 3. Subfolder Organization Mode
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Download Folder Organization",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                DownloaderSubfolderMode.entries.forEach { mode ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (subfolderMode == mode) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch { downloaderPrefs.setSubfolderMode(mode) }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = subfolderMode == mode,
+                                onClick = { scope.launch { downloaderPrefs.setSubfolderMode(mode) } }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = mode.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = mode.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Wi-Fi Only Downloads
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Wi-Fi Only Downloads",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Require unmetered Wi-Fi network for background downloads",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = wifiOnly,
+                    onCheckedChange = { enabled ->
+                        scope.launch { downloaderPrefs.setWifiOnlyDownloads(enabled) }
+                    }
+                )
+            }
+
+            // 5. Default Browser Search Engine
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Default Search Engine",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(BrowserSearchEngine.entries) { engine ->
+                        FilterChip(
+                            selected = searchEngine == engine,
+                            onClick = {
+                                scope.launch { downloaderPrefs.setSearchEngine(engine) }
+                            },
+                            label = { Text(engine.label) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/**
+ * Clean, prominent media card conforming to the minimal Emre design language (Dark-Mode Native).
  * Format label top-left, selection checkbox top-right, filename below thumbnail,
- * dimensions bottom-left, media category bottom-right.
+ * dimensions/size bottom-left, media category bottom-right.
  */
 @Composable
 fun DownloaderMediaCard(
@@ -1923,7 +2286,7 @@ fun DownloaderMediaCard(
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFFF1F3F5),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
@@ -1936,7 +2299,7 @@ fun DownloaderMediaCard(
                     .fillMaxWidth()
                     .height(118.dp)
                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                    .background(Color(0xFFE9ECEF))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
                 val isAudioWithoutArt = (item.isAudio || item.category == MediaCategory.AUDIO) && item.thumbnailUrl.isNullOrBlank()
                 if (isAudioWithoutArt) {
@@ -1946,14 +2309,14 @@ fun DownloaderMediaCard(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFF212529).copy(alpha = 0.08f),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                             modifier = Modifier.size(48.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Audiotrack,
                                     contentDescription = item.title,
-                                    tint = Color(0xFF212529),
+                                    tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(26.dp)
                                 )
                             }
@@ -1972,7 +2335,7 @@ fun DownloaderMediaCard(
                 // Top-Left Format Pill
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = Color.White.copy(alpha = 0.92f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                     shadowElevation = 1.dp,
                     modifier = Modifier
                         .padding(start = 6.dp, top = 6.dp)
@@ -1983,12 +2346,12 @@ fun DownloaderMediaCard(
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,
-                        color = Color(0xFF212529),
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
 
-                // Top-Right Checkbox: Turns ticked on download with default black and white
+                // Top-Right Checkbox: Turns ticked on download with theme-aware contrast
                 val isTicked = isSelected || isDownloaded
                 Box(
                     modifier = Modifier
@@ -1996,10 +2359,10 @@ fun DownloaderMediaCard(
                         .align(Alignment.TopEnd)
                         .size(20.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isTicked) Color(0xFF212529) else Color.Black.copy(alpha = 0.25f))
+                        .background(if (isTicked) MaterialTheme.colorScheme.onSurface else Color.Black.copy(alpha = 0.25f))
                         .border(
                             width = 1.5.dp,
-                            color = Color.White,
+                            color = if (isTicked) MaterialTheme.colorScheme.surface else Color.White,
                             shape = RoundedCornerShape(4.dp)
                         ),
                     contentAlignment = Alignment.Center
@@ -2008,7 +2371,7 @@ fun DownloaderMediaCard(
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = if (isDownloaded) "Downloaded" else "Selected",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.size(13.dp)
                         )
                     }
@@ -2027,7 +2390,7 @@ fun DownloaderMediaCard(
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                     fontSize = 11.sp,
-                    color = Color(0xFF212529),
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -2041,14 +2404,14 @@ fun DownloaderMediaCard(
                         text = dimText,
                         style = MaterialTheme.typography.labelSmall,
                         fontSize = 10.sp,
-                        color = Color(0xFF6C757D),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
                     Text(
                         text = categoryText,
                         style = MaterialTheme.typography.labelSmall,
                         fontSize = 10.sp,
-                        color = Color(0xFF6C757D),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
                 }

@@ -105,6 +105,11 @@ class MediaDownloadWorker(
 
         val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
             ?: downloadHeaders["Cookie"]
+        val resolvedSubfolder = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+            context = applicationContext,
+            sourceDomain = sourceDomain,
+            stackTitle = stackTitle
+        )
 
         try {
             setForeground(getForegroundInfo())
@@ -153,6 +158,7 @@ class MediaDownloadWorker(
                     downloadId = itemId,
                     headers = downloadHeaders,
                     cookies = cookieString,
+                    subfolder = resolvedSubfolder,
                     onProgress = { bytesRead, totalBytes, speed ->
                         reportLiveProgress(bytesRead, totalBytes, speed)
                     }
@@ -171,6 +177,7 @@ class MediaDownloadWorker(
                     referer = referer,
                     downloadId = itemId,
                     headers = downloadHeaders,
+                    subfolder = resolvedSubfolder,
                     onProgress = { bytesRead, totalBytes ->
                         val now = System.currentTimeMillis()
                         if (now - lastProgressUpdate > 250) {
@@ -218,6 +225,7 @@ class MediaDownloadWorker(
                             downloadId = itemId,
                             headers = downloadHeaders,
                             cookies = cookieString,
+                            subfolder = resolvedSubfolder,
                             onProgress = { bytesRead, totalBytes, speed ->
                                 reportLiveProgress(bytesRead, totalBytes, speed)
                             }

@@ -471,7 +471,7 @@ fun formatScrapedMediaDimensionOrSize(
     val knownBytes = item.sizeBytes?.takeIf { it > 0L }
         ?: ImageDimensionProber.getCachedSize(item.url)?.takeIf { it > 0L }
     if (knownBytes != null) {
-        return DownloadActivityManager.formatBytes(knownBytes)
+        return formatBytes(knownBytes)
     }
 
     val formatClean = item.format.trim().uppercase(Locale.ROOT)

@@ -881,7 +881,7 @@ fun PocketScreen(
             AlertDialog(
                 onDismissRequest = { tagPendingDelete = null },
                 containerColor = if (isDark) Color(0xFF1C1C1C) else Color(0xFFFFFFFF),
-                title = { Text("Delete Tag "${tagToDelete.title}"?", color = PocketThemeColors.primaryText(isDark)) },
+                title = { Text("Delete Tag \"${tagToDelete.title}\"?", color = PocketThemeColors.primaryText(isDark)) },
                 text = {
                     Text(
                         text = "Bookmarks will be kept. Nested child tags will move up to the parent level.",
@@ -921,7 +921,7 @@ fun PocketScreen(
                     val created = pocketRepo.getOrCreateTagPath(segs).first
                     if (created != null) {
                         pocketRepo.bulkAddTag(selectedStackIds, created.id)
-                        scope.launch { snackbarHostState.showSnackbar("Created and applied "${created.title}"") }
+                        scope.launch { snackbarHostState.showSnackbar("Created and applied \"${created.title}\"") }
                     }
                 },
                 onDismiss = { showBulkTagDialog = false },

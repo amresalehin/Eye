@@ -363,7 +363,7 @@ class ExtractionCoordinator(private val context: Context) {
                                     launch {
                                         updateStatus(
                                             "Recursive crawl (${p.pagesCrawled}/${p.maxPages} pages, depth ${p.currentDepth}): ${p.mediaDiscovered} media",
-                                            ExtractionPhase.STATIC_HTML
+                                            ExtractionPhase.STATIC_SCRAPING
                                         )
                                     }
                                 },

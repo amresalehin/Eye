@@ -848,7 +848,7 @@ private fun YtdlnisTerminalAndTemplatesTab(
         }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("yt-dlp --version", "status", "help", "python --version").forEach { quick ->
+                items(listOf("yt-dlp --version", "status", "help", "python --version")) { quick ->
                     AssistChip(onClick = { cmdInput = quick }, label = { Text(quick) })
                 }
             }

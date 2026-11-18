@@ -1394,12 +1394,26 @@ fun GalleryApp() {
                         onOpenMediaFile = { filePath ->
                             val file = java.io.File(filePath)
                             val name = if (file.exists()) file.name else filePath.substringAfterLast('/').ifBlank { "media_item" }
-                            val isVid = name.endsWith(".mp4", true) || name.endsWith(".webm", true) || name.endsWith(".mkv", true)
+                            val ext = name.substringAfterLast('.', "").lowercase()
+                            val isVid = ext in setOf("mp4", "webm", "mkv", "mov", "avi")
+                            val mime = when {
+                                isVid -> "video/$ext"
+                                ext in setOf("mp3", "m4a", "opus", "flac", "wav", "ogg") -> "audio/$ext"
+                                ext in setOf("jpg", "jpeg", "png", "webp", "gif") -> "image/$ext"
+                                else -> null
+                            }
+                            val nowMs = System.currentTimeMillis()
                             val item = MediaItem(
+                                id = filePath.hashCode().toLong(),
                                 uri = if (file.exists()) android.net.Uri.fromFile(file).toString() else filePath,
                                 name = name,
-                                bucketName = "YTDLnis",
-                                dateAddedSec = System.currentTimeMillis() / 1000L,
+                                mimeType = mime,
+                                dateAddedSeconds = nowMs / 1000L,
+                                dateTakenMillis = if (file.exists() && file.lastModified() > 0L) file.lastModified() else nowMs,
+                                sizeBytes = if (file.exists()) file.length() else 0L,
+                                width = 0,
+                                height = 0,
+                                relativePath = "Download/Emre Gallery/YTDLnis",
                                 isVideo = isVid
                             )
                             openMediaInViewer(item, listOf(item))

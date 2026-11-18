@@ -576,7 +576,7 @@ fun YtdlnisDownloadConfigCard(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Schedule", style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0 to "Now", 15 to "+15 min", 60 to "+1 hr", 360 to "+6 hr", 720 to "+12 hr").forEach { (mins, label) ->
+                    items(listOf(0 to "Now", 15 to "+15 min", 60 to "+1 hr", 360 to "+6 hr", 720 to "+12 hr")) { (mins, label) ->
                         FilterChip(
                             selected = scheduleDelayMinutes == mins,
                             onClick = { scheduleDelayMinutes = mins },

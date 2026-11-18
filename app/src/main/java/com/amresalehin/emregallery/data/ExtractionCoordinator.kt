@@ -76,7 +76,7 @@ class ExtractionCoordinator(private val context: Context) {
         extractionJob = scope.launch {
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
             val itemsMutex = Mutex()
-            var lastDiagnosticError: String? = null
+            val lastDiagnosticError = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
             suspend fun updateItems(
                 newList: List<ScrapedMediaItem>,
@@ -204,7 +204,7 @@ class ExtractionCoordinator(private val context: Context) {
                 val isTwitterStatusTarget = (lowerRequestUrl.contains("twitter.com/") || lowerRequestUrl.contains("x.com/")) && lowerRequestUrl.contains("/status/")
                 val recursiveCrawlEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isRecursiveCrawlEnabledSync(context)
                 val recursiveCrawlConfig = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRecursiveCrawlConfigSync(context)
-                var captchaChallengeUrl: String? = null
+                val captchaChallengeUrl = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
                 val redditDlJob = if (isRedditTarget) {
                     launch(Dispatchers.IO) {
@@ -213,8 +213,8 @@ class ExtractionCoordinator(private val context: Context) {
                                 val res = GalleryDlEngine.extractReddit(requestContext.url, options)
                                 if (res.success && res.items.isNotEmpty()) {
                                     updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via reddit-dl")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
+                                } else if (!res.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, res.errorMessage)
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent reddit-dl error", e)
@@ -230,8 +230,8 @@ class ExtractionCoordinator(private val context: Context) {
                                 val res = GalleryDlEngine.extractInstagram(requestContext.url, options)
                                 if (res.success && res.items.isNotEmpty()) {
                                     updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via Instaloader")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
+                                } else if (!res.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, res.errorMessage)
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent Instaloader error", e)
@@ -247,8 +247,8 @@ class ExtractionCoordinator(private val context: Context) {
                                 val res = GalleryDlEngine.extractSpotify(requestContext.url, options)
                                 if (res.success && res.items.isNotEmpty()) {
                                     updateItems(res.items, title = res.pageTitle, msg = "Matched ${res.items.size} Spotify audio track(s) via YouTube")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
+                                } else if (!res.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, res.errorMessage)
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent Spotify error", e)
@@ -264,8 +264,8 @@ class ExtractionCoordinator(private val context: Context) {
                                 val res = GalleryDlEngine.extractRadioJavan(requestContext.url, options)
                                 if (res.success && res.items.isNotEmpty()) {
                                     updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} RadioJavan item(s)")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
+                                } else if (!res.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, res.errorMessage)
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent RadioJavan error", e)
@@ -281,8 +281,8 @@ class ExtractionCoordinator(private val context: Context) {
                                 val res = GalleryDlEngine.extractXSpace(requestContext.url, options)
                                 if (res.success && res.items.isNotEmpty()) {
                                     updateItems(res.items, title = res.pageTitle, msg = "Resolved Twitter/X Space HLS audio stream")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
+                                } else if (!res.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, res.errorMessage)
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent X Space error", e)
@@ -363,7 +363,7 @@ class ExtractionCoordinator(private val context: Context) {
                                     launch {
                                         updateStatus(
                                             "Recursive crawl (${p.pagesCrawled}/${p.maxPages} pages, depth ${p.currentDepth}): ${p.mediaDiscovered} media",
-                                            ExtractionPhase.STATIC_HTML
+                                            ExtractionPhase.STATIC_SCRAPING
                                         )
                                     }
                                 },
@@ -379,9 +379,9 @@ class ExtractionCoordinator(private val context: Context) {
                                 )
                             }
                             if (crawlRes.captchaDetected) {
-                                captchaChallengeUrl = crawlRes.captchaUrl ?: requestContext.url
-                                if (lastDiagnosticError == null) {
-                                    lastDiagnosticError = crawlRes.errorMessage
+                                captchaChallengeUrl.compareAndSet(null, crawlRes.captchaUrl ?: requestContext.url)
+                                if (!crawlRes.errorMessage.isNullOrBlank()) {
+                                    lastDiagnosticError.compareAndSet(null, crawlRes.errorMessage)
                                 }
                             }
                         } catch (e: Exception) {
@@ -397,7 +397,7 @@ class ExtractionCoordinator(private val context: Context) {
                             if (res.success && res.items.isNotEmpty()) {
                                 updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via yt-dlp")
                             } else if (!res.errorMessage.isNullOrBlank()) {
-                                lastDiagnosticError = res.errorMessage
+                                lastDiagnosticError.set(res.errorMessage)
                             }
                         } catch (e: Exception) {
                             Log.w("ExtractionCoordinator", "Concurrent yt-dlp error", e)
@@ -411,8 +411,8 @@ class ExtractionCoordinator(private val context: Context) {
                             val res = GalleryDlEngine.extractGalleryDl(requestContext.url, options)
                             if (res.success && res.items.isNotEmpty()) {
                                 updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via gallery-dl")
-                            } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                lastDiagnosticError = res.errorMessage
+                            } else if (!res.errorMessage.isNullOrBlank()) {
+                                lastDiagnosticError.compareAndSet(null, res.errorMessage)
                             }
                         } catch (e: Exception) {
                             Log.w("ExtractionCoordinator", "Concurrent gallery-dl error", e)
@@ -430,8 +430,8 @@ class ExtractionCoordinator(private val context: Context) {
                         )
                         if (browserRes.items.isNotEmpty()) {
                             updateItems(browserRes.items, title = browserRes.pageTitle)
-                        } else if (lastDiagnosticError == null) {
-                            lastDiagnosticError = browserRes.errorMessage
+                        } else if (!browserRes.errorMessage.isNullOrBlank()) {
+                            lastDiagnosticError.compareAndSet(null, browserRes.errorMessage)
                         }
                     } catch (e: Exception) {
                         Log.w("ExtractionCoordinator", "Concurrent BrowserSession error", e)
@@ -454,16 +454,18 @@ class ExtractionCoordinator(private val context: Context) {
                 browserJob.join()
 
                 // Check bot challenges or login requirement if candidates are still empty
-                val needsSignInDirect = BotDetectionMitigator.indicatesSignInRequired(lastDiagnosticError)
+                val diagnosticErrorSnapshot = lastDiagnosticError.get()
+                val captchaUrlSnapshot = captchaChallengeUrl.get()
+                val needsSignInDirect = BotDetectionMitigator.indicatesSignInRequired(diagnosticErrorSnapshot)
                 val isSupportedByEngines = supportInfo.isSupported
-                val needsCookiesOrBot = BotDetectionMitigator.indicatesCookiesOrBotVerificationNeeded(lastDiagnosticError) ||
+                val needsCookiesOrBot = BotDetectionMitigator.indicatesCookiesOrBotVerificationNeeded(diagnosticErrorSnapshot) ||
                         (isSupportedByEngines && itemsMap.isEmpty() && cookies.isNullOrBlank())
 
-                if (captchaChallengeUrl != null && itemsMap.isEmpty()) {
+                if (captchaUrlSnapshot != null && itemsMap.isEmpty()) {
                     _state.value = _state.value.copy(
                         isRunning = false,
                         requiresSignIn = true,
-                        signInUrl = captchaChallengeUrl,
+                        signInUrl = captchaUrlSnapshot,
                         statusMessage = "CAPTCHA verification required for $domain",
                         errorMessage = "CAPTCHA detected on $domain. Complete verification in the browser to continue."
                     )
@@ -562,7 +564,7 @@ class ExtractionCoordinator(private val context: Context) {
                 }
 
                 // Final Evaluation if no items discovered
-                val finalReason: String = lastDiagnosticError?.takeIf { it.isNotBlank() }
+                val finalReason: String = diagnosticErrorSnapshot?.takeIf { it.isNotBlank() }
                     ?: "No media items discovered by any discovery engine."
 
                 _state.value = _state.value.copy(

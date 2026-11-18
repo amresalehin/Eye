@@ -119,6 +119,7 @@ chaquopy {
             install("gallery-dl")
             install("yt-dlp")
             install("instaloader")
+            install("pinterest-dl")
         }
     }
 }

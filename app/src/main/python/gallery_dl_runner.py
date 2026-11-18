@@ -42,11 +42,18 @@ except Exception:
     _ig_extractor = None
     INSTALOADER_AVAILABLE = False
 
+try:
+    import pinterest_dl_extractor as _pin_extractor
+    PINTEREST_DL_AVAILABLE = True
+except Exception:
+    _pin_extractor = None
+    PINTEREST_DL_AVAILABLE = False
+
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
     {"name": "Imgur", "domains": ["imgur.com", "i.imgur.com"], "icon": "image"},
     {"name": "Twitter / X", "domains": ["twitter.com", "x.com", "pbs.twimg.com"], "icon": "tag"},
-    {"name": "Pinterest", "domains": ["pinterest.com", "i.pinimg.com"], "icon": "pin"},
+    {"name": "Pinterest", "domains": ["pinterest.com", "pin.it", "i.pinimg.com", "v1.pinimg.com"], "icon": "pin"},
     {"name": "ArtStation", "domains": ["artstation.com"], "icon": "brush"},
     {"name": "DeviantArt", "domains": ["deviantart.com"], "icon": "palette"},
     {"name": "Flickr", "domains": ["flickr.com"], "icon": "camera"}
@@ -57,8 +64,9 @@ def get_engine_status():
     gdl_ver = getattr(gallery_dl, "__version__", "1.32.19") if GALLERY_DL_AVAILABLE else "N/A"
     ytdlp_ver = getattr(yt_dlp, "__version__", "2026.10.21") if YTDLP_AVAILABLE else "N/A"
     ig_ver = _ig_extractor.get_instaloader_version() if INSTALOADER_AVAILABLE else "N/A"
-    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE
-    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver}" if available else "Python Engine Unavailable"
+    pin_ver = _pin_extractor.get_pinterest_dl_version() if PINTEREST_DL_AVAILABLE else "N/A"
+    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE or PINTEREST_DL_AVAILABLE
+    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver} / pinterest-dl {pin_ver}" if available else "Python Engine Unavailable"
 
     return json.dumps({
         "available": available,
@@ -70,6 +78,8 @@ def get_engine_status():
         "yt_dlp_version": ytdlp_ver,
         "instaloader_available": INSTALOADER_AVAILABLE,
         "instaloader_version": ig_ver,
+        "pinterest_dl_available": PINTEREST_DL_AVAILABLE,
+        "pinterest_dl_version": pin_ver,
         "ffmpeg_available": True,
         "ffmpeg_kit_installed": True,
         "ffmpeg_version": "8.1.9",
@@ -95,6 +105,16 @@ def extract_instagram(url, options_json="{}"):
     if not INSTALOADER_AVAILABLE or _ig_extractor is None:
         return json.dumps({"success": False, "engine": "instaloader", "error": "instaloader extractor unavailable", "items": []})
     return _ig_extractor.extract_instagram(url, options_json)
+
+def is_pinterest_dl_available():
+    """Returns True if the pinterest-dl Pinterest extractor is available."""
+    return bool(PINTEREST_DL_AVAILABLE)
+
+def extract_pinterest(url, options_json="{}"):
+    """Extracts Pinterest media using sean1832/pinterest-dl (with Resource API & HTML/RSS/oEmbed fallbacks)."""
+    if not PINTEREST_DL_AVAILABLE or _pin_extractor is None:
+        return json.dumps({"success": False, "engine": "pinterest-dl", "error": "pinterest-dl extractor unavailable", "items": []})
+    return _pin_extractor.extract_pinterest(url, options_json)
 
 def get_supported_sites(options_json="{}"):
     """
@@ -317,6 +337,17 @@ def check_support(url):
             "extractor": "Instaloader",
             "display_name": "Instagram (Instaloader)",
             "engine": "instaloader"
+        })
+
+    # 0b. Dedicated Pinterest extractor powered by sean1832/pinterest-dl
+    if PINTEREST_DL_AVAILABLE and _pin_extractor is not None and _pin_extractor.is_pinterest_url(clean_url):
+        return json.dumps({
+            "supported": True,
+            "category": "pinterest",
+            "subcategory": _pin_extractor.parse_pinterest_url(clean_url).get("kind", "pin"),
+            "extractor": "PinterestDL",
+            "display_name": "Pinterest (pinterest-dl)",
+            "engine": "pinterest-dl"
         })
 
     # 1. Primary: Check yt-dlp
@@ -762,6 +793,16 @@ def extract_media(url, options_json="{}"):
             ig_res = json.loads(ig_res_str)
             if ig_res.get("success") and len(ig_res.get("items", [])) > 0:
                 return ig_res_str
+        except Exception:
+            pass
+
+    # Step 0b: Dedicated pinterest-dl path for Pinterest pins, boards, sections, search, and pin.it links
+    if PINTEREST_DL_AVAILABLE and _pin_extractor is not None and _pin_extractor.is_pinterest_url(clean_url):
+        pin_res_str = extract_pinterest(clean_url, options_json)
+        try:
+            pin_res = json.loads(pin_res_str)
+            if pin_res.get("success") and len(pin_res.get("items", [])) > 0:
+                return pin_res_str
         except Exception:
             pass
 

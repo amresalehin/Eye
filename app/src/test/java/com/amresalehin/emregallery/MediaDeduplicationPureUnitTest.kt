@@ -116,6 +116,30 @@ class MediaDeduplicationPureUnitTest {
     }
 
     @Test
+    fun testPinterestVideoStreamsPreservedAndSeparatedFromPosterImages() {
+        val hash = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+        val videoMp4 = "https://v1.pinimg.com/videos/mc/720p/a1/b2/c3/$hash.mp4"
+        val videoHls = "https://v1.pinimg.com/videos/mc/hls/a1/b2/c3/$hash.m3u8"
+        val posterImg = "https://i.pinimg.com/736x/a1/b2/c3/$hash.jpg"
+        val origWebp = "https://i.pinimg.com/originals/a1/b2/c3/$hash.webp"
+
+        // Video CDN URLs must NOT be rewritten to i.pinimg.com/originals
+        assertEquals(videoMp4, MediaClassifier.resolveOriginalMedia(videoMp4).mediaUrl)
+        assertEquals(videoHls, MediaClassifier.resolveOriginalMedia(videoHls).mediaUrl)
+        // Already-original .webp images must preserve their native extension
+        assertEquals(origWebp, MediaClassifier.resolveOriginalMedia(origWebp).mediaUrl)
+
+        // Video streams must have a distinct dedup key from poster images sharing the same hash
+        assertEquals("pinimg_video:$hash", MediaClassifier.deduplicationKey(videoMp4))
+        assertEquals("pinimg_video:$hash", MediaClassifier.deduplicationKey(videoHls))
+        assertEquals("pinimg:$hash", MediaClassifier.deduplicationKey(posterImg))
+
+        // Short and international Pinterest web pages must not be treated as direct media
+        assertFalse(MediaClassifier.isValidMedia("https://pin.it/3AbCdEf"))
+        assertFalse(MediaClassifier.isValidMedia("https://in.pinterest.com/pin/123456789/"))
+    }
+
+    @Test
     fun testResponsiveRasterFormatVariantsDeduplication() {
         // WordPress / Shopify / CDN resize suffixes and format variants
         val base = "https://example.com/wp-content/uploads/2024/05/hero"

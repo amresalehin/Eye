@@ -156,9 +156,12 @@ class ExtractionCoordinator(private val context: Context) {
                 // Rule 1: No exclusive extractor selection. Both yt-dlp and gallery-dl run concurrently.
                 // Rule 2: Browser discovery is complementary. Runs to discover dynamic network requests and DOM media.
                 // Rule 5: One unified candidate manager.
-                val isInstagramTarget = requestContext.url.lowercase(java.util.Locale.ROOT).let {
-                    it.contains("instagram.com") || it.contains("instagr.am")
-                }
+                val lowerTargetUrl = requestContext.url.lowercase(java.util.Locale.ROOT)
+                val isInstagramTarget = lowerTargetUrl.contains("instagram.com") || lowerTargetUrl.contains("instagr.am")
+                val isPinterestTarget = lowerTargetUrl.contains("pinterest.") ||
+                    lowerTargetUrl.contains("://pin.it/") ||
+                    lowerTargetUrl.contains(".pin.it/") ||
+                    lowerTargetUrl.contains("pinimg.com")
 
                 val instaloaderJob = if (isInstagramTarget) {
                     launch(Dispatchers.IO) {
@@ -172,6 +175,23 @@ class ExtractionCoordinator(private val context: Context) {
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent Instaloader error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val pinterestDlJob = if (isPinterestTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isPinterestDlAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractPinterest(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via pinterest-dl")
+                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                                    lastDiagnosticError = res.errorMessage
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent pinterest-dl error", e)
                             }
                         }
                     }
@@ -227,6 +247,7 @@ class ExtractionCoordinator(private val context: Context) {
 
                 // Await all concurrent discovery channels
                 instaloaderJob?.join()
+                pinterestDlJob?.join()
                 ytdlpJob.join()
                 galleryDlJob.join()
                 browserJob.join()
@@ -282,6 +303,19 @@ class ExtractionCoordinator(private val context: Context) {
                             }
                             if (retryIg.success && retryIg.items.isNotEmpty()) {
                                 updateItems(retryIg.items, title = retryIg.pageTitle)
+                            }
+                        }
+
+                        if (isPinterestTarget && GalleryDlEngine.isPinterestDlAvailable()) {
+                            val retryPin = withContext(Dispatchers.IO) {
+                                try {
+                                    GalleryDlEngine.extractPinterest(requestContext.url, updatedOptions)
+                                } catch (e: Exception) {
+                                    GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
+                                }
+                            }
+                            if (retryPin.success && retryPin.items.isNotEmpty()) {
+                                updateItems(retryPin.items, title = retryPin.pageTitle)
                             }
                         }
 
@@ -407,7 +441,7 @@ class ExtractionCoordinator(private val context: Context) {
 
         fun isGalleryPlatformUrl(lower: String): Boolean {
             val galleryHosts = listOf(
-                "reddit.com", "redd.it", "imgur.com", "pinterest.com", "pin.it",
+                "reddit.com", "redd.it", "imgur.com", "pinterest.", "pin.it",
                 "artstation.com", "deviantart.com", "flickr.com", "instagram.com/p/",
                 "instagram.com/tv/"
             )

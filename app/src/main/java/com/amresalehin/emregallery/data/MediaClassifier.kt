@@ -517,10 +517,10 @@ object MediaClassifier {
         ) {
             return false
         }
-        // Pinterest pin discussion pages (not direct image CDN)
-        if ((host.contains("pinterest.com") || host.contains("pin.it")) &&
-            !host.startsWith("i.") &&
-            path.contains("/pin/")
+        // Pinterest pin/board/short web pages (not direct media CDN)
+        if ((host.contains("pinterest.") || host == "pin.it" || host.endsWith(".pin.it")) &&
+            !host.startsWith("i.") && !host.startsWith("v.") && !host.startsWith("v1.") &&
+            (host == "pin.it" || host.endsWith(".pin.it") || path.contains("/pin/") || path.contains("/search/"))
         ) {
             return false
         }
@@ -598,15 +598,36 @@ object MediaClassifier {
             }
         }
 
-        // 0b. Pinterest image CDN (i.pinimg.com / *.pinimg.com -> originals full resolution master)
+        // 0b. Pinterest image CDN (i.pinimg.com -> originals full resolution master; preserve video CDN streams untouched)
         if (normalized.contains("pinimg.com")) {
+            val lowerNorm = normalized.lowercase(Locale.ROOT)
             val cleanUrl = normalized.substringBefore("?").substringBefore("#").trimEnd('/')
+            val cleanLower = cleanUrl.lowercase(Locale.ROOT)
+            val isPinterestVideo = lowerNorm.contains("/videos/") ||
+                Regex("""^https?://v\d*\.pinimg\.com/""").containsMatchIn(lowerNorm) ||
+                cleanLower.endsWith(".mp4") || cleanLower.endsWith(".m3u8") ||
+                cleanLower.endsWith(".ts") || cleanLower.endsWith(".webm")
+            if (isPinterestVideo) {
+                val videoFileName = cleanUrl.substringAfterLast('/').ifBlank { "pinterest_video.mp4" }
+                return ResolvedMediaInfo(
+                    mediaUrl = normalized,
+                    thumbnailUrl = null,
+                    cleanTitle = videoFileName
+                )
+            }
             val pinHexRegex = Regex("""([0-9a-fA-F]{32})(?:\.([a-zA-Z0-9]+))?""")
             val match = pinHexRegex.find(cleanUrl)
             if (match != null) {
                 val hash = match.groupValues[1]
                 val rawExt = match.groupValues.getOrNull(2)?.lowercase(Locale.ROOT)
-                val ext = if (rawExt.isNullOrBlank() || rawExt == "jpeg" || rawExt == "webp") "jpg" else rawExt
+                // Preserve native extension if URL is already an /originals/ master (e.g. .png, .webp, .gif)
+                val alreadyOriginal = lowerNorm.contains("/originals/")
+                val ext = when {
+                    rawExt.isNullOrBlank() -> "jpg"
+                    alreadyOriginal -> if (rawExt == "jpeg") "jpg" else rawExt
+                    rawExt == "jpeg" || rawExt == "webp" -> "jpg"
+                    else -> rawExt
+                }
                 val p1 = hash.substring(0, 2)
                 val p2 = hash.substring(2, 4)
                 val p3 = hash.substring(4, 6)
@@ -955,11 +976,16 @@ object MediaClassifier {
                 .replace(Regex("""https?://external-preview\.redd\.it/"""), "https://i.redd.it/")
                 .replace(Regex("""https?://i[0-3]\.wp\.com/"""), "https://i.wp.com/")
 
-            // 1. Pinterest Deduplication Key: Content-addressable 32-hex hash
+            // 1. Pinterest Deduplication Key: Content-addressable 32-hex hash (keep video streams distinct from poster images)
             if (normalizedHostAndPath.contains("pinimg.com")) {
                 val pinHash = Regex("""([0-9a-fA-F]{32})""").find(normalizedHostAndPath)?.groupValues?.get(1)
                 if (pinHash != null) {
-                    return "pinimg:$pinHash"
+                    val isPinVideo = normalizedHostAndPath.contains("/videos/") ||
+                        Regex("""^https?://v\d*\.pinimg\.com/""").containsMatchIn(normalizedHostAndPath) ||
+                        normalizedHostAndPath.endsWith(".mp4") ||
+                        normalizedHostAndPath.endsWith(".m3u8") ||
+                        normalizedHostAndPath.endsWith(".ts")
+                    return if (isPinVideo) "pinimg_video:$pinHash" else "pinimg:$pinHash"
                 }
             }
 

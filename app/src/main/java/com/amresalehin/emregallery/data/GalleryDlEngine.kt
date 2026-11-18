@@ -122,8 +122,25 @@ object GalleryDlEngine {
         }
     }
 
+    fun isPinterestDlAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_pinterest_dl_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking pinterest-dl availability", e)
+            false
+        }
+    }
+
     fun isAvailable(): Boolean {
-        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable())
+        return isPythonStarted() && (
+            isYtDlpAvailable() ||
+                isGalleryDlAvailable() ||
+                isInstaloaderAvailable() ||
+                isPinterestDlAvailable()
+            )
     }
 
     /**
@@ -397,6 +414,9 @@ object GalleryDlEngine {
     suspend fun extractInstagram(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_instagram", url, options)
 
+    suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_pinterest", url, options)
+
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
 
@@ -509,7 +529,7 @@ object GalleryDlEngine {
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
         GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
         GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
-        GalleryDlSite("Pinterest", listOf("pinterest.com", "i.pinimg.com"), "pin"),
+        GalleryDlSite("Pinterest", listOf("pinterest.com", "pin.it", "i.pinimg.com", "v1.pinimg.com"), "pin"),
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
         GalleryDlSite("Vimeo", listOf("vimeo.com"), "movie"),

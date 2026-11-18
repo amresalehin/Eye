@@ -9,12 +9,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.Authenticator
 import okhttp3.Cookie
 import okhttp3.CookieJar
+import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.URI
 import android.graphics.BitmapFactory
 import java.io.File
 import java.io.FileInputStream
@@ -141,12 +146,79 @@ object OkHttpDownloader {
 
     val sharedCookieJar = SharedSessionCookieJar()
 
-    val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+    data class ParsedProxySpec(
+        val type: Proxy.Type,
+        val host: String,
+        val port: Int,
+        val username: String? = null,
+        val password: String? = null
+    )
+
+    fun parseProxyUrl(rawUrl: String?): ParsedProxySpec? {
+        val trimmed = rawUrl?.trim().orEmpty()
+        if (trimmed.isBlank()) return null
+        return try {
+            val normalized = if ("://" in trimmed) trimmed else "http://$trimmed"
+            val uri = URI(normalized)
+            val scheme = (uri.scheme ?: "http").lowercase(Locale.ROOT)
+            val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+            val defaultPort = when (scheme) {
+                "socks5", "socks5h", "socks4", "socks" -> 1080
+                "https" -> 443
+                else -> 8080
+            }
+            val port = if (uri.port in 1..65535) uri.port else defaultPort
+            val proxyType = when (scheme) {
+                "socks5", "socks5h", "socks4", "socks" -> Proxy.Type.SOCKS
+                "http", "https" -> Proxy.Type.HTTP
+                else -> return null
+            }
+            var user: String? = null
+            var pass: String? = null
+            uri.userInfo?.takeIf { it.isNotBlank() }?.let { info ->
+                val parts = info.split(":", limit = 2)
+                user = parts.getOrNull(0)
+                pass = parts.getOrNull(1) ?: ""
+            }
+            ParsedProxySpec(proxyType, host, port, user, pass)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private val clientLock = Any()
+    @Volatile
+    private var proxyEnabledState: Boolean = false
+    @Volatile
+    private var proxyUrlState: String = ""
+    @Volatile
+    private var timeoutSecondsState: Int = 30
+    @Volatile
+    private var cachedClient: OkHttpClient? = null
+
+    val isProxyActive: Boolean get() = proxyEnabledState && parseProxyUrl(proxyUrlState) != null
+    val activeProxyUrl: String? get() = if (isProxyActive) proxyUrlState else null
+
+    fun configureProxy(enabled: Boolean, proxyUrl: String, timeoutSeconds: Int = 30) {
+        val cleanUrl = proxyUrl.trim()
+        val clampedTimeout = timeoutSeconds.coerceIn(10, 120)
+        synchronized(clientLock) {
+            if (proxyEnabledState == enabled && proxyUrlState == cleanUrl && timeoutSecondsState == clampedTimeout && cachedClient != null) {
+                return
+            }
+            proxyEnabledState = enabled
+            proxyUrlState = cleanUrl
+            timeoutSecondsState = clampedTimeout
+            cachedClient = buildClient(enabled, cleanUrl, clampedTimeout)
+        }
+    }
+
+    private fun buildClient(proxyEnabled: Boolean, proxyUrl: String, timeoutSec: Int): OkHttpClient {
+        val builder = OkHttpClient.Builder()
             .cookieJar(sharedCookieJar)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout((timeoutSec / 2).coerceIn(10, 30).toLong(), TimeUnit.SECONDS)
+            .readTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
+            .writeTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .addInterceptor { chain ->
@@ -161,8 +233,30 @@ object OkHttpDownloader {
                 }
                 chain.proceed(requestBuilder.build())
             }
-            .build()
+
+        if (proxyEnabled) {
+            parseProxyUrl(proxyUrl)?.let { spec ->
+                builder.proxy(Proxy(spec.type, InetSocketAddress(spec.host, spec.port)))
+                if (!spec.username.isNullOrBlank()) {
+                    val credential = Credentials.basic(spec.username, spec.password.orEmpty())
+                    builder.proxyAuthenticator(Authenticator { _, response ->
+                        if (response.request.header("Proxy-Authorization") != null) return@Authenticator null
+                        response.request.newBuilder()
+                            .header("Proxy-Authorization", credential)
+                            .build()
+                    })
+                }
+            }
+        }
+        return builder.build()
     }
+
+    val client: OkHttpClient
+        get() = cachedClient ?: synchronized(clientLock) {
+            cachedClient ?: buildClient(proxyEnabledState, proxyUrlState, timeoutSecondsState).also {
+                cachedClient = it
+            }
+        }
 
     data class HttpResponse(
         val isSuccessful: Boolean,

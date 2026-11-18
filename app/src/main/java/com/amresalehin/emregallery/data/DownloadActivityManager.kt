@@ -65,6 +65,23 @@ data class DownloadActivityItem(
     val isFinished: Boolean get() = status == DownloadActivityStatus.FINISHED
     val isPaused: Boolean get() = status == DownloadActivityStatus.PAUSED
     val isRetrying: Boolean get() = status == DownloadActivityStatus.RETRYING
+
+    /** Estimated seconds remaining based on live transfer speed (MSC72m/media_downloader ETA indicator). */
+    val etaSeconds: Long?
+        get() {
+            if (!isDownloading || speedBytesPerSec <= 0L || totalBytes <= 0L || bytesRead >= totalBytes) return null
+            return ((totalBytes - bytesRead) / speedBytesPerSec).coerceAtLeast(1L)
+        }
+
+    val formattedEta: String?
+        get() {
+            val sec = etaSeconds ?: return null
+            return when {
+                sec < 60L -> "${sec}s left"
+                sec < 3600L -> "${sec / 60L}m ${sec % 60L}s left"
+                else -> "${sec / 3600L}h ${(sec % 3600L) / 60L}m left"
+            }
+        }
 }
 
 object DownloadActivityManager {

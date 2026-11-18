@@ -49,6 +49,20 @@ except Exception:
     _reddit_extractor = None
     REDDIT_DL_AVAILABLE = False
 
+try:
+    import pinterest_dl_extractor as _pinterest_extractor
+    PINTEREST_DL_AVAILABLE = True
+except Exception:
+    _pinterest_extractor = None
+    PINTEREST_DL_AVAILABLE = False
+
+try:
+    import media_downloader_extractor as _media_dl_extractor
+    MEDIA_DL_AVAILABLE = True
+except Exception:
+    _media_dl_extractor = None
+    MEDIA_DL_AVAILABLE = False
+
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
     {"name": "Imgur", "domains": ["imgur.com", "i.imgur.com"], "icon": "image"},
@@ -65,8 +79,10 @@ def get_engine_status():
     ytdlp_ver = getattr(yt_dlp, "__version__", "2026.10.21") if YTDLP_AVAILABLE else "N/A"
     ig_ver = _ig_extractor.get_instaloader_version() if INSTALOADER_AVAILABLE else "N/A"
     reddit_ver = _reddit_extractor.get_reddit_dl_version() if REDDIT_DL_AVAILABLE else "N/A"
-    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE or REDDIT_DL_AVAILABLE
-    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver} / reddit-dl {reddit_ver}" if available else "Python Engine Unavailable"
+    pin_ver = _pinterest_extractor.get_pinterest_dl_version() if PINTEREST_DL_AVAILABLE and hasattr(_pinterest_extractor, "get_pinterest_dl_version") else "N/A"
+    media_dl_ver = _media_dl_extractor.get_version() if MEDIA_DL_AVAILABLE else "N/A"
+    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE or REDDIT_DL_AVAILABLE or PINTEREST_DL_AVAILABLE or MEDIA_DL_AVAILABLE
+    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver} / reddit-dl {reddit_ver} / pinterest-dl {pin_ver} / media-dl {media_dl_ver}" if available else "Python Engine Unavailable"
 
     return json.dumps({
         "available": available,
@@ -80,6 +96,10 @@ def get_engine_status():
         "instaloader_version": ig_ver,
         "reddit_dl_available": REDDIT_DL_AVAILABLE,
         "reddit_dl_version": reddit_ver,
+        "pinterest_dl_available": PINTEREST_DL_AVAILABLE,
+        "pinterest_dl_version": pin_ver,
+        "media_dl_available": MEDIA_DL_AVAILABLE,
+        "media_dl_version": media_dl_ver,
         "ffmpeg_available": True,
         "ffmpeg_kit_installed": True,
         "ffmpeg_version": "8.1.9",
@@ -115,6 +135,44 @@ def extract_reddit(url, options_json="{}"):
     if not REDDIT_DL_AVAILABLE or _reddit_extractor is None:
         return json.dumps({"success": False, "engine": "reddit-dl", "error": "reddit-dl extractor unavailable", "items": []})
     return _reddit_extractor.extract_reddit(url, options_json)
+
+def is_pinterest_dl_available():
+    """Returns True if the pinterest-dl extractor is available."""
+    return bool(PINTEREST_DL_AVAILABLE)
+
+def extract_pinterest(url, options_json="{}"):
+    """Extracts Pinterest pins and boards using pinterest_dl_extractor."""
+    if not PINTEREST_DL_AVAILABLE or _pinterest_extractor is None:
+        return json.dumps({"success": False, "engine": "pinterest-dl", "error": "pinterest-dl extractor unavailable", "items": []})
+    return _pinterest_extractor.extract_pinterest(url, options_json)
+
+def is_media_downloader_available():
+    """Returns True if the MSC72m/media_downloader multi-platform extractor is available."""
+    return bool(MEDIA_DL_AVAILABLE)
+
+def detect_platform(url):
+    """Detects which of the 8 supported platforms a URL belongs to."""
+    if MEDIA_DL_AVAILABLE and _media_dl_extractor is not None:
+        return _media_dl_extractor.detect_platform(url)
+    return "unknown"
+
+def extract_spotify(url, options_json="{}"):
+    """Extracts Spotify track/album/playlist/artist metadata and matches YouTube audio."""
+    if not MEDIA_DL_AVAILABLE or _media_dl_extractor is None:
+        return json.dumps({"success": False, "engine": "spotify", "error": "Spotify extractor unavailable", "items": []})
+    return _media_dl_extractor.extract_spotify(url, options_json)
+
+def extract_radiojavan(url, options_json="{}"):
+    """Extracts RadioJavan songs/videos/podcasts/playlists with 5-host CDN fallback."""
+    if not MEDIA_DL_AVAILABLE or _media_dl_extractor is None:
+        return json.dumps({"success": False, "engine": "radiojavan", "error": "RadioJavan extractor unavailable", "items": []})
+    return _media_dl_extractor.extract_radiojavan(url, options_json)
+
+def extract_x_space(url, options_json="{}"):
+    """Extracts Twitter/X Space public live/replayable HLS audio via GraphQL + yt-dlp fallback."""
+    if not MEDIA_DL_AVAILABLE or _media_dl_extractor is None:
+        return json.dumps({"success": False, "engine": "x_spaces", "error": "X Spaces extractor unavailable", "items": []})
+    return _media_dl_extractor.extract_x_space(url, options_json)
 
 def get_supported_sites(options_json="{}"):
     """
@@ -350,6 +408,49 @@ def check_support(url):
             "engine": "reddit-dl"
         })
 
+    # 0b2. Dedicated Pinterest extractor powered by pinterest_dl_extractor
+    if PINTEREST_DL_AVAILABLE and _pinterest_extractor is not None and _pinterest_extractor.is_pinterest_url(clean_url):
+        return json.dumps({
+            "supported": True,
+            "category": "pinterest",
+            "subcategory": _pinterest_extractor.parse_pinterest_url(clean_url).get("kind", "pin"),
+            "extractor": "PinterestDl",
+            "display_name": "Pinterest (pinterest-dl)",
+            "engine": "pinterest-dl"
+        })
+
+    # 0c. Dedicated MSC72m/media_downloader extractors (Spotify, RadioJavan, Twitter/X Spaces)
+    if MEDIA_DL_AVAILABLE and _media_dl_extractor is not None:
+        if _media_dl_extractor.is_spotify_url(clean_url):
+            sp = _media_dl_extractor.parse_spotify_url(clean_url)
+            return json.dumps({
+                "supported": True,
+                "category": "spotify",
+                "subcategory": sp.get("kind", "track"),
+                "extractor": "SpotifyYouTubeMatcher",
+                "display_name": "Spotify (YouTube Audio)",
+                "engine": "spotify"
+            })
+        if _media_dl_extractor.is_radiojavan_url(clean_url):
+            rj = _media_dl_extractor.parse_radiojavan_url(clean_url)
+            return json.dumps({
+                "supported": True,
+                "category": "radiojavan",
+                "subcategory": rj.get("kind", "song"),
+                "extractor": "RadioJavanExtractor",
+                "display_name": "RadioJavan (5-Host CDN)",
+                "engine": "radiojavan"
+            })
+        if _media_dl_extractor.is_x_space_url(clean_url):
+            return json.dumps({
+                "supported": True,
+                "category": "twitter_space",
+                "subcategory": "space",
+                "extractor": "TwitterSpacesExtractor",
+                "display_name": "Twitter / X Spaces",
+                "engine": "x_spaces"
+            })
+
     # 1. Primary: Check yt-dlp
     if is_ytdlp_supported(clean_url):
         ie = find_ytdlp_extractor(clean_url)
@@ -439,6 +540,7 @@ def extract_gallery_dl(url, options_json="{}"):
 
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
     cookies = opts.get("cookies")
+    proxy = (opts.get("proxy") or "").strip() or None
 
     items = []
     page_title = ""
@@ -448,6 +550,11 @@ def extract_gallery_dl(url, options_json="{}"):
     try:
         with _gdl_lock:
             gdl_config.set(("extractor",), "user-agent", user_agent)
+            if proxy:
+                try:
+                    gdl_config.set(("extractor",), "proxy", proxy)
+                except Exception:
+                    pass
             cookie_file = _prepare_cookiefile(cookies, clean_url)
             if cookie_file:
                 try:
@@ -600,6 +707,17 @@ def extract_yt_dlp(url, options_json="{}"):
 
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
     cookies = opts.get("cookies")
+    proxy = (opts.get("proxy") or "").strip() or None
+    timeout = int(opts.get("timeout") or 35)
+    retries = int(opts.get("retries") or 3)
+    max_height = int(opts.get("max_height") or 0)
+    format_mode = str(opts.get("format_mode") or "video_audio").strip().lower()
+    download_playlist = bool(opts.get("download_playlist", False))
+    download_subtitles = bool(opts.get("download_subtitles", False))
+    include_auto_subtitles = bool(opts.get("include_auto_subtitles", True))
+    subtitle_langs = opts.get("subtitle_languages") or ["en"]
+    if isinstance(subtitle_langs, str):
+        subtitle_langs = [s.strip() for s in subtitle_langs.split(",") if s.strip()]
 
     items = []
     page_title = ""
@@ -626,18 +744,30 @@ def extract_yt_dlp(url, options_json="{}"):
         if cookies:
             http_headers["Cookie"] = cookies
 
+        height_filter = f"[height<={max_height}]" if max_height > 0 else ""
+        if format_mode == "audio_only":
+            fmt_selector = "bestaudio/best"
+        elif format_mode == "video_only":
+            fmt_selector = f"bestvideo{height_filter}/bestvideo/best"
+        else:
+            fmt_selector = f"b{height_filter}[vcodec!=none][acodec!=none]/best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best"
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
+            "noplaylist": not download_playlist,
+            "writesubtitles": download_subtitles,
+            "writeautomaticsub": download_subtitles and include_auto_subtitles,
+            "subtitleslangs": subtitle_langs if download_subtitles else [],
             "ffmpeg_location": None,
             "prefer_ffmpeg": False,
-            "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
-            "socket_timeout": 35,
+            "format": fmt_selector,
+            "socket_timeout": timeout,
             "geo_bypass": True,
             "nocheckcertificate": True,
-            "retries": 3,
-            "fragment_retries": 3,
+            "retries": retries,
+            "fragment_retries": retries,
             "http_headers": http_headers,
             "extractor_args": {
                 "youtube": {
@@ -657,6 +787,8 @@ def extract_yt_dlp(url, options_json="{}"):
         }
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
+        if proxy:
+            ydl_opts["proxy"] = proxy
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -768,6 +900,44 @@ def extract_yt_dlp(url, options_json="{}"):
                                 "source": "yt-dlp",
                                 "pageUrl": page_url
                             })
+
+                    # Extract manual & auto-generated subtitles (MSC72m/media_downloader subtitle support)
+                    if download_subtitles:
+                        sub_sources = []
+                        manual_subs = entry.get("subtitles") or {}
+                        auto_subs = (entry.get("automatic_captions") or {}) if include_auto_subtitles else {}
+                        for lang in subtitle_langs:
+                            tracks_for_lang = manual_subs.get(lang) or auto_subs.get(lang)
+                            is_auto = lang not in manual_subs and lang in auto_subs
+                            if tracks_for_lang:
+                                sub_sources.append((lang, is_auto, tracks_for_lang))
+                        for lang, is_auto, tracks_for_lang in sub_sources:
+                            preferred = next(
+                                (t for t in tracks_for_lang if t.get("ext") in ("vtt", "srt") and t.get("url")),
+                                next((t for t in tracks_for_lang if t.get("url")), None),
+                            )
+                            if preferred and preferred["url"] not in seen_urls:
+                                s_url = preferred["url"]
+                                seen_urls.add(s_url)
+                                s_ext = preferred.get("ext") or "vtt"
+                                auto_tag = "_auto" if is_auto else ""
+                                s_title = f"{v_title}.{lang}{auto_tag}.{s_ext}"
+                                s_hash = hashlib.sha256(s_url.encode('utf-8')).hexdigest()[:12]
+                                items.append({
+                                    "id": f"ytdlp_sub_{lang}_{len(items)}_{s_hash}",
+                                    "url": s_url,
+                                    "title": s_title,
+                                    "category": "SUBTITLES",
+                                    "format": s_ext.upper(),
+                                    "mimeType": "text/vtt" if s_ext == "vtt" else "application/x-subrip",
+                                    "isVideo": False,
+                                    "isAudio": False,
+                                    "isStream": False,
+                                    "thumbnailUrl": thumb,
+                                    "source": f"yt-dlp Subtitles ({lang}{' auto' if is_auto else ''})",
+                                    "pageUrl": page_url,
+                                    "metadata": {"subtitle_lang": lang, "auto_generated": str(is_auto).lower()}
+                                })
     except Exception as e:
         return json.dumps({
             "success": False,
@@ -825,6 +995,15 @@ def extract_media(url, options_json="{}"):
         except Exception:
             pass
 
+    # Step 0c: Dedicated MSC72m/media_downloader paths (Spotify, RadioJavan, X Spaces)
+    if MEDIA_DL_AVAILABLE and _media_dl_extractor is not None:
+        if _media_dl_extractor.is_spotify_url(clean_url):
+            return extract_spotify(clean_url, options_json)
+        if _media_dl_extractor.is_radiojavan_url(clean_url):
+            return extract_radiojavan(clean_url, options_json)
+        if _media_dl_extractor.is_x_space_url(clean_url):
+            return extract_x_space(clean_url, options_json)
+
     # Step 1: Check if yt-dlp supports this task
     if is_ytdlp_supported(clean_url):
         ytdlp_res_str = extract_yt_dlp(clean_url, options_json)
@@ -862,7 +1041,7 @@ def extract_media(url, options_json="{}"):
         "items": []
     })
 
-def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_headers, media_mode="best"):
+def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_headers, media_mode="best", proxy=None, max_height=0, timeout=35, retries=3):
     """Downloads media exclusively via yt-dlp."""
     if not YTDLP_AVAILABLE:
         return False
@@ -885,15 +1064,18 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
 
         cookie_file = _prepare_cookiefile(cookies, url)
         mode = (media_mode or "best").lower()
+        height_filter = f"[height<={int(max_height)}]" if max_height and int(max_height) > 0 else ""
         if mode == "audio":
             # Never fall back to a muxed video when the user explicitly requested audio-only.
             format_selector = "bestaudio"
+        elif mode == "video_only":
+            format_selector = f"bestvideo{height_filter}/bestvideo"
         elif mode == "video":
             # Prefer a muxed result; separate video+audio is permitted only when yt-dlp can
             # merge it. Do not silently fall back to a video-only format.
-            format_selector = "best[vcodec!=none][acodec!=none]/bestvideo+bestaudio"
+            format_selector = f"best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best[vcodec!=none][acodec!=none]"
         else:
-            format_selector = "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best"
+            format_selector = f"b{height_filter}[vcodec!=none][acodec!=none]/best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best"
 
         ydl_opts = {
             "outtmpl": target_path,
@@ -902,11 +1084,11 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
             "ffmpeg_location": None,
             "prefer_ffmpeg": False,
             "format": format_selector,
-            "socket_timeout": 35,
+            "socket_timeout": int(timeout or 35),
             "geo_bypass": True,
             "nocheckcertificate": True,
-            "retries": 3,
-            "fragment_retries": 3,
+            "retries": int(retries or 3),
+            "fragment_retries": int(retries or 3),
             "http_headers": http_headers,
             "extractor_args": {
                 "youtube": {
@@ -926,6 +1108,8 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
         }
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
+        if proxy and isinstance(proxy, str) and proxy.strip():
+            ydl_opts["proxy"] = proxy.strip()
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -1024,7 +1208,7 @@ def _download_with_gallery_dl(url, target_path, referer, user_agent, cookies, ex
                     pass
     return False
 
-def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, media_mode="best"):
+def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, media_mode="best", proxy=None, max_height=0, timeout=35, retries=3):
     """
     Downloads media file using yt-dlp (primary) and gallery-dl (secondary fallback).
     Ditches all other engines/workflows.
@@ -1046,13 +1230,13 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
     ua = user_agent or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
     mode = (media_mode or "best").strip().lower()
-    if mode not in ("audio", "video"):
+    if mode not in ("audio", "video", "video_only"):
         mode = "best"
 
     # 1. Primary: yt-dlp
     ytdlp_supported = is_ytdlp_supported(media_url) or (referer and is_ytdlp_supported(referer))
     if ytdlp_supported:
-        if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers, mode):
+        if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers, mode, proxy=proxy, max_height=max_height, timeout=timeout, retries=retries):
             return True
         # For audio-only requests, do not substitute a potentially muxed/video result
         # when yt-dlp recognizes the source but cannot satisfy the requested audio format.
@@ -1071,7 +1255,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
             return True
 
     # 3. Final yt-dlp attempt for generic URLs not recognized by the support registry.
-    if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers, mode):
+    if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers, mode, proxy=proxy, max_height=max_height, timeout=timeout, retries=retries):
         return True
 
     if allow_gallery_fallback and _download_with_gallery_dl(media_url, target_path, referer, ua, cookies, extra_headers):

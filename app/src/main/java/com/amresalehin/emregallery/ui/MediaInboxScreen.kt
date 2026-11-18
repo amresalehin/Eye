@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
 import androidx.compose.ui.res.painterResource
 import com.amresalehin.emregallery.R
@@ -124,6 +125,7 @@ fun DiscoveredMediaPage(
     val filterState by DiscoveryFilterManager.filterState.collectAsState()
     var showFilterSheet by remember { mutableStateOf(false) }
     var showAddUrlDialog by remember { mutableStateOf(false) }
+    var showNetworkStatusDialog by remember { mutableStateOf(false) }
     var manualUrlInput by remember { mutableStateOf("") }
     var qrShareItem by remember { mutableStateOf<ScrapedMediaItem?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -235,6 +237,18 @@ fun DiscoveredMediaPage(
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
+
+                // 8-Platform Network Status Diagnostics button (MSC72m/media_downloader)
+                IconButton(
+                    onClick = { showNetworkStatusDialog = true },
+                    modifier = Modifier.testTag("discovered_media_network_status_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Wifi,
+                        contentDescription = "Platform Network Status",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
 
                 // Manual URL Entry button ("Add URL" from Website Media Downloader)
                 IconButton(
@@ -705,10 +719,28 @@ fun DiscoveredMediaPage(
                         OutlinedTextField(
                             value = manualUrlInput,
                             onValueChange = { manualUrlInput = it },
-                            placeholder = { Text("https://example.com/video.mp4") },
+                            placeholder = { Text("https://youtube.com/... or open.spotify.com/...") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        val detectedPlatform = remember(manualUrlInput) {
+                            com.amresalehin.emregallery.data.SupportedMediaPlatform.detect(manualUrlInput)
+                        }
+                        if (detectedPlatform != null) {
+                            val isSpace = com.amresalehin.emregallery.data.SupportedMediaPlatform.isXSpace(manualUrlInput)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                            ) {
+                                Text(
+                                    text = if (isSpace) "Detected: Twitter / X Space (HLS Audio)"
+                                    else "Detected: ${detectedPlatform.displayName} • ${detectedPlatform.contentSummary}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
                     }
                 },
                 confirmButton = {
@@ -763,6 +795,11 @@ fun DiscoveredMediaPage(
                 url = item.url,
                 onDismiss = { qrShareItem = null }
             )
+        }
+
+        // 8-Platform Network Status Dialog
+        if (showNetworkStatusDialog) {
+            NetworkStatusDialog(onDismiss = { showNetworkStatusDialog = false })
         }
     }
 }

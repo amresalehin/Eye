@@ -88,9 +88,10 @@ class ShareReceiverActivity : ComponentActivity() {
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
             val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
+            val colorTheme by preferences.colorTheme.collectAsStateWithLifecycle(initialValue = preferences.getColorThemeSync())
             val currentUrl by sharedUrlState
 
-            EmreGalleryTheme(theme = theme, surfaceColor = Color.Transparent) {
+            EmreGalleryTheme(theme = theme, colorTheme = colorTheme, surfaceColor = Color.Transparent) {
                 if (currentUrl != null) {
                     ShareReceiverScreen(
                         url = currentUrl!!,

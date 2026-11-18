@@ -28,8 +28,10 @@ class MainActivity : FragmentActivity() {
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
             val initialTheme = remember { preferences.getThemeSync() }
+            val initialColorTheme = remember { preferences.getColorThemeSync() }
             val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
-            EmreGalleryTheme(theme) {
+            val colorTheme by preferences.colorTheme.collectAsStateWithLifecycle(initialValue = initialColorTheme)
+            EmreGalleryTheme(theme = theme, colorTheme = colorTheme) {
                 GalleryApp()
             }
         }

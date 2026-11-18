@@ -98,6 +98,15 @@ fun DirectBrowserView(
     val hideBlockedElements by downloaderPrefs.hideBlockedRedirectElements.collectAsState(initial = true)
     val speedBoostEnabled by downloaderPrefs.speedBoostEnabled.collectAsState(initial = true)
     val speedBoostConnections by downloaderPrefs.speedBoostConnections.collectAsState(initial = 4)
+    val videoQuality by downloaderPrefs.videoQualityCap.collectAsState(initial = com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST)
+    val formatMode by downloaderPrefs.formatMode.collectAsState(initial = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.VIDEO_AUDIO)
+    val downloadPlaylist by downloaderPrefs.downloadPlaylist.collectAsState(initial = false)
+    val downloadSubtitles by downloaderPrefs.downloadSubtitles.collectAsState(initial = false)
+    val includeAutoSubtitles by downloaderPrefs.includeAutoSubtitles.collectAsState(initial = true)
+    val subtitleLanguages by downloaderPrefs.subtitleLanguages.collectAsState(initial = setOf("en"))
+    val proxyEnabled by downloaderPrefs.proxyEnabled.collectAsState(initial = false)
+    val proxyUrl by downloaderPrefs.proxyUrl.collectAsState(initial = "")
+    var showNetworkStatusDialog by remember { mutableStateOf(false) }
     val themePref by prefsRepo.theme.collectAsState(initial = "system")
     val systemInDark = isSystemInDarkTheme()
     val isDark = when (themePref) {
@@ -1340,7 +1349,44 @@ fun DirectBrowserView(
             speedBoostConnections = speedBoostConnections,
             onSpeedBoostConnectionsChange = { conns ->
                 coroutineScope.launch { downloaderPrefs.setSpeedBoostConnections(conns) }
+            },
+            videoQuality = videoQuality,
+            onVideoQualityChange = { q ->
+                coroutineScope.launch { downloaderPrefs.setVideoQualityCap(q) }
+            },
+            formatMode = formatMode,
+            onFormatModeChange = { mode ->
+                coroutineScope.launch { downloaderPrefs.setFormatMode(mode) }
+            },
+            downloadPlaylist = downloadPlaylist,
+            onDownloadPlaylistChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setDownloadPlaylist(enabled) }
+            },
+            downloadSubtitles = downloadSubtitles,
+            onDownloadSubtitlesChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setDownloadSubtitles(enabled) }
+            },
+            includeAutoSubtitles = includeAutoSubtitles,
+            onIncludeAutoSubtitlesChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setIncludeAutoSubtitles(enabled) }
+            },
+            subtitleLanguages = subtitleLanguages,
+            onSubtitleLanguagesChange = { langs ->
+                coroutineScope.launch { downloaderPrefs.setSubtitleLanguages(langs) }
+            },
+            proxyEnabled = proxyEnabled,
+            proxyUrl = proxyUrl,
+            onProxyConfigChange = { enabled, url ->
+                coroutineScope.launch { downloaderPrefs.setProxyConfig(enabled, url) }
+            },
+            onOpenNetworkStatus = {
+                showSettingsSheet = false
+                showNetworkStatusDialog = true
             }
         )
+    }
+
+    if (showNetworkStatusDialog) {
+        NetworkStatusDialog(onDismiss = { showNetworkStatusDialog = false })
     }
 }

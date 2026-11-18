@@ -171,9 +171,23 @@ class MediaDownloadWorker(
                 )
             ) sourceUrl else mediaUrl
 
-            val mediaMode = resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
-            // Reddit/YouTube often expose separate audio and video representations.
-            val requireAudioTrack = isVideo && (isYouTubeSource || isRedditSource)
+            val activeProxy = DownloaderPreferencesManager.getActiveProxyUrlSync(applicationContext)
+            val networkTimeout = DownloaderPreferencesManager.getNetworkTimeoutSync(applicationContext)
+            val retryCountPref = DownloaderPreferencesManager.getRetryCountSync(applicationContext)
+            val formatModePref = DownloaderPreferencesManager.getFormatModeSync(applicationContext)
+            OkHttpDownloader.configureProxy(
+                enabled = activeProxy != null,
+                proxyUrl = activeProxy.orEmpty(),
+                timeoutSeconds = networkTimeout
+            )
+
+            val mediaMode = if (isVideo && !isAudio && formatModePref == com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.VIDEO_ONLY) {
+                "video_only"
+            } else {
+                resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
+            }
+            // Reddit/YouTube often expose separate audio and video representations (skip audio check if user chose Video Only).
+            val requireAudioTrack = isVideo && (isYouTubeSource || isRedditSource) && mediaMode != "video_only"
 
             val effectiveDomain = sourceDomain.takeIf { it.isNotBlank() }
                 ?: OkHttpDownloader.extractDomain(sourceUrl.ifBlank { mediaUrl })
@@ -283,7 +297,11 @@ class MediaDownloadWorker(
                     headers = downloadHeaders,
                     cookies = cookieString,
                     domain = effectiveDomain,
-                    mediaMode = mediaMode
+                    mediaMode = mediaMode,
+                    proxy = activeProxy,
+                    maxHeight = maxVideoHeight,
+                    timeoutSeconds = networkTimeout,
+                    retries = retryCountPref
                 )
                 // If targetUrl != mediaUrl and extractor returned null, retry with mediaUrl directly
                 if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && targetUrl != mediaUrl) {
@@ -295,7 +313,11 @@ class MediaDownloadWorker(
                         headers = downloadHeaders,
                         cookies = cookieString,
                         domain = effectiveDomain,
-                        mediaMode = mediaMode
+                        mediaMode = mediaMode,
+                        proxy = activeProxy,
+                        maxHeight = maxVideoHeight,
+                        timeoutSeconds = networkTimeout,
+                        retries = retryCountPref
                     )
                 }
             }

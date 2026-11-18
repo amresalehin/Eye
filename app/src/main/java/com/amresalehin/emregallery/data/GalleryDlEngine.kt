@@ -48,7 +48,15 @@ data class GalleryDlOptions(
     val redditClientSecret: String? = null,
     val redditUsername: String? = null,
     val redditPassword: String? = null,
-    val redditRefreshToken: String? = null
+    val redditRefreshToken: String? = null,
+    val proxy: String? = null,
+    val maxHeight: Int = 0,
+    val formatMode: String = "video_audio",
+    val downloadPlaylist: Boolean = false,
+    val downloadSubtitles: Boolean = false,
+    val includeAutoSubtitles: Boolean = true,
+    val subtitleLanguages: Set<String> = setOf("en"),
+    val retries: Int = 3
 )
 
 data class GalleryDlExtractResult(
@@ -144,8 +152,20 @@ object GalleryDlEngine {
         }
     }
 
+    fun isMediaDownloaderAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_media_downloader_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking media_downloader availability", e)
+            false
+        }
+    }
+
     fun isAvailable(): Boolean {
-        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable())
+        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isMediaDownloaderAvailable())
     }
 
     /**
@@ -305,6 +325,8 @@ object GalleryDlEngine {
                 "VIDEOS" -> MediaCategory.VIDEOS
                 "AUDIO" -> MediaCategory.AUDIO
                 "STREAMS" -> MediaCategory.STREAMS
+                "SUBTITLES" -> MediaCategory.SUBTITLES
+                "FILES" -> MediaCategory.FILES
                 else -> MediaCategory.IMAGES
             }
 
@@ -404,6 +426,16 @@ object GalleryDlEngine {
                 options.redditUsername?.takeIf { it.isNotBlank() }?.let { put("reddit_username", it) }
                 options.redditPassword?.takeIf { it.isNotBlank() }?.let { put("reddit_password", it) }
                 options.redditRefreshToken?.takeIf { it.isNotBlank() }?.let { put("reddit_refresh_token", it) }
+                options.proxy?.takeIf { it.isNotBlank() }?.let { put("proxy", it) }
+                if (options.maxHeight > 0) put("max_height", options.maxHeight)
+                put("format_mode", options.formatMode)
+                if (options.downloadPlaylist) put("download_playlist", true)
+                if (options.downloadSubtitles) {
+                    put("download_subtitles", true)
+                    put("include_auto_subtitles", options.includeAutoSubtitles)
+                    put("subtitle_languages", JSONArray(options.subtitleLanguages.toList()))
+                }
+                put("retries", options.retries)
             }.toString()
 
             val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
@@ -452,6 +484,15 @@ object GalleryDlEngine {
     suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_reddit", url, options)
 
+    suspend fun extractSpotify(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_spotify", url, options)
+
+    suspend fun extractRadioJavan(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_radiojavan", url, options)
+
+    suspend fun extractXSpace(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_x_space", url, options)
+
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
 
@@ -466,7 +507,11 @@ object GalleryDlEngine {
         headers: Map<String, String>? = null,
         cookies: String? = null,
         domain: String? = null,
-        mediaMode: String = "best"
+        mediaMode: String = "best",
+        proxy: String? = null,
+        maxHeight: Int = 0,
+        timeoutSeconds: Int = 35,
+        retries: Int = 3
     ): File? = withContext(Dispatchers.IO) {
         var stagingFile: File? = null
         try {
@@ -501,7 +546,7 @@ object GalleryDlEngine {
                 val py = Python.getInstance()
                 val runner = py.getModule("gallery_dl_runner")
                 val normalizedMode = mediaMode.lowercase().takeIf {
-                    it == "audio" || it == "video"
+                    it == "audio" || it == "video" || it == "video_only"
                 } ?: "best"
                 val success = runner.callAttr(
                     "download_media_file",
@@ -511,7 +556,11 @@ object GalleryDlEngine {
                     userAgent,
                     effectiveCookies ?: "",
                     headersJson,
-                    normalizedMode
+                    normalizedMode,
+                    proxy ?: "",
+                    maxHeight,
+                    timeoutSeconds,
+                    retries
                 ).toBoolean()
 
                 if (success && stagingOutputFile.exists() && stagingOutputFile.length() > 0L) {
@@ -573,7 +622,9 @@ object GalleryDlEngine {
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
         GalleryDlSite("Vimeo", listOf("vimeo.com"), "movie"),
-        GalleryDlSite("SoundCloud", listOf("soundcloud.com"), "audiotrack"),
+        GalleryDlSite("SoundCloud", listOf("soundcloud.com", "on.soundcloud.com"), "audiotrack"),
+        GalleryDlSite("Spotify", listOf("open.spotify.com", "spotify.link", "spoti.fi"), "music_note"),
+        GalleryDlSite("RadioJavan", listOf("radiojavan.com", "play.radiojavan.com", "rj.app"), "radio"),
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),
         GalleryDlSite("Flickr", listOf("flickr.com"), "photo_camera"),
         GalleryDlSite("Tumblr", listOf("tumblr.com"), "feed"),

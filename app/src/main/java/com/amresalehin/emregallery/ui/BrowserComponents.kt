@@ -1998,7 +1998,23 @@ fun BrowserSettingsBottomSheet(
     speedBoostEnabled: Boolean = true,
     onSpeedBoostChange: ((Boolean) -> Unit)? = null,
     speedBoostConnections: Int = 4,
-    onSpeedBoostConnectionsChange: ((Int) -> Unit)? = null
+    onSpeedBoostConnectionsChange: ((Int) -> Unit)? = null,
+    videoQuality: com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality = com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST,
+    onVideoQualityChange: ((com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality) -> Unit)? = null,
+    formatMode: com.amresalehin.emregallery.data.preferences.DownloaderFormatMode = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.VIDEO_AUDIO,
+    onFormatModeChange: ((com.amresalehin.emregallery.data.preferences.DownloaderFormatMode) -> Unit)? = null,
+    downloadPlaylist: Boolean = false,
+    onDownloadPlaylistChange: ((Boolean) -> Unit)? = null,
+    downloadSubtitles: Boolean = false,
+    onDownloadSubtitlesChange: ((Boolean) -> Unit)? = null,
+    includeAutoSubtitles: Boolean = true,
+    onIncludeAutoSubtitlesChange: ((Boolean) -> Unit)? = null,
+    subtitleLanguages: Set<String> = setOf("en"),
+    onSubtitleLanguagesChange: ((Set<String>) -> Unit)? = null,
+    proxyEnabled: Boolean = false,
+    proxyUrl: String = "",
+    onProxyConfigChange: ((Boolean, String) -> Unit)? = null,
+    onOpenNetworkStatus: (() -> Unit)? = null
 ) {
     var localAdBlock by remember(adBlockEnabled) { mutableStateOf(adBlockEnabled) }
     var jsEnabled by remember { mutableStateOf(true) }
@@ -2150,6 +2166,163 @@ fun BrowserSettingsBottomSheet(
                         valueRange = 1f..16f,
                         steps = 14
                     )
+                }
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // Quality & Format Control (144p–8K, Video+Audio / Audio Only / Video Only)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                Text("Media Quality & Format", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                Text("Resolution cap (144p–8K) and track mode", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = formatMode == mode,
+                            onClick = { onFormatModeChange?.invoke(mode) },
+                            label = { Text(mode.label, fontSize = 11.sp) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.entries) { q ->
+                        FilterChip(
+                            selected = videoQuality == q,
+                            onClick = { onVideoQualityChange?.invoke(q) },
+                            label = { Text(q.id, fontSize = 11.sp) }
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // Playlist & YouTube Subtitles (Manual + Auto-Generated)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Download Entire Playlist / Album", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("Extract all tracks/videos from YouTube, Spotify & RadioJavan lists", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = downloadPlaylist,
+                    onCheckedChange = { onDownloadPlaylistChange?.invoke(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Extract Subtitles", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("Include manual & auto-generated YouTube captions (.vtt/.srt)", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = downloadSubtitles,
+                    onCheckedChange = { onDownloadSubtitlesChange?.invoke(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            if (downloadSubtitles) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Include Auto-Generated Captions", fontSize = 13.sp, color = BrowserThemeColors.textSecondary(isDark))
+                        Switch(
+                            checked = includeAutoSubtitles,
+                            onCheckedChange = { onIncludeAutoSubtitlesChange?.invoke(it) }
+                        )
+                    }
+                    val commonLangs = listOf("en", "es", "fr", "de", "ar", "fa", "hi", "ja", "ko", "zh")
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(commonLangs) { lang ->
+                            val isSelected = subtitleLanguages.contains(lang)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    val next = if (isSelected) subtitleLanguages - lang else subtitleLanguages + lang
+                                    onSubtitleLanguagesChange?.invoke(next.ifEmpty { setOf("en") })
+                                },
+                                label = { Text(lang.uppercase(), fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // SOCKS5 / HTTP Proxy & 8-Platform Network Status
+            var localProxyUrl by remember(proxyUrl) { mutableStateOf(proxyUrl) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("SOCKS5 / HTTP Proxy", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("Route extraction & downloads through a custom proxy", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = proxyEnabled,
+                    onCheckedChange = { enabled -> onProxyConfigChange?.invoke(enabled, localProxyUrl) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            if (proxyEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = localProxyUrl,
+                        onValueChange = { localProxyUrl = it },
+                        placeholder = { Text("socks5://127.0.0.1:1080 or http://host:port", fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(onClick = { onProxyConfigChange?.invoke(true, localProxyUrl) }) {
+                        Text("Apply", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (onOpenNetworkStatus != null) {
+                OutlinedButton(
+                    onClick = onOpenNetworkStatus,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Check 8-Platform Network Status")
                 }
             }
 

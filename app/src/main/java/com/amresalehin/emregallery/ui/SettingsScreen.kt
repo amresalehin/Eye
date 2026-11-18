@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -559,6 +560,11 @@ private fun AestheticThemeCard(
         else Color.White.copy(alpha = 0.65f)
     )
 
+    val context = LocalContext.current
+    val prefsRepo = remember { com.amresalehin.emregallery.data.PreferencesRepository(context) }
+    val colorThemeId by prefsRepo.colorTheme.collectAsState(initial = prefsRepo.getColorThemeSync())
+    val themeScope = rememberCoroutineScope()
+
     Surface(
         shape = RoundedCornerShape(26.dp),
         color = cardBackground,
@@ -567,6 +573,7 @@ private fun AestheticThemeCard(
             .fillMaxWidth()
             .testTag("settings_theme_card")
     ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -646,6 +653,54 @@ private fun AestheticThemeCard(
                     )
                 }
             }
+        }
+
+        // 22 Color Themes + Monochrome default (MSC72m/media_downloader instant theme switcher)
+        androidx.compose.foundation.lazy.LazyRow(
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("settings_color_theme_row")
+        ) {
+            items(
+                items = com.amresalehin.emregallery.ui.theme.AppColorTheme.entries,
+                key = { it.id }
+            ) { palette ->
+                val selected = colorThemeId.equals(palette.id, ignoreCase = true)
+                val swatchColor = if (isDark) palette.darkPrimary else palette.lightPrimary
+                Surface(
+                    onClick = {
+                        themeScope.launch { prefsRepo.setColorTheme(palette.id) }
+                    },
+                    shape = CircleShape,
+                    color = if (selected) swatchColor.copy(alpha = 0.18f) else Color.Transparent,
+                    border = BorderStroke(
+                        width = if (selected) 1.5.dp else 1.dp,
+                        color = if (selected) swatchColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .clip(CircleShape)
+                                .background(swatchColor)
+                        )
+                        Text(
+                            text = palette.label,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
         }
     }
 }

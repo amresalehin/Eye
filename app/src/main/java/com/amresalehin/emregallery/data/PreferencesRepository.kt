@@ -39,6 +39,10 @@ class PreferencesRepository(context: Context) {
     val theme: Flow<String> get() = uiPrefs.theme
     suspend fun setTheme(value: String) = uiPrefs.setTheme(value)
 
+    fun getColorThemeSync(): String = uiPrefs.getColorThemeSync()
+    val colorTheme: Flow<String> get() = uiPrefs.colorTheme
+    suspend fun setColorTheme(value: String) = uiPrefs.setColorTheme(value)
+
     val sortOrder: Flow<String> get() = uiPrefs.sortOrder
     suspend fun setSortOrder(value: String) = uiPrefs.setSortOrder(value)
 

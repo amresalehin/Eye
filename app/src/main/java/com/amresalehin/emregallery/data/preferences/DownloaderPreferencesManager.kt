@@ -22,7 +22,9 @@ enum class DownloaderVideoQuality(val id: String, val label: String, val maxHeig
     Q1080P("1080P", "1080p Full HD", 1080),
     Q720P("720P", "720p HD", 720),
     Q480P("480P", "480p SD", 480),
-    Q360P("360P", "360p Data Saver", 360);
+    Q360P("360P", "360p Data Saver", 360),
+    Q240P("240P", "240p Low", 240),
+    Q144P("144P", "144p Ultra Low", 144);
 
     companion object {
         fun fromId(id: String?): DownloaderVideoQuality =
@@ -42,6 +44,17 @@ data class RedditDlConfig(
     val password: String = "",
     val refreshToken: String = ""
 )
+
+enum class DownloaderFormatMode(val id: String, val label: String) {
+    VIDEO_AUDIO("video_audio", "Video + Audio"),
+    AUDIO_ONLY("audio_only", "Audio Only"),
+    VIDEO_ONLY("video_only", "Video Only");
+
+    companion object {
+        fun fromId(id: String?): DownloaderFormatMode =
+            entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: VIDEO_AUDIO
+    }
+}
 
 enum class DownloaderSubfolderMode(val id: String, val label: String, val description: String) {
     FLAT("FLAT", "Single Folder", "Save all files directly in Downloads/Emre Gallery"),
@@ -225,6 +238,48 @@ class DownloaderPreferencesManager(private val context: Context) {
         prefs[KEY_AD_BLOCK_ENABLED] ?: syncPrefs.getBoolean(PREF_AD_BLOCK_ENABLED, true)
     }.distinctUntilChanged()
 
+    // MSC72m/media_downloader settings (Format Mode, Subtitles, Playlists, SOCKS5/HTTP Proxy, Retries/Timeout)
+    val formatMode: Flow<DownloaderFormatMode> = appContext.galleryDataStore.data.map { prefs ->
+        val raw = prefs[KEY_FORMAT_MODE] ?: syncPrefs.getString(PREF_FORMAT_MODE, null)
+        if (raw != null) DownloaderFormatMode.fromId(raw)
+        else if (prefs[KEY_AUDIO_ONLY] ?: syncPrefs.getBoolean(PREF_AUDIO_ONLY, false)) DownloaderFormatMode.AUDIO_ONLY
+        else DownloaderFormatMode.VIDEO_AUDIO
+    }.distinctUntilChanged()
+
+    val downloadPlaylist: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_DOWNLOAD_PLAYLIST] ?: syncPrefs.getBoolean(PREF_DOWNLOAD_PLAYLIST, false)
+    }.distinctUntilChanged()
+
+    val downloadSubtitles: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_DOWNLOAD_SUBTITLES] ?: syncPrefs.getBoolean(PREF_DOWNLOAD_SUBTITLES, false)
+    }.distinctUntilChanged()
+
+    val includeAutoSubtitles: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_INCLUDE_AUTO_SUBTITLES] ?: syncPrefs.getBoolean(PREF_INCLUDE_AUTO_SUBTITLES, true)
+    }.distinctUntilChanged()
+
+    val subtitleLanguages: Flow<Set<String>> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_SUBTITLE_LANGUAGES]
+            ?: syncPrefs.getStringSet(PREF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES)
+            ?: DEFAULT_SUBTITLE_LANGUAGES
+    }.distinctUntilChanged()
+
+    val proxyEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_PROXY_ENABLED] ?: syncPrefs.getBoolean(PREF_PROXY_ENABLED, false)
+    }.distinctUntilChanged()
+
+    val proxyUrl: Flow<String> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_PROXY_URL] ?: syncPrefs.getString(PREF_PROXY_URL, "") ?: ""
+    }.distinctUntilChanged()
+
+    val networkTimeoutSeconds: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_NETWORK_TIMEOUT] ?: syncPrefs.getInt(PREF_NETWORK_TIMEOUT, 30)).coerceIn(10, 120)
+    }.distinctUntilChanged()
+
+    val retryCount: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_RETRY_COUNT] ?: syncPrefs.getInt(PREF_RETRY_COUNT, 3)).coerceIn(1, 10)
+    }.distinctUntilChanged()
+
     suspend fun setSpeedBoostEnabled(enabled: Boolean) {
         syncPrefs.edit().putBoolean(PREF_SPEED_BOOST_ENABLED, enabled).apply()
         appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST_ENABLED] = enabled }
@@ -255,6 +310,74 @@ class DownloaderPreferencesManager(private val context: Context) {
     suspend fun setAdBlockEnabled(enabled: Boolean) {
         syncPrefs.edit().putBoolean(PREF_AD_BLOCK_ENABLED, enabled).apply()
         appContext.galleryDataStore.edit { it[KEY_AD_BLOCK_ENABLED] = enabled }
+    }
+
+    suspend fun setFormatMode(mode: DownloaderFormatMode) {
+        val isAudio = mode == DownloaderFormatMode.AUDIO_ONLY
+        syncPrefs.edit()
+            .putString(PREF_FORMAT_MODE, mode.id)
+            .putBoolean(PREF_AUDIO_ONLY, isAudio)
+            .apply()
+        appContext.galleryDataStore.edit {
+            it[KEY_FORMAT_MODE] = mode.id
+            it[KEY_AUDIO_ONLY] = isAudio
+        }
+    }
+
+    suspend fun setDownloadPlaylist(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_DOWNLOAD_PLAYLIST, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_DOWNLOAD_PLAYLIST] = enabled }
+    }
+
+    suspend fun setDownloadSubtitles(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_DOWNLOAD_SUBTITLES, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_DOWNLOAD_SUBTITLES] = enabled }
+    }
+
+    suspend fun setIncludeAutoSubtitles(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_INCLUDE_AUTO_SUBTITLES, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_INCLUDE_AUTO_SUBTITLES] = enabled }
+    }
+
+    suspend fun setSubtitleLanguages(languages: Set<String>) {
+        val clean = languages.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotBlank() }.toSet()
+            .ifEmpty { DEFAULT_SUBTITLE_LANGUAGES }
+        syncPrefs.edit().putStringSet(PREF_SUBTITLE_LANGUAGES, clean).apply()
+        appContext.galleryDataStore.edit { it[KEY_SUBTITLE_LANGUAGES] = clean }
+    }
+
+    suspend fun setProxyConfig(enabled: Boolean, url: String) {
+        val cleanUrl = url.trim()
+        syncPrefs.edit()
+            .putBoolean(PREF_PROXY_ENABLED, enabled)
+            .putString(PREF_PROXY_URL, cleanUrl)
+            .apply()
+        appContext.galleryDataStore.edit {
+            it[KEY_PROXY_ENABLED] = enabled
+            it[KEY_PROXY_URL] = cleanUrl
+        }
+        com.amresalehin.emregallery.data.OkHttpDownloader.configureProxy(
+            enabled = enabled,
+            proxyUrl = cleanUrl,
+            timeoutSeconds = getNetworkTimeoutSync(appContext)
+        )
+    }
+
+    suspend fun setNetworkTimeoutSeconds(seconds: Int) {
+        val clamped = seconds.coerceIn(10, 120)
+        syncPrefs.edit().putInt(PREF_NETWORK_TIMEOUT, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_NETWORK_TIMEOUT] = clamped }
+        com.amresalehin.emregallery.data.OkHttpDownloader.configureProxy(
+            enabled = isProxyEnabledSync(appContext),
+            proxyUrl = getProxyUrlSync(appContext),
+            timeoutSeconds = clamped
+        )
+    }
+
+    suspend fun setRetryCount(retries: Int) {
+        val clamped = retries.coerceIn(1, 10)
+        syncPrefs.edit().putInt(PREF_RETRY_COUNT, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_RETRY_COUNT] = clamped }
     }
 
     suspend fun setRedditConfig(config: RedditDlConfig) {
@@ -311,6 +434,16 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_REDIRECT_TAPS_TO_OPEN = "wmd_redirect_taps_to_open"
         private const val PREF_HIDE_BLOCKED_ELEMENTS = "wmd_hide_blocked_elements"
         private const val PREF_AD_BLOCK_ENABLED = "wmd_ad_block_enabled"
+        private const val PREF_FORMAT_MODE = "msc_format_mode"
+        private const val PREF_DOWNLOAD_PLAYLIST = "msc_download_playlist"
+        private const val PREF_DOWNLOAD_SUBTITLES = "msc_download_subtitles"
+        private const val PREF_INCLUDE_AUTO_SUBTITLES = "msc_include_auto_subtitles"
+        private const val PREF_SUBTITLE_LANGUAGES = "msc_subtitle_languages"
+        private const val PREF_PROXY_ENABLED = "msc_proxy_enabled"
+        private const val PREF_PROXY_URL = "msc_proxy_url"
+        private const val PREF_NETWORK_TIMEOUT = "msc_network_timeout"
+        private const val PREF_RETRY_COUNT = "msc_retry_count"
+        val DEFAULT_SUBTITLE_LANGUAGES = setOf("en")
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -334,6 +467,59 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_REDIRECT_TAPS_TO_OPEN = intPreferencesKey(PREF_REDIRECT_TAPS_TO_OPEN)
         private val KEY_HIDE_BLOCKED_ELEMENTS = booleanPreferencesKey(PREF_HIDE_BLOCKED_ELEMENTS)
         private val KEY_AD_BLOCK_ENABLED = booleanPreferencesKey(PREF_AD_BLOCK_ENABLED)
+        private val KEY_FORMAT_MODE = stringPreferencesKey(PREF_FORMAT_MODE)
+        private val KEY_DOWNLOAD_PLAYLIST = booleanPreferencesKey(PREF_DOWNLOAD_PLAYLIST)
+        private val KEY_DOWNLOAD_SUBTITLES = booleanPreferencesKey(PREF_DOWNLOAD_SUBTITLES)
+        private val KEY_INCLUDE_AUTO_SUBTITLES = booleanPreferencesKey(PREF_INCLUDE_AUTO_SUBTITLES)
+        private val KEY_SUBTITLE_LANGUAGES = stringSetPreferencesKey(PREF_SUBTITLE_LANGUAGES)
+        private val KEY_PROXY_ENABLED = booleanPreferencesKey(PREF_PROXY_ENABLED)
+        private val KEY_PROXY_URL = stringPreferencesKey(PREF_PROXY_URL)
+        private val KEY_NETWORK_TIMEOUT = intPreferencesKey(PREF_NETWORK_TIMEOUT)
+        private val KEY_RETRY_COUNT = intPreferencesKey(PREF_RETRY_COUNT)
+
+        fun getFormatModeSync(context: Context): DownloaderFormatMode {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = sp.getString(PREF_FORMAT_MODE, null)
+            return if (raw != null) DownloaderFormatMode.fromId(raw)
+            else if (sp.getBoolean(PREF_AUDIO_ONLY, false)) DownloaderFormatMode.AUDIO_ONLY
+            else DownloaderFormatMode.VIDEO_AUDIO
+        }
+
+        fun isDownloadPlaylistSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_DOWNLOAD_PLAYLIST, false)
+
+        fun isDownloadSubtitlesSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_DOWNLOAD_SUBTITLES, false)
+
+        fun isIncludeAutoSubtitlesSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_INCLUDE_AUTO_SUBTITLES, true)
+
+        fun getSubtitleLanguagesSync(context: Context): Set<String> =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getStringSet(PREF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES)
+                ?.takeIf { it.isNotEmpty() } ?: DEFAULT_SUBTITLE_LANGUAGES
+
+        fun isProxyEnabledSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_PROXY_ENABLED, false)
+
+        fun getProxyUrlSync(context: Context): String =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(PREF_PROXY_URL, "") ?: ""
+
+        fun getActiveProxyUrlSync(context: Context): String? =
+            if (isProxyEnabledSync(context)) getProxyUrlSync(context).trim().takeIf { it.isNotBlank() } else null
+
+        fun getNetworkTimeoutSync(context: Context): Int =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(PREF_NETWORK_TIMEOUT, 30).coerceIn(10, 120)
+
+        fun getRetryCountSync(context: Context): Int =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(PREF_RETRY_COUNT, 3).coerceIn(1, 10)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext

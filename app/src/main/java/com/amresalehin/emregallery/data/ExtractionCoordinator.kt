@@ -107,6 +107,14 @@ class ExtractionCoordinator(private val context: Context) {
             }
 
             try {
+                val activeProxy = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getActiveProxyUrlSync(context)
+                val networkTimeout = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getNetworkTimeoutSync(context)
+                OkHttpDownloader.configureProxy(
+                    enabled = activeProxy != null,
+                    proxyUrl = activeProxy.orEmpty(),
+                    timeoutSeconds = networkTimeout
+                )
+
                 // Step 1: OkHttp Direct-Media Fast Path Probe
                 updateStatus("Probing URL headers with OkHttp...", ExtractionPhase.DIRECT_MEDIA)
                 val directProbe = OkHttpDownloader.probeDirectMedia(requestContext.url)
@@ -155,6 +163,7 @@ class ExtractionCoordinator(private val context: Context) {
                 val redditPrefs = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRedditConfigSync(context)
                 val options = GalleryDlOptions(
                     cookies = cookies,
+                    timeoutSeconds = networkTimeout,
                     limit = redditPrefs.limit,
                     afterDate = redditPrefs.afterDate.takeIf { it.isNotBlank() },
                     beforeDate = redditPrefs.beforeDate.takeIf { it.isNotBlank() },
@@ -164,7 +173,15 @@ class ExtractionCoordinator(private val context: Context) {
                     redditClientSecret = redditPrefs.clientSecret.takeIf { it.isNotBlank() },
                     redditUsername = redditPrefs.username.takeIf { it.isNotBlank() },
                     redditPassword = redditPrefs.password.takeIf { it.isNotBlank() },
-                    redditRefreshToken = redditPrefs.refreshToken.takeIf { it.isNotBlank() }
+                    redditRefreshToken = redditPrefs.refreshToken.takeIf { it.isNotBlank() },
+                    proxy = activeProxy,
+                    maxHeight = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight,
+                    formatMode = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getFormatModeSync(context).id,
+                    downloadPlaylist = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isDownloadPlaylistSync(context),
+                    downloadSubtitles = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isDownloadSubtitlesSync(context),
+                    includeAutoSubtitles = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isIncludeAutoSubtitlesSync(context),
+                    subtitleLanguages = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getSubtitleLanguagesSync(context),
+                    retries = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRetryCountSync(context)
                 )
 
                 // Launch concurrent discovery jobs:
@@ -177,6 +194,10 @@ class ExtractionCoordinator(private val context: Context) {
                     lowerRequestUrl.contains("reddit.com") ||
                     lowerRequestUrl.contains("redd.it") ||
                     lowerRequestUrl.contains("redgifs.com")
+                val detectedPlatform = SupportedMediaPlatform.detect(requestContext.url)
+                val isSpotifyTarget = detectedPlatform == SupportedMediaPlatform.SPOTIFY
+                val isRadioJavanTarget = detectedPlatform == SupportedMediaPlatform.RADIOJAVAN
+                val isXSpaceTarget = SupportedMediaPlatform.isXSpace(requestContext.url)
 
                 val redditDlJob = if (isRedditTarget) {
                     launch(Dispatchers.IO) {
@@ -207,6 +228,57 @@ class ExtractionCoordinator(private val context: Context) {
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent Instaloader error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val spotifyJob = if (isSpotifyTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractSpotify(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Matched ${res.items.size} Spotify audio track(s) via YouTube")
+                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                                    lastDiagnosticError = res.errorMessage
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent Spotify error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val radioJavanJob = if (isRadioJavanTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractRadioJavan(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} RadioJavan item(s)")
+                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                                    lastDiagnosticError = res.errorMessage
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent RadioJavan error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val xSpaceJob = if (isXSpaceTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractXSpace(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Resolved Twitter/X Space HLS audio stream")
+                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                                    lastDiagnosticError = res.errorMessage
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent X Space error", e)
                             }
                         }
                     }
@@ -263,6 +335,9 @@ class ExtractionCoordinator(private val context: Context) {
                 // Await all concurrent discovery channels
                 redditDlJob?.join()
                 instaloaderJob?.join()
+                spotifyJob?.join()
+                radioJavanJob?.join()
+                xSpaceJob?.join()
                 ytdlpJob.join()
                 galleryDlJob.join()
                 browserJob.join()
@@ -449,7 +524,8 @@ class ExtractionCoordinator(private val context: Context) {
         fun isVideoPlatformUrl(lower: String): Boolean {
             val videoHosts = listOf(
                 "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel", "instagram.com/reels/"
+                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel", "instagram.com/reels/",
+                "open.spotify.com", "spotify.link", "spoti.fi", "radiojavan.com", "rj.app", "x.com/i/spaces/", "twitter.com/i/spaces/"
             )
             return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
         }

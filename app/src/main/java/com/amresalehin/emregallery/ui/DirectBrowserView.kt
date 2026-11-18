@@ -106,6 +106,11 @@ fun DirectBrowserView(
     val subtitleLanguages by downloaderPrefs.subtitleLanguages.collectAsState(initial = setOf("en"))
     val proxyEnabled by downloaderPrefs.proxyEnabled.collectAsState(initial = false)
     val proxyUrl by downloaderPrefs.proxyUrl.collectAsState(initial = "")
+    val recursiveCrawlEnabled by downloaderPrefs.recursiveCrawlEnabled.collectAsState(initial = false)
+    val recursiveCrawlMaxDepth by downloaderPrefs.recursiveCrawlMaxDepth.collectAsState(initial = 3)
+    val recursiveCrawlMaxPages by downloaderPrefs.recursiveCrawlMaxPages.collectAsState(initial = 20)
+    val recursiveCrawlSameDomainOnly by downloaderPrefs.recursiveCrawlSameDomainOnly.collectAsState(initial = true)
+    val saveCrawlSitemap by downloaderPrefs.saveCrawlSitemap.collectAsState(initial = true)
     var showNetworkStatusDialog by remember { mutableStateOf(false) }
     val themePref by prefsRepo.theme.collectAsState(initial = "system")
     val systemInDark = isSystemInDarkTheme()
@@ -1382,6 +1387,26 @@ fun DirectBrowserView(
             onOpenNetworkStatus = {
                 showSettingsSheet = false
                 showNetworkStatusDialog = true
+            },
+            recursiveCrawlEnabled = recursiveCrawlEnabled,
+            onRecursiveCrawlEnabledChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setRecursiveCrawlEnabled(enabled) }
+            },
+            recursiveCrawlMaxDepth = recursiveCrawlMaxDepth,
+            onRecursiveCrawlMaxDepthChange = { depth ->
+                coroutineScope.launch { downloaderPrefs.setRecursiveCrawlMaxDepth(depth) }
+            },
+            recursiveCrawlMaxPages = recursiveCrawlMaxPages,
+            onRecursiveCrawlMaxPagesChange = { pages ->
+                coroutineScope.launch { downloaderPrefs.setRecursiveCrawlMaxPages(pages) }
+            },
+            recursiveCrawlSameDomainOnly = recursiveCrawlSameDomainOnly,
+            onRecursiveCrawlSameDomainOnlyChange = { sameDomain ->
+                coroutineScope.launch { downloaderPrefs.setRecursiveCrawlSameDomainOnly(sameDomain) }
+            },
+            saveCrawlSitemap = saveCrawlSitemap,
+            onSaveCrawlSitemapChange = { save ->
+                coroutineScope.launch { downloaderPrefs.setSaveCrawlSitemap(save) }
             }
         )
     }

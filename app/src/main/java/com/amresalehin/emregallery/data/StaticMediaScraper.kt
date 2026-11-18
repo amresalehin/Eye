@@ -140,7 +140,7 @@ class StaticMediaScraper {
         }
     }
 
-    private fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
+    internal fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
         val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
 
         fun addCandidate(

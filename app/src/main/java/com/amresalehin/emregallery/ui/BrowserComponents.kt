@@ -2014,7 +2014,17 @@ fun BrowserSettingsBottomSheet(
     proxyEnabled: Boolean = false,
     proxyUrl: String = "",
     onProxyConfigChange: ((Boolean, String) -> Unit)? = null,
-    onOpenNetworkStatus: (() -> Unit)? = null
+    onOpenNetworkStatus: (() -> Unit)? = null,
+    recursiveCrawlEnabled: Boolean = false,
+    onRecursiveCrawlEnabledChange: ((Boolean) -> Unit)? = null,
+    recursiveCrawlMaxDepth: Int = 3,
+    onRecursiveCrawlMaxDepthChange: ((Int) -> Unit)? = null,
+    recursiveCrawlMaxPages: Int = 20,
+    onRecursiveCrawlMaxPagesChange: ((Int) -> Unit)? = null,
+    recursiveCrawlSameDomainOnly: Boolean = true,
+    onRecursiveCrawlSameDomainOnlyChange: ((Boolean) -> Unit)? = null,
+    saveCrawlSitemap: Boolean = true,
+    onSaveCrawlSitemapChange: ((Boolean) -> Unit)? = null
 ) {
     var localAdBlock by remember(adBlockEnabled) { mutableStateOf(adBlockEnabled) }
     var jsEnabled by remember { mutableStateOf(true) }
@@ -2323,6 +2333,82 @@ fun BrowserSettingsBottomSheet(
                     Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Check 8-Platform Network Status")
+                }
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // Recursive Site Crawler (mitchlinDEV/media-scraper)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Recursive Site Crawl", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("BFS crawl linked pages for photos & videos with sitemap & CAPTCHA detection", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = recursiveCrawlEnabled,
+                    onCheckedChange = { enabled -> onRecursiveCrawlEnabledChange?.invoke(enabled) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            if (recursiveCrawlEnabled) {
+                Text("Crawl Depth (Levels)", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textSecondary(isDark))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(1, 2, 3, 4, 5).forEach { depth ->
+                        FilterChip(
+                            selected = recursiveCrawlMaxDepth == depth,
+                            onClick = { onRecursiveCrawlMaxDepthChange?.invoke(depth) },
+                            label = { Text("${depth}L", fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                Text("Max Pages Per Crawl", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textSecondary(isDark))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(10, 20, 50, 100).forEach { pages ->
+                        FilterChip(
+                            selected = recursiveCrawlMaxPages == pages,
+                            onClick = { onRecursiveCrawlMaxPagesChange?.invoke(pages) },
+                            label = { Text("$pages", fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Stay on same domain only", fontSize = 13.sp, color = BrowserThemeColors.textPrimary(isDark))
+                    Switch(
+                        checked = recursiveCrawlSameDomainOnly,
+                        onCheckedChange = { onRecursiveCrawlSameDomainOnlyChange?.invoke(it) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Save visited URLs to sitemap.txt", fontSize = 13.sp, color = BrowserThemeColors.textPrimary(isDark))
+                    Switch(
+                        checked = saveCrawlSitemap,
+                        onCheckedChange = { onSaveCrawlSitemapChange?.invoke(it) }
+                    )
                 }
             }
 

@@ -63,6 +63,13 @@ except Exception:
     _media_dl_extractor = None
     MEDIA_DL_AVAILABLE = False
 
+try:
+    import media_scraper_extractor as _media_scraper_extractor
+    MEDIA_SCRAPER_AVAILABLE = True
+except Exception:
+    _media_scraper_extractor = None
+    MEDIA_SCRAPER_AVAILABLE = False
+
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
     {"name": "Imgur", "domains": ["imgur.com", "i.imgur.com"], "icon": "image"},
@@ -81,8 +88,9 @@ def get_engine_status():
     reddit_ver = _reddit_extractor.get_reddit_dl_version() if REDDIT_DL_AVAILABLE else "N/A"
     pin_ver = _pinterest_extractor.get_pinterest_dl_version() if PINTEREST_DL_AVAILABLE and hasattr(_pinterest_extractor, "get_pinterest_dl_version") else "N/A"
     media_dl_ver = _media_dl_extractor.get_version() if MEDIA_DL_AVAILABLE else "N/A"
-    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE or REDDIT_DL_AVAILABLE or PINTEREST_DL_AVAILABLE or MEDIA_DL_AVAILABLE
-    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver} / reddit-dl {reddit_ver} / pinterest-dl {pin_ver} / media-dl {media_dl_ver}" if available else "Python Engine Unavailable"
+    media_scraper_ver = _media_scraper_extractor.get_version() if MEDIA_SCRAPER_AVAILABLE else "N/A"
+    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE or INSTALOADER_AVAILABLE or REDDIT_DL_AVAILABLE or PINTEREST_DL_AVAILABLE or MEDIA_DL_AVAILABLE or MEDIA_SCRAPER_AVAILABLE
+    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver} / instaloader {ig_ver} / reddit-dl {reddit_ver} / pinterest-dl {pin_ver} / media-dl {media_dl_ver} / media-scraper {media_scraper_ver}" if available else "Python Engine Unavailable"
 
     return json.dumps({
         "available": available,
@@ -100,6 +108,8 @@ def get_engine_status():
         "pinterest_dl_version": pin_ver,
         "media_dl_available": MEDIA_DL_AVAILABLE,
         "media_dl_version": media_dl_ver,
+        "media_scraper_available": MEDIA_SCRAPER_AVAILABLE,
+        "media_scraper_version": media_scraper_ver,
         "ffmpeg_available": True,
         "ffmpeg_kit_installed": True,
         "ffmpeg_version": "8.1.9",
@@ -173,6 +183,40 @@ def extract_x_space(url, options_json="{}"):
     if not MEDIA_DL_AVAILABLE or _media_dl_extractor is None:
         return json.dumps({"success": False, "engine": "x_spaces", "error": "X Spaces extractor unavailable", "items": []})
     return _media_dl_extractor.extract_x_space(url, options_json)
+
+def is_media_scraper_available():
+    """Returns True if the mitchlinDEV/media-scraper Python adapter is available."""
+    return bool(MEDIA_SCRAPER_AVAILABLE)
+
+def scrape_site_recursive(url, options_json="{}"):
+    """Recursively crawls a site using mitchlinDEV/media-scraper BFS crawling."""
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper", "error": "media-scraper extractor unavailable", "items": []})
+    return _media_scraper_extractor.scrape_recursive(url, options_json)
+
+def extract_tumblr(url, options_json="{}"):
+    """Extracts Tumblr blog/post media via lightweight HTTP API (m_scraper/rq)."""
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper-tumblr", "error": "Tumblr extractor unavailable", "items": []})
+    return _media_scraper_extractor.extract_tumblr(url, options_json)
+
+def extract_pixiv(url, options_json="{}"):
+    """Extracts Pixiv artwork pages via Ajax API with Referer headers (m_scraper/rq)."""
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper-pixiv", "error": "Pixiv extractor unavailable", "items": []})
+    return _media_scraper_extractor.extract_pixiv(url, options_json)
+
+def extract_twitter_media_scraper(url, options_json="{}"):
+    """Extracts Twitter/X photos, MP4s, and highest-resolution HLS (.m3u8) streams."""
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper-twitter", "error": "Twitter media-scraper unavailable", "items": []})
+    return _media_scraper_extractor.extract_twitter_video(url, options_json)
+
+def extract_facebook_media_scraper(url, options_json="{}"):
+    """Extracts public Facebook HD/SD video and OpenGraph media."""
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper-facebook", "error": "Facebook media-scraper unavailable", "items": []})
+    return _media_scraper_extractor.extract_facebook(url, options_json)
 
 def get_supported_sites(options_json="{}"):
     """

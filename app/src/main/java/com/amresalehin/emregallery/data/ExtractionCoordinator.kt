@@ -198,6 +198,13 @@ class ExtractionCoordinator(private val context: Context) {
                 val isSpotifyTarget = detectedPlatform == SupportedMediaPlatform.SPOTIFY
                 val isRadioJavanTarget = detectedPlatform == SupportedMediaPlatform.RADIOJAVAN
                 val isXSpaceTarget = SupportedMediaPlatform.isXSpace(requestContext.url)
+                val isTumblrTarget = lowerRequestUrl.contains("tumblr.com")
+                val isPixivTarget = lowerRequestUrl.contains("pixiv.net")
+                val isFacebookTarget = lowerRequestUrl.contains("facebook.com") || lowerRequestUrl.contains("fb.watch")
+                val isTwitterStatusTarget = (lowerRequestUrl.contains("twitter.com/") || lowerRequestUrl.contains("x.com/")) && lowerRequestUrl.contains("/status/")
+                val recursiveCrawlEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isRecursiveCrawlEnabledSync(context)
+                val recursiveCrawlConfig = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRecursiveCrawlConfigSync(context)
+                var captchaChallengeUrl: String? = null
 
                 val redditDlJob = if (isRedditTarget) {
                     launch(Dispatchers.IO) {
@@ -284,6 +291,105 @@ class ExtractionCoordinator(private val context: Context) {
                     }
                 } else null
 
+                val tumblrJob = if (isTumblrTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaScraperAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractTumblr(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Tumblr item(s) via media-scraper")
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent Tumblr media-scraper error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val pixivJob = if (isPixivTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaScraperAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractPixiv(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Pixiv artwork page(s) via media-scraper")
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent Pixiv media-scraper error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val twitterScraperJob = if (isTwitterStatusTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaScraperAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractTwitterMediaScraper(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Twitter/X media item(s) via media-scraper")
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent Twitter media-scraper error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val facebookScraperJob = if (isFacebookTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isMediaScraperAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractFacebookMediaScraper(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Facebook item(s) via media-scraper")
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent Facebook media-scraper error", e)
+                            }
+                        }
+                    }
+                } else null
+
+                val recursiveCrawlJob = if (recursiveCrawlEnabled && expectation != TargetMediaExpectation.VIDEO_OR_STREAM) {
+                    launch(Dispatchers.IO) {
+                        try {
+                            val crawler = RecursiveSiteCrawler()
+                            val crawlRes = crawler.crawl(
+                                startUrl = requestContext.url,
+                                config = recursiveCrawlConfig,
+                                context = context,
+                                onProgress = { p ->
+                                    launch {
+                                        updateStatus(
+                                            "Recursive crawl (${p.pagesCrawled}/${p.maxPages} pages, depth ${p.currentDepth}): ${p.mediaDiscovered} media",
+                                            ExtractionPhase.STATIC_HTML
+                                        )
+                                    }
+                                },
+                                onMediaDiscovered = { discovered ->
+                                    launch { updateItems(discovered) }
+                                }
+                            )
+                            if (crawlRes.items.isNotEmpty()) {
+                                updateItems(
+                                    crawlRes.items,
+                                    title = crawlRes.pageTitle,
+                                    msg = "Recursive crawl discovered ${crawlRes.items.size} media across ${crawlRes.pagesCrawled} page(s)"
+                                )
+                            }
+                            if (crawlRes.captchaDetected) {
+                                captchaChallengeUrl = crawlRes.captchaUrl ?: requestContext.url
+                                if (lastDiagnosticError == null) {
+                                    lastDiagnosticError = crawlRes.errorMessage
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w("ExtractionCoordinator", "Concurrent RecursiveSiteCrawler error", e)
+                        }
+                    }
+                } else null
+
                 val ytdlpJob = launch(Dispatchers.IO) {
                     if (GalleryDlEngine.isYtDlpAvailable()) {
                         try {
@@ -338,6 +444,11 @@ class ExtractionCoordinator(private val context: Context) {
                 spotifyJob?.join()
                 radioJavanJob?.join()
                 xSpaceJob?.join()
+                tumblrJob?.join()
+                pixivJob?.join()
+                twitterScraperJob?.join()
+                facebookScraperJob?.join()
+                recursiveCrawlJob?.join()
                 ytdlpJob.join()
                 galleryDlJob.join()
                 browserJob.join()
@@ -347,6 +458,17 @@ class ExtractionCoordinator(private val context: Context) {
                 val isSupportedByEngines = supportInfo.isSupported
                 val needsCookiesOrBot = BotDetectionMitigator.indicatesCookiesOrBotVerificationNeeded(lastDiagnosticError) ||
                         (isSupportedByEngines && itemsMap.isEmpty() && cookies.isNullOrBlank())
+
+                if (captchaChallengeUrl != null && itemsMap.isEmpty()) {
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        requiresSignIn = true,
+                        signInUrl = captchaChallengeUrl,
+                        statusMessage = "CAPTCHA verification required for $domain",
+                        errorMessage = "CAPTCHA detected on $domain. Complete verification in the browser to continue."
+                    )
+                    return@launch
+                }
 
                 if (needsSignInDirect && itemsMap.isEmpty()) {
                     _state.value = _state.value.copy(
@@ -534,7 +656,7 @@ class ExtractionCoordinator(private val context: Context) {
             val galleryHosts = listOf(
                 "reddit.com", "redd.it", "imgur.com", "pinterest.com", "pin.it",
                 "artstation.com", "deviantart.com", "flickr.com", "instagram.com/p/",
-                "instagram.com/tv/"
+                "instagram.com/tv/", "tumblr.com", "pixiv.net"
             )
             return galleryHosts.any { lower.contains(it) }
         }

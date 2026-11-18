@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.amresalehin.emregallery.data.BrowserSearchEngine
+import com.amresalehin.emregallery.data.RecursiveCrawlConfig
 import com.amresalehin.emregallery.data.VaultCrypto
 import com.amresalehin.emregallery.data.galleryDataStore
 import kotlinx.coroutines.flow.Flow
@@ -280,6 +281,54 @@ class DownloaderPreferencesManager(private val context: Context) {
         (prefs[KEY_RETRY_COUNT] ?: syncPrefs.getInt(PREF_RETRY_COUNT, 3)).coerceIn(1, 10)
     }.distinctUntilChanged()
 
+    // mitchlinDEV/media-scraper recursive BFS site crawler settings
+    val recursiveCrawlEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_RECURSIVE_CRAWL_ENABLED] ?: syncPrefs.getBoolean(PREF_RECURSIVE_CRAWL_ENABLED, false)
+    }.distinctUntilChanged()
+
+    val recursiveCrawlMaxDepth: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_RECURSIVE_CRAWL_MAX_DEPTH] ?: syncPrefs.getInt(PREF_RECURSIVE_CRAWL_MAX_DEPTH, 3)).coerceIn(1, 5)
+    }.distinctUntilChanged()
+
+    val recursiveCrawlMaxPages: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_RECURSIVE_CRAWL_MAX_PAGES] ?: syncPrefs.getInt(PREF_RECURSIVE_CRAWL_MAX_PAGES, 20)).coerceIn(5, 100)
+    }.distinctUntilChanged()
+
+    val recursiveCrawlSameDomainOnly: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_RECURSIVE_CRAWL_SAME_DOMAIN] ?: syncPrefs.getBoolean(PREF_RECURSIVE_CRAWL_SAME_DOMAIN, true)
+    }.distinctUntilChanged()
+
+    val saveCrawlSitemap: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_SAVE_CRAWL_SITEMAP] ?: syncPrefs.getBoolean(PREF_SAVE_CRAWL_SITEMAP, true)
+    }.distinctUntilChanged()
+
+    suspend fun setRecursiveCrawlEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_RECURSIVE_CRAWL_ENABLED, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL_ENABLED] = enabled }
+    }
+
+    suspend fun setRecursiveCrawlMaxDepth(depth: Int) {
+        val clamped = depth.coerceIn(1, 5)
+        syncPrefs.edit().putInt(PREF_RECURSIVE_CRAWL_MAX_DEPTH, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL_MAX_DEPTH] = clamped }
+    }
+
+    suspend fun setRecursiveCrawlMaxPages(pages: Int) {
+        val clamped = pages.coerceIn(5, 100)
+        syncPrefs.edit().putInt(PREF_RECURSIVE_CRAWL_MAX_PAGES, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL_MAX_PAGES] = clamped }
+    }
+
+    suspend fun setRecursiveCrawlSameDomainOnly(sameDomain: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_RECURSIVE_CRAWL_SAME_DOMAIN, sameDomain).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL_SAME_DOMAIN] = sameDomain }
+    }
+
+    suspend fun setSaveCrawlSitemap(save: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_SAVE_CRAWL_SITEMAP, save).apply()
+        appContext.galleryDataStore.edit { it[KEY_SAVE_CRAWL_SITEMAP] = save }
+    }
+
     suspend fun setSpeedBoostEnabled(enabled: Boolean) {
         syncPrefs.edit().putBoolean(PREF_SPEED_BOOST_ENABLED, enabled).apply()
         appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST_ENABLED] = enabled }
@@ -476,6 +525,34 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_PROXY_URL = stringPreferencesKey(PREF_PROXY_URL)
         private val KEY_NETWORK_TIMEOUT = intPreferencesKey(PREF_NETWORK_TIMEOUT)
         private val KEY_RETRY_COUNT = intPreferencesKey(PREF_RETRY_COUNT)
+
+        private const val PREF_RECURSIVE_CRAWL_ENABLED = "downloader_recursive_crawl_enabled"
+        private const val PREF_RECURSIVE_CRAWL_MAX_DEPTH = "downloader_recursive_crawl_max_depth"
+        private const val PREF_RECURSIVE_CRAWL_MAX_PAGES = "downloader_recursive_crawl_max_pages"
+        private const val PREF_RECURSIVE_CRAWL_SAME_DOMAIN = "downloader_recursive_crawl_same_domain"
+        private const val PREF_SAVE_CRAWL_SITEMAP = "downloader_save_crawl_sitemap"
+
+        private val KEY_RECURSIVE_CRAWL_ENABLED = booleanPreferencesKey(PREF_RECURSIVE_CRAWL_ENABLED)
+        private val KEY_RECURSIVE_CRAWL_MAX_DEPTH = intPreferencesKey(PREF_RECURSIVE_CRAWL_MAX_DEPTH)
+        private val KEY_RECURSIVE_CRAWL_MAX_PAGES = intPreferencesKey(PREF_RECURSIVE_CRAWL_MAX_PAGES)
+        private val KEY_RECURSIVE_CRAWL_SAME_DOMAIN = booleanPreferencesKey(PREF_RECURSIVE_CRAWL_SAME_DOMAIN)
+        private val KEY_SAVE_CRAWL_SITEMAP = booleanPreferencesKey(PREF_SAVE_CRAWL_SITEMAP)
+
+        fun isRecursiveCrawlEnabledSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_RECURSIVE_CRAWL_ENABLED, false)
+
+        fun getRecursiveCrawlConfigSync(context: Context): RecursiveCrawlConfig {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return RecursiveCrawlConfig(
+                maxDepth = sp.getInt(PREF_RECURSIVE_CRAWL_MAX_DEPTH, 3).coerceIn(1, 5),
+                maxPages = sp.getInt(PREF_RECURSIVE_CRAWL_MAX_PAGES, 20).coerceIn(5, 100),
+                sameDomainOnly = sp.getBoolean(PREF_RECURSIVE_CRAWL_SAME_DOMAIN, true),
+                delayMs = 500L,
+                maxRetries = sp.getInt(PREF_RETRY_COUNT, 3).coerceIn(1, 5),
+                saveSitemap = sp.getBoolean(PREF_SAVE_CRAWL_SITEMAP, true)
+            )
+        }
 
         fun getFormatModeSync(context: Context): DownloaderFormatMode {
             val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)

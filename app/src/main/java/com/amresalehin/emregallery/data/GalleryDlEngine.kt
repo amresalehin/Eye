@@ -56,7 +56,11 @@ data class GalleryDlOptions(
     val downloadSubtitles: Boolean = false,
     val includeAutoSubtitles: Boolean = true,
     val subtitleLanguages: Set<String> = setOf("en"),
-    val retries: Int = 3
+    val retries: Int = 3,
+    val maxDepth: Int = 3,
+    val maxPages: Int = 20,
+    val sameDomainOnly: Boolean = true,
+    val crawlDelayMs: Long = 500L
 )
 
 data class GalleryDlExtractResult(
@@ -164,8 +168,20 @@ object GalleryDlEngine {
         }
     }
 
+    fun isMediaScraperAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_media_scraper_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking media_scraper availability", e)
+            false
+        }
+    }
+
     fun isAvailable(): Boolean {
-        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isMediaDownloaderAvailable())
+        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isMediaDownloaderAvailable() || isMediaScraperAvailable())
     }
 
     /**
@@ -436,6 +452,10 @@ object GalleryDlEngine {
                     put("subtitle_languages", JSONArray(options.subtitleLanguages.toList()))
                 }
                 put("retries", options.retries)
+                put("maxDepth", options.maxDepth)
+                put("maxPages", options.maxPages)
+                put("sameDomainOnly", options.sameDomainOnly)
+                put("scrollPause", options.crawlDelayMs / 1000.0)
             }.toString()
 
             val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
@@ -492,6 +512,21 @@ object GalleryDlEngine {
 
     suspend fun extractXSpace(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_x_space", url, options)
+
+    suspend fun scrapeSiteRecursive(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("scrape_site_recursive", url, options)
+
+    suspend fun extractTumblr(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_tumblr", url, options)
+
+    suspend fun extractPixiv(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_pixiv", url, options)
+
+    suspend fun extractTwitterMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_twitter_media_scraper", url, options)
+
+    suspend fun extractFacebookMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_facebook_media_scraper", url, options)
 
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
@@ -628,6 +663,7 @@ object GalleryDlEngine {
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),
         GalleryDlSite("Flickr", listOf("flickr.com"), "photo_camera"),
         GalleryDlSite("Tumblr", listOf("tumblr.com"), "feed"),
+        GalleryDlSite("Pixiv", listOf("pixiv.net"), "palette"),
         GalleryDlSite("Wikimedia", listOf("wikimedia.org", "wikipedia.org"), "public"),
         GalleryDlSite("Bluesky", listOf("bsky.app"), "cloud"),
         GalleryDlSite("500px", listOf("500px.com"), "camera_alt"),

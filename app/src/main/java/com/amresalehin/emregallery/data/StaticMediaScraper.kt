@@ -294,7 +294,7 @@ class StaticMediaScraper {
         for (script in doc.select("script#__PWS_DATA__, script[type=application/json], script[type=application/ld+json]")) {
             val data = script.data().ifBlank { script.html() }
             if (data.contains("pinimg.com/videos/") || data.contains("v.redd.it/") || data.contains("cdninstagram.com/")) {
-                val videoRegex = Regex("""https:(?:\\/|/){2}(?:v\d*\.pinimg\.com/videos/[^"'\s\\]+\.(?:mp4|m3u8)|v\.redd\.it/[A-Za-z0-9]+/DASH_\d+\.mp4)[^"'\s\\]*""")
+                val videoRegex = Regex("""https:(?:\\/|/){2}(?:v1?\.pinimg\.com/videos/[^"'\s\\]+\.mp4|v\.redd\.it/[A-Za-z0-9]+/DASH_\d+\.mp4)[^"'\s\\]*""")
                 for (match in videoRegex.findAll(data)) {
                     val cleanVideoUrl = match.value.replace("\\/", "/").replace("\\u0026", "&")
                     addCandidate(cleanVideoUrl, ExtractionSource.DOM_SCRAPE, posterUrl = ogImageFallback, domSelector = "script[json]")

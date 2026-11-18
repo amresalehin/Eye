@@ -38,7 +38,17 @@ data class GalleryDlSupportInfo(
 data class GalleryDlOptions(
     val userAgent: String? = null,
     val cookies: String? = null,
-    val timeoutSeconds: Int = 30
+    val timeoutSeconds: Int = 30,
+    val limit: Int? = null,
+    val afterDate: String? = null,
+    val beforeDate: String? = null,
+    val includeComments: Boolean = false,
+    val includePostAuthors: Boolean = false,
+    val redditClientId: String? = null,
+    val redditClientSecret: String? = null,
+    val redditUsername: String? = null,
+    val redditPassword: String? = null,
+    val redditRefreshToken: String? = null
 )
 
 data class GalleryDlExtractResult(
@@ -122,25 +132,20 @@ object GalleryDlEngine {
         }
     }
 
-    fun isPinterestDlAvailable(): Boolean {
+    fun isRedditDlAvailable(): Boolean {
         if (!isPythonStarted()) return false
         return try {
             val py = Python.getInstance()
             val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_pinterest_dl_available").toBoolean()
+            runner.callAttr("is_reddit_dl_available").toBoolean()
         } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking pinterest-dl availability", e)
+            Log.w(TAG, "Failed checking reddit-dl availability", e)
             false
         }
     }
 
     fun isAvailable(): Boolean {
-        return isPythonStarted() && (
-            isYtDlpAvailable() ||
-                isGalleryDlAvailable() ||
-                isInstaloaderAvailable() ||
-                isPinterestDlAvailable()
-            )
+        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable())
     }
 
     /**
@@ -307,6 +312,29 @@ object GalleryDlEngine {
             val isAudio = obj.optBoolean("isAudio", false)
             val isStream = obj.optBoolean("isStream", false)
 
+            val itemPageUrl = obj.optString("pageUrl").takeIf { it.isNotBlank() } ?: pageUrl
+            val parsedMeta = mutableMapOf("source_url" to itemPageUrl)
+            obj.optJSONObject("metadata")?.let { metaObj ->
+                val keys = metaObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = metaObj.optString(k)
+                    if (v.isNotBlank()) parsedMeta[k] = v
+                }
+            }
+            val parsedHeaders = mutableMapOf(
+                "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                "Referer" to itemPageUrl
+            )
+            obj.optJSONObject("downloadHeaders")?.let { hdrObj ->
+                val keys = hdrObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = hdrObj.optString(k)
+                    if (v.isNotBlank()) parsedHeaders[k] = v
+                }
+            }
+
             val item = ScrapedMediaItem(
                 id = obj.optString("id", "dl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
@@ -323,13 +351,10 @@ object GalleryDlEngine {
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
                     extractorEngine = obj.optString("source", "yt-dlp / gallery-dl"),
-                    pageUrl = pageUrl
+                    pageUrl = itemPageUrl
                 ),
-                metadata = mapOf("source_url" to pageUrl),
-                downloadHeaders = mapOf(
-                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                    "Referer" to pageUrl
-                ),
+                metadata = parsedMeta,
+                downloadHeaders = parsedHeaders,
                 width = obj.optInt("width", 0).takeIf { it > 0 },
                 height = obj.optInt("height", 0).takeIf { it > 0 }
             )
@@ -369,6 +394,16 @@ object GalleryDlEngine {
                 put("user_agent", effectiveUa)
                 effectiveCookies?.let { put("cookies", it) }
                 put("timeout", options.timeoutSeconds)
+                options.limit?.let { put("limit", it) }
+                options.afterDate?.takeIf { it.isNotBlank() }?.let { put("after", it) }
+                options.beforeDate?.takeIf { it.isNotBlank() }?.let { put("before", it) }
+                if (options.includeComments) put("comments", true)
+                if (options.includePostAuthors) put("post_authors", true)
+                options.redditClientId?.takeIf { it.isNotBlank() }?.let { put("reddit_client_id", it) }
+                options.redditClientSecret?.takeIf { it.isNotBlank() }?.let { put("reddit_client_secret", it) }
+                options.redditUsername?.takeIf { it.isNotBlank() }?.let { put("reddit_username", it) }
+                options.redditPassword?.takeIf { it.isNotBlank() }?.let { put("reddit_password", it) }
+                options.redditRefreshToken?.takeIf { it.isNotBlank() }?.let { put("reddit_refresh_token", it) }
             }.toString()
 
             val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
@@ -414,8 +449,8 @@ object GalleryDlEngine {
     suspend fun extractInstagram(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_instagram", url, options)
 
-    suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_pinterest", url, options)
+    suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_reddit", url, options)
 
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
@@ -529,7 +564,7 @@ object GalleryDlEngine {
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
         GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
         GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
-        GalleryDlSite("Pinterest", listOf("pinterest.com", "pin.it", "i.pinimg.com", "v1.pinimg.com"), "pin"),
+        GalleryDlSite("Pinterest", listOf("pinterest.com", "i.pinimg.com"), "pin"),
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
         GalleryDlSite("Vimeo", listOf("vimeo.com"), "movie"),

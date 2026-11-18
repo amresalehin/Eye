@@ -50,16 +50,18 @@ class ExtractionCoordinator(private val context: Context) {
         cancel()
 
         val trimmed = targetUrl.trim()
-        if (!MediaClassifier.isValidWebUrl(trimmed)) {
+        val normalizedRedditTarget = MediaClassifier.normalizeRedditShorthand(trimmed)
+        val effectiveInputUrl = normalizedRedditTarget ?: trimmed
+        if (!MediaClassifier.isValidWebUrl(effectiveInputUrl)) {
             _state.value = ExtractionState(
-                errorMessage = "Please enter a valid URL (e.g. https://example.com)",
+                errorMessage = "Please enter a valid URL or Reddit target (e.g. https://example.com, r/funny, u/username)",
                 isRunning = false,
                 items = emptyList()
             )
             return
         }
 
-        val requestContext = MediaRequestContext.create(trimmed)
+        val requestContext = MediaRequestContext.create(effectiveInputUrl)
         val domain = requestContext.domain
         val expectation = determineExpectation(requestContext.url)
 
@@ -150,18 +152,48 @@ class ExtractionCoordinator(private val context: Context) {
                 }
 
                 val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
-                val options = GalleryDlOptions(cookies = cookies)
+                val redditPrefs = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRedditConfigSync(context)
+                val options = GalleryDlOptions(
+                    cookies = cookies,
+                    limit = redditPrefs.limit,
+                    afterDate = redditPrefs.afterDate.takeIf { it.isNotBlank() },
+                    beforeDate = redditPrefs.beforeDate.takeIf { it.isNotBlank() },
+                    includeComments = redditPrefs.includeComments,
+                    includePostAuthors = redditPrefs.includePostAuthors,
+                    redditClientId = redditPrefs.clientId.takeIf { it.isNotBlank() },
+                    redditClientSecret = redditPrefs.clientSecret.takeIf { it.isNotBlank() },
+                    redditUsername = redditPrefs.username.takeIf { it.isNotBlank() },
+                    redditPassword = redditPrefs.password.takeIf { it.isNotBlank() },
+                    redditRefreshToken = redditPrefs.refreshToken.takeIf { it.isNotBlank() }
+                )
 
                 // Launch concurrent discovery jobs:
                 // Rule 1: No exclusive extractor selection. Both yt-dlp and gallery-dl run concurrently.
                 // Rule 2: Browser discovery is complementary. Runs to discover dynamic network requests and DOM media.
                 // Rule 5: One unified candidate manager.
-                val lowerTargetUrl = requestContext.url.lowercase(java.util.Locale.ROOT)
-                val isInstagramTarget = lowerTargetUrl.contains("instagram.com") || lowerTargetUrl.contains("instagr.am")
-                val isPinterestTarget = lowerTargetUrl.contains("pinterest.") ||
-                    lowerTargetUrl.contains("://pin.it/") ||
-                    lowerTargetUrl.contains(".pin.it/") ||
-                    lowerTargetUrl.contains("pinimg.com")
+                val lowerRequestUrl = requestContext.url.lowercase(java.util.Locale.ROOT)
+                val isInstagramTarget = lowerRequestUrl.contains("instagram.com") || lowerRequestUrl.contains("instagr.am")
+                val isRedditTarget = normalizedRedditTarget != null ||
+                    lowerRequestUrl.contains("reddit.com") ||
+                    lowerRequestUrl.contains("redd.it") ||
+                    lowerRequestUrl.contains("redgifs.com")
+
+                val redditDlJob = if (isRedditTarget) {
+                    launch(Dispatchers.IO) {
+                        if (GalleryDlEngine.isRedditDlAvailable()) {
+                            try {
+                                val res = GalleryDlEngine.extractReddit(requestContext.url, options)
+                                if (res.success && res.items.isNotEmpty()) {
+                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via reddit-dl")
+                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                                    lastDiagnosticError = res.errorMessage
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ExtractionCoordinator", "Concurrent reddit-dl error", e)
+                            }
+                        }
+                    }
+                } else null
 
                 val instaloaderJob = if (isInstagramTarget) {
                     launch(Dispatchers.IO) {
@@ -175,23 +207,6 @@ class ExtractionCoordinator(private val context: Context) {
                                 }
                             } catch (e: Exception) {
                                 Log.w("ExtractionCoordinator", "Concurrent Instaloader error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val pinterestDlJob = if (isPinterestTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isPinterestDlAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractPinterest(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via pinterest-dl")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent pinterest-dl error", e)
                             }
                         }
                     }
@@ -246,8 +261,8 @@ class ExtractionCoordinator(private val context: Context) {
                 }
 
                 // Await all concurrent discovery channels
+                redditDlJob?.join()
                 instaloaderJob?.join()
-                pinterestDlJob?.join()
                 ytdlpJob.join()
                 galleryDlJob.join()
                 browserJob.join()
@@ -293,6 +308,19 @@ class ExtractionCoordinator(private val context: Context) {
                         val updatedOptions = options.copy(cookies = cookieRes.cookies)
                         updateStatus("Cookies refreshed. Re-probing with yt-dlp & gallery-dl...", ExtractionPhase.YT_DLP)
 
+                        if (isRedditTarget && GalleryDlEngine.isRedditDlAvailable()) {
+                            val retryReddit = withContext(Dispatchers.IO) {
+                                try {
+                                    GalleryDlEngine.extractReddit(requestContext.url, updatedOptions)
+                                } catch (e: Exception) {
+                                    GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
+                                }
+                            }
+                            if (retryReddit.success && retryReddit.items.isNotEmpty()) {
+                                updateItems(retryReddit.items, title = retryReddit.pageTitle)
+                            }
+                        }
+
                         if (isInstagramTarget && GalleryDlEngine.isInstaloaderAvailable()) {
                             val retryIg = withContext(Dispatchers.IO) {
                                 try {
@@ -303,19 +331,6 @@ class ExtractionCoordinator(private val context: Context) {
                             }
                             if (retryIg.success && retryIg.items.isNotEmpty()) {
                                 updateItems(retryIg.items, title = retryIg.pageTitle)
-                            }
-                        }
-
-                        if (isPinterestTarget && GalleryDlEngine.isPinterestDlAvailable()) {
-                            val retryPin = withContext(Dispatchers.IO) {
-                                try {
-                                    GalleryDlEngine.extractPinterest(requestContext.url, updatedOptions)
-                                } catch (e: Exception) {
-                                    GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
-                                }
-                            }
-                            if (retryPin.success && retryPin.items.isNotEmpty()) {
-                                updateItems(retryPin.items, title = retryPin.pageTitle)
                             }
                         }
 
@@ -441,7 +456,7 @@ class ExtractionCoordinator(private val context: Context) {
 
         fun isGalleryPlatformUrl(lower: String): Boolean {
             val galleryHosts = listOf(
-                "reddit.com", "redd.it", "imgur.com", "pinterest.", "pin.it",
+                "reddit.com", "redd.it", "imgur.com", "pinterest.com", "pin.it",
                 "artstation.com", "deviantart.com", "flickr.com", "instagram.com/p/",
                 "instagram.com/tv/"
             )

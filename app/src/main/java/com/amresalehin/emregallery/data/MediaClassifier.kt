@@ -280,6 +280,64 @@ object MediaClassifier {
      * Strictly validates whether an input string is a valid web URL (e.g. https://example.com, example.com/page).
      * Rejects arbitrary text, invalid hosts, spaces, local file/javascript URIs, or non-domain inputs.
      */
+    private val REDDIT_SHORTHAND_SUBREDDIT_REGEX = Regex(
+        """^/?r/([A-Za-z0-9_]{2,24})(?:/(hot|new|top|rising|controversial))?/?$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val REDDIT_SHORTHAND_USER_REGEX = Regex(
+        """^/?(?:u|user)/([A-Za-z0-9_-]{2,24})(?:/(submitted|posts|overview|saved))?/?$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val REDDIT_SHORTHAND_POST_REGEX = Regex(
+        """^/?p/([A-Za-z0-9]{4,12})/?$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val REDDIT_SHORTHAND_MY_REGEX = Regex(
+        """^/?my/(saved|joined|following)/?$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Returns true if input matches a patrickkfkan/reddit-dl shorthand target
+     * (r/<subreddit>, u/<username>, p/<post_id>, my/saved, my/joined, my/following).
+     */
+    fun isRedditShorthand(raw: String): Boolean {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || trimmed.contains(" ") || trimmed.contains("://")) return false
+        return REDDIT_SHORTHAND_SUBREDDIT_REGEX.matches(trimmed) ||
+            REDDIT_SHORTHAND_USER_REGEX.matches(trimmed) ||
+            REDDIT_SHORTHAND_POST_REGEX.matches(trimmed) ||
+            REDDIT_SHORTHAND_MY_REGEX.matches(trimmed)
+    }
+
+    /**
+     * Normalizes a reddit-dl shorthand target into a canonical https://www.reddit.com URL.
+     * Returns null if input is not a recognized Reddit shorthand.
+     */
+    fun normalizeRedditShorthand(raw: String): String? {
+        val trimmed = raw.trim()
+        if (!isRedditShorthand(trimmed)) return null
+        REDDIT_SHORTHAND_SUBREDDIT_REGEX.matchEntire(trimmed)?.let { m ->
+            val sub = m.groupValues[1]
+            val sort = m.groupValues[2].lowercase(Locale.ROOT)
+            return if (sort.isNotBlank()) "https://www.reddit.com/r/$sub/$sort" else "https://www.reddit.com/r/$sub/"
+        }
+        REDDIT_SHORTHAND_USER_REGEX.matchEntire(trimmed)?.let { m ->
+            val user = m.groupValues[1]
+            val sec = m.groupValues[2].lowercase(Locale.ROOT).ifBlank { "submitted" }.let {
+                if (it == "posts") "submitted" else it
+            }
+            return "https://www.reddit.com/user/$user/$sec/"
+        }
+        REDDIT_SHORTHAND_POST_REGEX.matchEntire(trimmed)?.let { m ->
+            return "https://www.reddit.com/comments/${m.groupValues[1]}/"
+        }
+        REDDIT_SHORTHAND_MY_REGEX.matchEntire(trimmed)?.let { m ->
+            return "https://www.reddit.com/my/${m.groupValues[1].lowercase(Locale.ROOT)}"
+        }
+        return null
+    }
+
     fun isValidWebUrl(raw: String): Boolean {
         val trimmed = raw.trim()
         if (trimmed.isBlank() || trimmed.contains(" ") || trimmed.length < 4) {
@@ -517,10 +575,10 @@ object MediaClassifier {
         ) {
             return false
         }
-        // Pinterest pin/board/short web pages (not direct media CDN)
-        if ((host.contains("pinterest.") || host == "pin.it" || host.endsWith(".pin.it")) &&
-            !host.startsWith("i.") && !host.startsWith("v.") && !host.startsWith("v1.") &&
-            (host == "pin.it" || host.endsWith(".pin.it") || path.contains("/pin/") || path.contains("/search/"))
+        // Pinterest pin discussion pages (not direct image CDN)
+        if ((host.contains("pinterest.com") || host.contains("pin.it")) &&
+            !host.startsWith("i.") &&
+            path.contains("/pin/")
         ) {
             return false
         }
@@ -598,36 +656,15 @@ object MediaClassifier {
             }
         }
 
-        // 0b. Pinterest image CDN (i.pinimg.com -> originals full resolution master; preserve video CDN streams untouched)
+        // 0b. Pinterest image CDN (i.pinimg.com / *.pinimg.com -> originals full resolution master)
         if (normalized.contains("pinimg.com")) {
-            val lowerNorm = normalized.lowercase(Locale.ROOT)
             val cleanUrl = normalized.substringBefore("?").substringBefore("#").trimEnd('/')
-            val cleanLower = cleanUrl.lowercase(Locale.ROOT)
-            val isPinterestVideo = lowerNorm.contains("/videos/") ||
-                Regex("""^https?://v\d*\.pinimg\.com/""").containsMatchIn(lowerNorm) ||
-                cleanLower.endsWith(".mp4") || cleanLower.endsWith(".m3u8") ||
-                cleanLower.endsWith(".ts") || cleanLower.endsWith(".webm")
-            if (isPinterestVideo) {
-                val videoFileName = cleanUrl.substringAfterLast('/').ifBlank { "pinterest_video.mp4" }
-                return ResolvedMediaInfo(
-                    mediaUrl = normalized,
-                    thumbnailUrl = null,
-                    cleanTitle = videoFileName
-                )
-            }
             val pinHexRegex = Regex("""([0-9a-fA-F]{32})(?:\.([a-zA-Z0-9]+))?""")
             val match = pinHexRegex.find(cleanUrl)
             if (match != null) {
                 val hash = match.groupValues[1]
                 val rawExt = match.groupValues.getOrNull(2)?.lowercase(Locale.ROOT)
-                // Preserve native extension if URL is already an /originals/ master (e.g. .png, .webp, .gif)
-                val alreadyOriginal = lowerNorm.contains("/originals/")
-                val ext = when {
-                    rawExt.isNullOrBlank() -> "jpg"
-                    alreadyOriginal -> if (rawExt == "jpeg") "jpg" else rawExt
-                    rawExt == "jpeg" || rawExt == "webp" -> "jpg"
-                    else -> rawExt
-                }
+                val ext = if (rawExt.isNullOrBlank() || rawExt == "jpeg" || rawExt == "webp") "jpg" else rawExt
                 val p1 = hash.substring(0, 2)
                 val p2 = hash.substring(2, 4)
                 val p3 = hash.substring(4, 6)
@@ -655,8 +692,12 @@ object MediaClassifier {
             )
         }
 
-        // 1. Reddit Preview CDN (preview.redd.it / external-preview.redd.it -> i.redd.it)
-        if (normalized.contains("preview.redd.it") || normalized.contains("external-preview.redd.it")) {
+        // 1. Reddit Preview CDN (preview.redd.it -> i.redd.it; do NOT rewrite external-preview.redd.it or award_images)
+        if (normalized.contains("preview.redd.it") &&
+            !normalized.contains("external-preview.redd.it") &&
+            !normalized.contains("/award_images/") &&
+            !normalized.contains("/communityIcon_")
+        ) {
             val cleanPath = normalized.substringBefore("?")
             val fileName = cleanPath.substringAfterLast('/')
             val originalUrl = "https://i.redd.it/$fileName"
@@ -976,16 +1017,11 @@ object MediaClassifier {
                 .replace(Regex("""https?://external-preview\.redd\.it/"""), "https://i.redd.it/")
                 .replace(Regex("""https?://i[0-3]\.wp\.com/"""), "https://i.wp.com/")
 
-            // 1. Pinterest Deduplication Key: Content-addressable 32-hex hash (keep video streams distinct from poster images)
+            // 1. Pinterest Deduplication Key: Content-addressable 32-hex hash
             if (normalizedHostAndPath.contains("pinimg.com")) {
                 val pinHash = Regex("""([0-9a-fA-F]{32})""").find(normalizedHostAndPath)?.groupValues?.get(1)
                 if (pinHash != null) {
-                    val isPinVideo = normalizedHostAndPath.contains("/videos/") ||
-                        Regex("""^https?://v\d*\.pinimg\.com/""").containsMatchIn(normalizedHostAndPath) ||
-                        normalizedHostAndPath.endsWith(".mp4") ||
-                        normalizedHostAndPath.endsWith(".m3u8") ||
-                        normalizedHostAndPath.endsWith(".ts")
-                    return if (isPinVideo) "pinimg_video:$pinHash" else "pinimg:$pinHash"
+                    return "pinimg:$pinHash"
                 }
             }
 

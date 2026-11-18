@@ -29,6 +29,19 @@ enum class DownloaderVideoQuality(val id: String, val label: String, val maxHeig
     }
 }
 
+data class RedditDlConfig(
+    val limit: Int = 25,
+    val afterDate: String = "",
+    val beforeDate: String = "",
+    val includeComments: Boolean = false,
+    val includePostAuthors: Boolean = false,
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val username: String = "",
+    val password: String = "",
+    val refreshToken: String = ""
+)
+
 enum class DownloaderSubfolderMode(val id: String, val label: String, val description: String) {
     FLAT("FLAT", "Single Folder", "Save all files directly in Downloads/Emre Gallery"),
     BY_DOMAIN("BY_DOMAIN", "By Website Domain", "Group files into subfolders like reddit.com, youtube.com"),
@@ -174,6 +187,39 @@ class DownloaderPreferencesManager(private val context: Context) {
         appContext.galleryDataStore.edit { it[KEY_SEARCH_ENGINE] = engine.name }
     }
 
+    val redditLimit: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_REDDIT_LIMIT] ?: syncPrefs.getInt(PREF_REDDIT_LIMIT, 25)).coerceIn(1, 500)
+    }.distinctUntilChanged()
+
+    val redditIncludeComments: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_REDDIT_COMMENTS] ?: syncPrefs.getBoolean(PREF_REDDIT_COMMENTS, false)
+    }.distinctUntilChanged()
+
+    val redditIncludePostAuthors: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_REDDIT_POST_AUTHORS] ?: syncPrefs.getBoolean(PREF_REDDIT_POST_AUTHORS, false)
+    }.distinctUntilChanged()
+
+    suspend fun setRedditConfig(config: RedditDlConfig) {
+        val clampedLimit = config.limit.coerceIn(1, 500)
+        syncPrefs.edit()
+            .putInt(PREF_REDDIT_LIMIT, clampedLimit)
+            .putString(PREF_REDDIT_AFTER_DATE, config.afterDate.trim())
+            .putString(PREF_REDDIT_BEFORE_DATE, config.beforeDate.trim())
+            .putBoolean(PREF_REDDIT_COMMENTS, config.includeComments)
+            .putBoolean(PREF_REDDIT_POST_AUTHORS, config.includePostAuthors)
+            .putString(PREF_REDDIT_CLIENT_ID, config.clientId.trim())
+            .putString(PREF_REDDIT_CLIENT_SECRET, config.clientSecret.trim())
+            .putString(PREF_REDDIT_USERNAME, config.username.trim())
+            .putString(PREF_REDDIT_PASSWORD, config.password)
+            .putString(PREF_REDDIT_REFRESH_TOKEN, config.refreshToken.trim())
+            .apply()
+        appContext.galleryDataStore.edit {
+            it[KEY_REDDIT_LIMIT] = clampedLimit
+            it[KEY_REDDIT_COMMENTS] = config.includeComments
+            it[KEY_REDDIT_POST_AUTHORS] = config.includePostAuthors
+        }
+    }
+
     companion object {
         const val SYNC_PREFS_NAME = "emre_downloader_prefs"
         const val DEFAULT_FILENAME_TEMPLATE = "{title}_{hash}"
@@ -191,6 +237,16 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_WIFI_ONLY = "wifi_only_downloads"
         private const val PREF_MAX_CONCURRENT = "max_concurrent_downloads"
         private const val PREF_SEARCH_ENGINE = "browser_search_engine"
+        private const val PREF_REDDIT_LIMIT = "reddit_dl_limit"
+        private const val PREF_REDDIT_AFTER_DATE = "reddit_dl_after_date"
+        private const val PREF_REDDIT_BEFORE_DATE = "reddit_dl_before_date"
+        private const val PREF_REDDIT_COMMENTS = "reddit_dl_comments"
+        private const val PREF_REDDIT_POST_AUTHORS = "reddit_dl_post_authors"
+        private const val PREF_REDDIT_CLIENT_ID = "reddit_dl_client_id"
+        private const val PREF_REDDIT_CLIENT_SECRET = "reddit_dl_client_secret"
+        private const val PREF_REDDIT_USERNAME = "reddit_dl_username"
+        private const val PREF_REDDIT_PASSWORD = "reddit_dl_password"
+        private const val PREF_REDDIT_REFRESH_TOKEN = "reddit_dl_refresh_token"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -205,6 +261,9 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_MAX_CONCURRENT = intPreferencesKey(PREF_MAX_CONCURRENT)
         private val KEY_ENABLED_PROVIDERS = stringSetPreferencesKey("enabled_providers")
         private val KEY_SEARCH_ENGINE = stringPreferencesKey(PREF_SEARCH_ENGINE)
+        private val KEY_REDDIT_LIMIT = intPreferencesKey(PREF_REDDIT_LIMIT)
+        private val KEY_REDDIT_COMMENTS = booleanPreferencesKey(PREF_REDDIT_COMMENTS)
+        private val KEY_REDDIT_POST_AUTHORS = booleanPreferencesKey(PREF_REDDIT_POST_AUTHORS)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext
@@ -238,6 +297,23 @@ class DownloaderPreferencesManager(private val context: Context) {
                 .getString(PREF_SEARCH_ENGINE, BrowserSearchEngine.DUCKDUCKGO.name)
             return BrowserSearchEngine.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
                 ?: BrowserSearchEngine.DUCKDUCKGO
+        }
+
+        fun getRedditConfigSync(context: Context): RedditDlConfig {
+            val sp = context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return RedditDlConfig(
+                limit = sp.getInt(PREF_REDDIT_LIMIT, 25).coerceIn(1, 500),
+                afterDate = sp.getString(PREF_REDDIT_AFTER_DATE, "") ?: "",
+                beforeDate = sp.getString(PREF_REDDIT_BEFORE_DATE, "") ?: "",
+                includeComments = sp.getBoolean(PREF_REDDIT_COMMENTS, false),
+                includePostAuthors = sp.getBoolean(PREF_REDDIT_POST_AUTHORS, false),
+                clientId = sp.getString(PREF_REDDIT_CLIENT_ID, "") ?: "",
+                clientSecret = sp.getString(PREF_REDDIT_CLIENT_SECRET, "") ?: "",
+                username = sp.getString(PREF_REDDIT_USERNAME, "") ?: "",
+                password = sp.getString(PREF_REDDIT_PASSWORD, "") ?: "",
+                refreshToken = sp.getString(PREF_REDDIT_REFRESH_TOKEN, "") ?: ""
+            )
         }
 
         fun resolveSubfolderName(

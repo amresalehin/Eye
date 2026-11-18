@@ -728,9 +728,6 @@ fun DirectBrowserView(
 
                             setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
                                 scrollHandler.onScroll(scrollY, oldScrollY)
-                                if (RamGovernor.isHeapLimitExceeded()) {
-                                    RamGovernor.enforceLimit(context, this)
-                                }
                             }
 
                             setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
@@ -749,7 +746,7 @@ fun DirectBrowserView(
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 mediaPlaybackRequiresUserGesture = true
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                                 userAgentString = BotDetectionMitigator.STEALTH_USER_AGENT
                             }
 
@@ -835,9 +832,19 @@ fun DirectBrowserView(
                                         try {
                                             val intent = Intent.parseUri(urlString, Intent.URI_INTENT_SCHEME)
                                             if (intent != null) {
+                                                // Prevent untrusted pages from launching internal app components or selectors
+                                                intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                                                intent.component = null
+                                                intent.selector = null
+                                                if (intent.`package` == context.packageName) {
+                                                    return true
+                                                }
+
                                                 val pm = context.packageManager
-                                                val resolveInfo = intent.resolveActivity(pm)
-                                                if (resolveInfo != null) {
+                                                val resolveComponent = intent.resolveActivity(pm)
+                                                if (resolveComponent != null &&
+                                                    resolveComponent.packageName != context.packageName
+                                                ) {
                                                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                                     context.startActivity(intent)
                                                     return true
@@ -856,7 +863,10 @@ fun DirectBrowserView(
                                                     val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")).apply {
                                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                                     }
-                                                    if (marketIntent.resolveActivity(pm) != null) {
+                                                    val marketComponent = marketIntent.resolveActivity(pm)
+                                                    if (marketComponent != null &&
+                                                        marketComponent.packageName != context.packageName
+                                                    ) {
                                                         context.startActivity(marketIntent)
                                                         return true
                                                     } else {
@@ -871,13 +881,22 @@ fun DirectBrowserView(
                                         return true
                                     }
 
+                                    // Block unsafe internal URI schemes from untrusted web pages
+                                    if (lower.startsWith("file:") || lower.startsWith("content:") || lower.startsWith("android-app:")) {
+                                        return true
+                                    }
+
                                     try {
                                         val uri = Uri.parse(urlString)
                                         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                            addCategory(Intent.CATEGORY_BROWSABLE)
                                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         }
                                         val pm = context.packageManager
-                                        if (intent.resolveActivity(pm) != null) {
+                                        val resolveComponent = intent.resolveActivity(pm)
+                                        if (resolveComponent != null &&
+                                            resolveComponent.packageName != context.packageName
+                                        ) {
                                             context.startActivity(intent)
                                             return true
                                         } else if (lower.startsWith("market://details?id=")) {

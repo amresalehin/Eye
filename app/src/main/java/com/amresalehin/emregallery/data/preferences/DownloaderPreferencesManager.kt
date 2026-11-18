@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.amresalehin.emregallery.data.BrowserSearchEngine
+import com.amresalehin.emregallery.data.VaultCrypto
 import com.amresalehin.emregallery.data.galleryDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -265,10 +266,10 @@ class DownloaderPreferencesManager(private val context: Context) {
             .putBoolean(PREF_REDDIT_COMMENTS, config.includeComments)
             .putBoolean(PREF_REDDIT_POST_AUTHORS, config.includePostAuthors)
             .putString(PREF_REDDIT_CLIENT_ID, config.clientId.trim())
-            .putString(PREF_REDDIT_CLIENT_SECRET, config.clientSecret.trim())
+            .putString(PREF_REDDIT_CLIENT_SECRET, VaultCrypto.encryptStringToBase64(config.clientSecret.trim()))
             .putString(PREF_REDDIT_USERNAME, config.username.trim())
-            .putString(PREF_REDDIT_PASSWORD, config.password)
-            .putString(PREF_REDDIT_REFRESH_TOKEN, config.refreshToken.trim())
+            .putString(PREF_REDDIT_PASSWORD, VaultCrypto.encryptStringToBase64(config.password))
+            .putString(PREF_REDDIT_REFRESH_TOKEN, VaultCrypto.encryptStringToBase64(config.refreshToken.trim()))
             .apply()
         appContext.galleryDataStore.edit {
             it[KEY_REDDIT_LIMIT] = clampedLimit
@@ -391,10 +392,10 @@ class DownloaderPreferencesManager(private val context: Context) {
                 includeComments = sp.getBoolean(PREF_REDDIT_COMMENTS, false),
                 includePostAuthors = sp.getBoolean(PREF_REDDIT_POST_AUTHORS, false),
                 clientId = sp.getString(PREF_REDDIT_CLIENT_ID, "") ?: "",
-                clientSecret = sp.getString(PREF_REDDIT_CLIENT_SECRET, "") ?: "",
+                clientSecret = VaultCrypto.decryptStringFromBase64(sp.getString(PREF_REDDIT_CLIENT_SECRET, "") ?: ""),
                 username = sp.getString(PREF_REDDIT_USERNAME, "") ?: "",
-                password = sp.getString(PREF_REDDIT_PASSWORD, "") ?: "",
-                refreshToken = sp.getString(PREF_REDDIT_REFRESH_TOKEN, "") ?: ""
+                password = VaultCrypto.decryptStringFromBase64(sp.getString(PREF_REDDIT_PASSWORD, "") ?: ""),
+                refreshToken = VaultCrypto.decryptStringFromBase64(sp.getString(PREF_REDDIT_REFRESH_TOKEN, "") ?: "")
             )
         }
 

@@ -2196,6 +2196,10 @@ fun FfmpegVideoToolsSection(
             }
         }
 
+        val isVaultItem = remember(item.uri) {
+            com.amresalehin.emregallery.data.LockedVaultManager.isVaultFileUri(context, item.uri)
+        }
+
         // Action Buttons Row
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -2205,6 +2209,10 @@ fun FfmpegVideoToolsSection(
             OutlinedButton(
                 onClick = {
                     if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    if (isVaultItem) {
+                        errorMsg = "Unlock this video from Locked Folder before exporting with FFmpeg tools."
+                        return@OutlinedButton
+                    }
                     isExtractingAudio = true
                     audioSuccessMsg = null
                     errorMsg = null
@@ -2244,6 +2252,10 @@ fun FfmpegVideoToolsSection(
             OutlinedButton(
                 onClick = {
                     if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    if (isVaultItem) {
+                        errorMsg = "Unlock this video from Locked Folder before exporting with FFmpeg tools."
+                        return@OutlinedButton
+                    }
                     isCompressing = true
                     compressSuccessMsg = null
                     errorMsg = null
@@ -2283,6 +2295,10 @@ fun FfmpegVideoToolsSection(
             OutlinedButton(
                 onClick = {
                     if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    if (isVaultItem) {
+                        errorMsg = "Unlock this video from Locked Folder before exporting with FFmpeg tools."
+                        return@OutlinedButton
+                    }
                     isExtractingFrame = true
                     frameSuccessMsg = null
                     errorMsg = null

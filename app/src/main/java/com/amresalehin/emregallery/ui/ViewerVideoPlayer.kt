@@ -45,6 +45,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import com.amresalehin.emregallery.data.VaultAwareDataSourceFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -122,7 +123,8 @@ fun rememberViewerVideoState(
 
             val httpDataSourceFactory = OkHttpDataSource.Factory(OkHttpDownloader.client)
                 .setUserAgent(OkHttpDownloader.DEFAULT_USER_AGENT)
-            val upstreamDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val baseDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val upstreamDataSourceFactory = VaultAwareDataSourceFactory(context, baseDataSourceFactory)
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
                 .setDataSourceFactory(upstreamDataSourceFactory)
 

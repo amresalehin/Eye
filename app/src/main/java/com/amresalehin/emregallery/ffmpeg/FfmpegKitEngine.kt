@@ -78,25 +78,26 @@ object FfmpegKitEngine {
     fun getStatus(): FfmpegEngineStatus {
         return try {
             ensureConfigured()
-            val version = runCatching { FFmpegKitConfig.getFFmpegVersion() }.getOrNull() ?: "8.1.9"
-            val buildDate = runCatching { FFmpegKitConfig.getBuildDate() }.getOrNull() ?: "2025"
+            val version = runCatching { FFmpegKitConfig.getFFmpegVersion() }.getOrNull()?.takeIf { it.isNotBlank() }
+            val buildDate = runCatching { FFmpegKitConfig.getBuildDate() }.getOrNull().orEmpty()
+            val nativeLoaded = version != null
             FfmpegEngineStatus(
-                isAvailable = true,
-                version = version,
+                isAvailable = nativeLoaded,
+                version = version ?: "unavailable",
                 buildDate = buildDate,
                 packageName = "dev.ffmpegkit-maintained:ffmpeg-kit-full",
                 supportedCodecsSummary = "H.264, HEVC/H.265, VP8, VP9, AV1, AAC, MP3, Opus, FLAC, Vorbis, AC3",
-                isFfprobeAvailable = true
+                isFfprobeAvailable = nativeLoaded
             )
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to get FFmpegKit status", e)
             FfmpegEngineStatus(
-                isAvailable = true,
-                version = "8.1.9",
-                buildDate = "2025",
+                isAvailable = false,
+                version = "unavailable",
+                buildDate = "",
                 packageName = "dev.ffmpegkit-maintained:ffmpeg-kit-full",
                 supportedCodecsSummary = "H.264, HEVC/H.265, VP8, VP9, AV1, AAC, MP3, Opus, FLAC, Vorbis, AC3",
-                isFfprobeAvailable = true
+                isFfprobeAvailable = false
             )
         }
     }
@@ -113,19 +114,54 @@ object FfmpegKitEngine {
             Log.d(TAG, "Executing FFmpeg command: $command")
             val session = FFmpegKit.execute(command)
             val returnCode = session.returnCode
+            val rcValue = returnCode?.value ?: -1
             val output = session.allLogsAsString ?: session.failStackTrace ?: ""
             val duration = System.currentTimeMillis() - startTime
             val success = ReturnCode.isSuccess(returnCode)
 
-            Log.d(TAG, "FFmpeg finished with returnCode=${returnCode.value}, success=$success in ${duration}ms")
+            Log.d(TAG, "FFmpeg finished with returnCode=$rcValue, success=$success in ${duration}ms")
             FfmpegExecutionResult(
                 isSuccess = success,
-                returnCode = returnCode.value,
+                returnCode = rcValue,
                 outputLogs = output,
                 executionTimeMs = duration
             )
         } catch (e: Throwable) {
             Log.e(TAG, "FFmpeg command failed: $command", e)
+            val duration = System.currentTimeMillis() - startTime
+            FfmpegExecutionResult(
+                isSuccess = false,
+                returnCode = -1,
+                outputLogs = e.stackTraceToString(),
+                executionTimeMs = duration
+            )
+        }
+    }
+
+    /**
+     * Executes FFmpeg safely using an argument array to prevent shell quoting or injection issues
+     * from file paths or stream URLs containing special characters.
+     */
+    suspend fun executeArguments(args: Array<String>): FfmpegExecutionResult = withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
+        try {
+            Log.d(TAG, "Executing FFmpeg with ${args.size} arguments")
+            val session = FFmpegKit.executeWithArguments(args)
+            val returnCode = session.returnCode
+            val rcValue = returnCode?.value ?: -1
+            val output = session.allLogsAsString ?: session.failStackTrace ?: ""
+            val duration = System.currentTimeMillis() - startTime
+            val success = ReturnCode.isSuccess(returnCode)
+
+            Log.d(TAG, "FFmpeg finished with returnCode=$rcValue, success=$success in ${duration}ms")
+            FfmpegExecutionResult(
+                isSuccess = success,
+                returnCode = rcValue,
+                outputLogs = output,
+                executionTimeMs = duration
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "FFmpeg executeWithArguments failed", e)
             val duration = System.currentTimeMillis() - startTime
             FfmpegExecutionResult(
                 isSuccess = false,
@@ -243,8 +279,12 @@ object FfmpegKitEngine {
             else -> "libmp3lame"
         }
 
-        val cmd = "-y -i \"${videoFile.absolutePath}\" -vn -c:a $audioCodec -b:a ${bitrateKbps}k \"${targetFile.absolutePath}\""
-        val res = executeCommand(cmd)
+        val args = arrayOf(
+            "-y", "-i", videoFile.absolutePath,
+            "-vn", "-c:a", audioCodec, "-b:a", "${bitrateKbps}k",
+            targetFile.absolutePath
+        )
+        val res = executeArguments(args)
 
         if (res.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
             context?.let { ctx ->
@@ -271,8 +311,15 @@ object FfmpegKitEngine {
 
         // Scale filter preserving aspect ratio, ensuring width and height are divisible by 2
         val scaleFilter = "scale=-2:$targetHeight"
-        val cmd = "-y -i \"${videoFile.absolutePath}\" -vf \"$scaleFilter\" -c:v libx264 -preset fast -crf $crf -c:a aac -b:a 128k -movflags +faststart \"${targetFile.absolutePath}\""
-        val res = executeCommand(cmd)
+        val args = arrayOf(
+            "-y", "-i", videoFile.absolutePath,
+            "-vf", scaleFilter,
+            "-c:v", "libx264", "-preset", "fast", "-crf", crf.toString(),
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            targetFile.absolutePath
+        )
+        val res = executeArguments(args)
 
         if (res.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
             context?.let { ctx ->
@@ -291,15 +338,29 @@ object FfmpegKitEngine {
         videoFile: File,
         audioFile: File,
         outputFile: File
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): FfmpegExecutionResult = withContext(Dispatchers.IO) {
         try {
-            // -y -i video -i audio -c:v copy -c:a aac -movflags +faststart output.mp4
-            val cmd = "-y -i \"${videoFile.absolutePath}\" -i \"${audioFile.absolutePath}\" -c:v copy -c:a aac -movflags +faststart \"${outputFile.absolutePath}\""
-            val result = executeCommand(cmd)
-            result.isSuccess && outputFile.exists() && outputFile.length() > 0L
+            val args = arrayOf(
+                "-y", "-i", videoFile.absolutePath,
+                "-i", audioFile.absolutePath,
+                "-c:v", "copy", "-c:a", "aac",
+                "-movflags", "+faststart",
+                outputFile.absolutePath
+            )
+            val result = executeArguments(args)
+            if (result.isSuccess && outputFile.exists() && outputFile.length() > 0L) {
+                result.copy(isSuccess = true, outputFile = outputFile)
+            } else {
+                result.copy(isSuccess = false)
+            }
         } catch (e: Throwable) {
             Log.e(TAG, "muxAudioAndVideo failed", e)
-            false
+            FfmpegExecutionResult(
+                isSuccess = false,
+                returnCode = -1,
+                outputLogs = e.stackTraceToString(),
+                executionTimeMs = 0L
+            )
         }
     }
 
@@ -316,8 +377,13 @@ object FfmpegKitEngine {
             val baseName = videoFile.nameWithoutExtension
             val targetFile = File(destDir, "${baseName}_thumb_${System.currentTimeMillis()}.jpg")
 
-            val cmd = "-y -ss $positionSec -i \"${videoFile.absolutePath}\" -vframes 1 -q:v 2 \"${targetFile.absolutePath}\""
-            val res = executeCommand(cmd)
+            val args = arrayOf(
+                "-y", "-ss", positionSec.toString(),
+                "-i", videoFile.absolutePath,
+                "-vframes", "1", "-q:v", "2",
+                targetFile.absolutePath
+            )
+            val res = executeArguments(args)
             if (res.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
                 targetFile
             } else null
@@ -340,8 +406,14 @@ object FfmpegKitEngine {
         val baseName = videoFile.nameWithoutExtension
         val targetFile = File(destDir, "${baseName}_trimmed_${System.currentTimeMillis()}.mp4")
 
-        val cmd = "-y -ss $startSec -i \"${videoFile.absolutePath}\" -t $durationSec -c copy -movflags +faststart \"${targetFile.absolutePath}\""
-        val res = executeCommand(cmd)
+        val args = arrayOf(
+            "-y", "-ss", startSec.toString(),
+            "-i", videoFile.absolutePath,
+            "-t", durationSec.toString(),
+            "-c", "copy", "-movflags", "+faststart",
+            targetFile.absolutePath
+        )
+        val res = executeArguments(args)
 
         if (res.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
             context?.let { ctx ->
@@ -350,8 +422,15 @@ object FfmpegKitEngine {
             res.copy(outputFile = targetFile)
         } else {
             // If stream copy failed due to non-keyframes, retry with re-encode
-            val fallbackCmd = "-y -ss $startSec -i \"${videoFile.absolutePath}\" -t $durationSec -c:v libx264 -preset ultrafast -c:a aac -movflags +faststart \"${targetFile.absolutePath}\""
-            val fallbackRes = executeCommand(fallbackCmd)
+            val fallbackArgs = arrayOf(
+                "-y", "-ss", startSec.toString(),
+                "-i", videoFile.absolutePath,
+                "-t", durationSec.toString(),
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-c:a", "aac", "-movflags", "+faststart",
+                targetFile.absolutePath
+            )
+            val fallbackRes = executeArguments(fallbackArgs)
             if (fallbackRes.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
                 context?.let { ctx ->
                     android.media.MediaScannerConnection.scanFile(ctx, arrayOf(targetFile.absolutePath), null, null)
@@ -375,8 +454,12 @@ object FfmpegKitEngine {
         val targetFile = File(destDir, "${baseName}_converted_${System.currentTimeMillis()}.mp4")
 
         // Try stream copy first, fallback to transcode if necessary
-        val copyCmd = "-y -i \"${inputFile.absolutePath}\" -c copy -movflags +faststart \"${targetFile.absolutePath}\""
-        val copyRes = executeCommand(copyCmd)
+        val copyArgs = arrayOf(
+            "-y", "-i", inputFile.absolutePath,
+            "-c", "copy", "-movflags", "+faststart",
+            targetFile.absolutePath
+        )
+        val copyRes = executeArguments(copyArgs)
         if (copyRes.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
             context?.let { ctx ->
                 android.media.MediaScannerConnection.scanFile(ctx, arrayOf(targetFile.absolutePath), null, null)
@@ -385,8 +468,13 @@ object FfmpegKitEngine {
         }
 
         // Full transcode
-        val transcodeCmd = "-y -i \"${inputFile.absolutePath}\" -c:v libx264 -preset fast -c:a aac -movflags +faststart \"${targetFile.absolutePath}\""
-        val transcodeRes = executeCommand(transcodeCmd)
+        val transcodeArgs = arrayOf(
+            "-y", "-i", inputFile.absolutePath,
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "aac", "-movflags", "+faststart",
+            targetFile.absolutePath
+        )
+        val transcodeRes = executeArguments(transcodeArgs)
         if (transcodeRes.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
             context?.let { ctx ->
                 android.media.MediaScannerConnection.scanFile(ctx, arrayOf(targetFile.absolutePath), null, null)
@@ -472,8 +560,13 @@ object FfmpegKitEngine {
         outputFile: File,
         context: Context? = null
     ): FfmpegExecutionResult = withContext(Dispatchers.IO) {
-        val cmd = "-y -i \"$streamUrl\" -c copy -bsf:a aac_adtstoasc -movflags +faststart \"${outputFile.absolutePath}\""
-        val res = executeCommand(cmd)
+        val copyArgs = arrayOf(
+            "-y", "-i", streamUrl,
+            "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            "-movflags", "+faststart",
+            outputFile.absolutePath
+        )
+        val res = executeArguments(copyArgs)
         if (res.isSuccess && outputFile.exists() && outputFile.length() > 0L) {
             context?.let { ctx ->
                 android.media.MediaScannerConnection.scanFile(ctx, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null)
@@ -481,8 +574,13 @@ object FfmpegKitEngine {
             res.copy(outputFile = outputFile)
         } else {
             // Fallback: transcode stream if direct bitstream copy fails
-            val transcodeCmd = "-y -i \"$streamUrl\" -c:v libx264 -preset fast -c:a aac -movflags +faststart \"${outputFile.absolutePath}\""
-            val transRes = executeCommand(transcodeCmd)
+            val transcodeArgs = arrayOf(
+                "-y", "-i", streamUrl,
+                "-c:v", "libx264", "-preset", "fast",
+                "-c:a", "aac", "-movflags", "+faststart",
+                outputFile.absolutePath
+            )
+            val transRes = executeArguments(transcodeArgs)
             if (transRes.isSuccess && outputFile.exists() && outputFile.length() > 0L) {
                 context?.let { ctx ->
                     android.media.MediaScannerConnection.scanFile(ctx, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null)

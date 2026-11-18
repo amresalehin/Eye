@@ -401,7 +401,7 @@ object StreamReconstructionEngine {
             .replace("\$Bandwidth\$", bandwidth.toString())
         if (number != null) {
             result = result.replace("\$Number\$", number.toString())
-            result = Regex("""\$Number%0(\d+)d\$""").replace(result) { match ->
+            result = Regex("\\\$Number%0(\\d+)d\\\$").replace(result) { match ->
                 val pad = match.groupValues[1].toIntOrNull() ?: 1
                 number.toString().padStart(pad, '0')
             }
@@ -520,6 +520,7 @@ object StreamReconstructionEngine {
             val finalMp4 = File(targetDir, "${safeBase}.mp4")
             val remuxRes = FfmpegKitEngine.remuxStream(mergedTsFile.absolutePath, finalMp4, context)
             if (remuxRes.isSuccess && finalMp4.exists() && finalMp4.length() > 0L) {
+                OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(context, finalMp4, "video/mp4", domain)
                 return@withContext StreamDownloadResult(
                     file = finalMp4,
                     isSuccessful = true,
@@ -532,9 +533,7 @@ object StreamReconstructionEngine {
             // Automatic TS fallback when MP4 conversion cannot finish
             val fallbackTs = File(targetDir, "${safeBase}.ts")
             mergedTsFile.copyTo(fallbackTs, overwrite = true)
-            runCatching {
-                MediaScannerConnection.scanFile(context, arrayOf(fallbackTs.absolutePath), arrayOf("video/mp2t"), null)
-            }
+            OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(context, fallbackTs, "video/mp2t", domain)
             StreamDownloadResult(
                 file = fallbackTs,
                 isSuccessful = fallbackTs.exists() && fallbackTs.length() > 0L,
@@ -651,9 +650,8 @@ object StreamReconstructionEngine {
             }
 
             if (resultFile != null && resultFile.exists() && resultFile.length() > 0L) {
-                runCatching {
-                    MediaScannerConnection.scanFile(context, arrayOf(resultFile.absolutePath), null, null)
-                }
+                val outMime = if (resultFile.extension.equals("m4a", ignoreCase = true)) "audio/mp4" else "video/mp4"
+                OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(context, resultFile, outMime, domain)
                 StreamDownloadResult(
                     file = resultFile,
                     isSuccessful = true,

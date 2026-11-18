@@ -252,7 +252,7 @@ object DiscoveryFilterManager {
     fun matchesSearchQuery(item: ScrapedMediaItem, rawQuery: String): Boolean {
         val query = rawQuery.trim().lowercase(Locale.ROOT)
         if (query.isBlank()) return true
-        val tokens = query.split(Regex("\s+")).filter { it.isNotBlank() }
+        val tokens = query.split(Regex("""\s+""")).filter { it.isNotBlank() }
         val haystack = buildString {
             append(item.title.lowercase(Locale.ROOT)).append(' ')
             append(item.url.lowercase(Locale.ROOT)).append(' ')

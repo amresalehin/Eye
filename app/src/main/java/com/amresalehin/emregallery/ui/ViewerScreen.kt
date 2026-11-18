@@ -7,6 +7,9 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewConfiguration
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import com.amresalehin.emregallery.data.LockedVaultManager
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -1237,8 +1240,17 @@ private fun Context.findActivity(): Activity? {
 }
 
 private fun shareMediaItem(context: Context, item: MediaItem) {
+    if (item.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, item.uri)) {
+        Toast.makeText(context, "Move out of Locked folder to share", Toast.LENGTH_SHORT).show()
+        return
+    }
     runCatching {
-        val parsedUri = Uri.parse(item.uri)
+        val rawUri = Uri.parse(item.uri)
+        val parsedUri = if (rawUri.scheme == "file" && rawUri.path != null) {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(rawUri.path!!))
+        } else {
+            rawUri
+        }
         val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = mimeType

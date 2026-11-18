@@ -48,29 +48,3 @@ data class DownloaderPill(
     val initial: String
         get() = name.firstOrNull()?.uppercaseChar()?.toString() ?: "W"
 }
-
-fun parseScrapedMediaDimensions(item: ScrapedMediaItem): Pair<Int?, Int?> {
-    val hint = item.resolutionHint ?: return null to null
-    val parts = hint.split("×", "x", "*").map { it.trim().filter { ch -> ch.isDigit() } }
-    if (parts.size >= 2) {
-        val w = parts[0].toIntOrNull()
-        val h = parts[1].toIntOrNull()
-        return w to h
-    }
-    return null to null
-}
-
-fun passesDimensionFilter(
-    item: ScrapedMediaItem,
-    minWidth: Int,
-    minHeight: Int,
-    dimensionsMap: Map<String, Pair<Int, Int>>
-): Boolean {
-    if (minWidth <= 0 && minHeight <= 0) return true
-    if (item.isVideo || item.isAudio || item.isStream) return true
-    val (w, h) = dimensionsMap[item.id] ?: parseScrapedMediaDimensions(item)
-    if (w == null || h == null) return false
-    val widthOk = if (minWidth > 0) w >= minWidth else true
-    val heightOk = if (minHeight > 0) h >= minHeight else true
-    return widthOk && heightOk
-}

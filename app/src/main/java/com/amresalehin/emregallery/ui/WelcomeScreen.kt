@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material3.*
@@ -73,7 +72,6 @@ fun WelcomeScreen(
     var currentStep by remember { mutableIntStateOf(initialStep) }
     var mediaGranted by remember { mutableStateOf(hasMediaPermission(context)) }
     var notificationGranted by remember { mutableStateOf(hasNotificationPermission(context)) }
-    var allFilesGranted by remember { mutableStateOf(hasAllFilesAccess()) }
 
     BackHandler(enabled = currentStep > 0) {
         currentStep--
@@ -85,7 +83,6 @@ fun WelcomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 mediaGranted = hasMediaPermission(context)
                 notificationGranted = hasNotificationPermission(context)
-                allFilesGranted = hasAllFilesAccess()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -102,12 +99,6 @@ fun WelcomeScreen(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         notificationGranted = isGranted
-    }
-
-    val allFilesLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        allFilesGranted = hasAllFilesAccess()
     }
 
     fun requestMedia() {
@@ -136,22 +127,6 @@ fun WelcomeScreen(
         }
     }
 
-    fun requestAllFiles() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val intent = try {
-                Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                )
-            } catch (_: Exception) {
-                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-            }
-            allFilesLauncher.launch(intent)
-        } else {
-            allFilesGranted = true
-        }
-    }
-
     // Atmospheric mist/fog gradient matching Emre style (#F3F5F7 to #161A20)
     val mistGradient = Brush.verticalGradient(
         0.00f to Color(0xFFF3F5F7),
@@ -161,14 +136,14 @@ fun WelcomeScreen(
         1.00f to Color(0xFF161A20)
     )
 
+    val needsNotifPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val grantedCount = (if (mediaGranted) 1 else 0) +
-        (if (notificationGranted) 1 else 0) +
-        (if (allFilesGranted) 1 else 0)
-    val allPermissionsGranted = grantedCount == 3
+        (if (needsNotifPrompt && notificationGranted) 1 else 0)
+    val allPermissionsGranted = mediaGranted && (!needsNotifPrompt || notificationGranted)
 
     val buttonText = when {
         allPermissionsGranted -> "Enter Emre"
-        grantedCount in 1..2 -> "Growing Wings"
+        grantedCount > 0 -> "Growing Wings"
         else -> "Liberate Emre"
     }
 
@@ -335,21 +310,10 @@ fun WelcomeScreen(
                             testTag = "welcome_permission_notifications"
                         )
 
-                        Spacer(Modifier.height(14.dp))
-
-                        // Card 3: All files access
-                        PermissionCard(
-                            icon = Icons.Outlined.FolderCopy,
-                            title = "All files access",
-                            isGranted = allFilesGranted,
-                            onClick = { requestAllFiles() },
-                            testTag = "welcome_permission_all_files"
-                        )
-
                         Spacer(Modifier.weight(1f))
 
                         // Dynamic Action Button:
-                        // "Liberate Emre" (0 granted) -> "Growing Wings" (1 or 2 granted) -> "Enter Emre" (all 3 granted)
+                        // "Liberate Emre" -> "Growing Wings" -> "Enter Emre"
                         // Arrow appears ONLY on "Enter Emre"
                         Button(
                             onClick = {
@@ -359,8 +323,6 @@ fun WelcomeScreen(
                                     requestMedia()
                                 } else if (!notificationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                     requestNotifications()
-                                } else if (!allFilesGranted) {
-                                    requestAllFiles()
                                 }
                             },
                             shape = RoundedCornerShape(32.dp),

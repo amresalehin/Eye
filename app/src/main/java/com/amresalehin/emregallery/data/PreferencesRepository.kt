@@ -54,8 +54,10 @@ class PreferencesRepository(context: Context) {
     // --- Vault & Security ---
     val lockedFolderPinHash: Flow<String?> get() = vaultPrefs.lockedFolderPinHash
     val lockedFolderBiometricEnabled: Flow<Boolean> get() = vaultPrefs.lockedFolderBiometricEnabled
+    val lockedFolderLockoutUntilMs: Flow<Long> get() = vaultPrefs.lockedFolderLockoutUntilMs
     suspend fun setLockedFolderPin(pin: String) = vaultPrefs.setLockedFolderPin(pin)
     suspend fun verifyLockedFolderPin(pin: String): Boolean = vaultPrefs.verifyLockedFolderPin(pin)
+    suspend fun resetLockedFolderLockout() = vaultPrefs.resetLockedFolderLockout()
     suspend fun clearLockedFolderPin() = vaultPrefs.clearLockedFolderPin()
     suspend fun setLockedFolderBiometricEnabled(enabled: Boolean) = vaultPrefs.setLockedFolderBiometricEnabled(enabled)
 

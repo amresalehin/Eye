@@ -444,6 +444,7 @@ def extract_gallery_dl(url, options_json="{}"):
     page_title = ""
     seen_urls = set()
 
+    cookie_file = None
     try:
         with _gdl_lock:
             gdl_config.set(("extractor",), "user-agent", user_agent)
@@ -561,6 +562,17 @@ def extract_gallery_dl(url, options_json="{}"):
             "error": f"{e.__class__.__name__}: {str(e)}",
             "items": []
         })
+    finally:
+        if cookie_file:
+            try:
+                gdl_config.set(("extractor",), "cookies", None)
+            except Exception:
+                pass
+            if os.path.exists(cookie_file):
+                try:
+                    os.unlink(cookie_file)
+                except Exception:
+                    pass
 
     return json.dumps({
         "success": len(items) > 0,
@@ -595,6 +607,7 @@ def extract_yt_dlp(url, options_json="{}"):
     page_thumbnail = ""
     seen_urls = set()
 
+    cookie_file = None
     try:
         cookie_file = _prepare_cookiefile(cookies, clean_url)
         http_headers = {
@@ -761,6 +774,12 @@ def extract_yt_dlp(url, options_json="{}"):
             "error": f"{e.__class__.__name__}: {str(e)}",
             "items": []
         })
+    finally:
+        if cookie_file and os.path.exists(cookie_file):
+            try:
+                os.unlink(cookie_file)
+            except Exception:
+                pass
 
     return json.dumps({
         "success": len(items) > 0,
@@ -847,6 +866,7 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
     """Downloads media exclusively via yt-dlp."""
     if not YTDLP_AVAILABLE:
         return False
+    cookie_file = None
     try:
         http_headers = {
             "User-Agent": user_agent or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
@@ -919,12 +939,19 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
             return True
     except Exception:
         pass
+    finally:
+        if cookie_file and os.path.exists(cookie_file):
+            try:
+                os.unlink(cookie_file)
+            except Exception:
+                pass
     return False
 
 def _download_with_gallery_dl(url, target_path, referer, user_agent, cookies, extra_headers):
     """Downloads media via gallery-dl job runner or gallery-dl network session."""
     if not GALLERY_DL_AVAILABLE:
         return False
+    cookie_file = None
     try:
         with _gdl_lock:
             gdl_config.set(("extractor",), "user-agent", user_agent or "Mozilla/5.0")
@@ -983,6 +1010,18 @@ def _download_with_gallery_dl(url, target_path, referer, user_agent, cookies, ex
                     return True
     except Exception:
         pass
+    finally:
+        if cookie_file:
+            try:
+                with _gdl_lock:
+                    gdl_config.set(("extractor",), "cookies", None)
+            except Exception:
+                pass
+            if os.path.exists(cookie_file):
+                try:
+                    os.unlink(cookie_file)
+                except Exception:
+                    pass
     return False
 
 def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, media_mode="best"):

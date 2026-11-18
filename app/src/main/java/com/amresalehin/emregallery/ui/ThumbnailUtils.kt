@@ -6,6 +6,7 @@ import android.net.Uri
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
+import com.amresalehin.emregallery.data.LockedVaultManager
 import kotlin.math.max
 
 /**
@@ -19,6 +20,24 @@ object ThumbnailUtils {
 
     fun mediaThumbnailKey(uri: String): String = "${uri}_thumb"
 
+    fun parseMediaDataModel(rawUrl: String): Any {
+        val trimmed = rawUrl.trim()
+        if (trimmed.startsWith("data:image/", ignoreCase = true)) {
+            val base64Marker = ";base64,"
+            val idx = trimmed.indexOf(base64Marker, ignoreCase = true)
+            if (idx != -1) {
+                val payload = trimmed.substring(idx + base64Marker.length)
+                val decoded = runCatching {
+                    android.util.Base64.decode(payload, android.util.Base64.DEFAULT)
+                }.getOrNull()
+                if (decoded != null && decoded.isNotEmpty()) {
+                    return decoded
+                }
+            }
+        }
+        return Uri.parse(trimmed)
+    }
+
     fun buildThumbnailRequest(
         context: Context,
         uri: String,
@@ -26,6 +45,7 @@ object ThumbnailUtils {
         heightPx: Int = THUMBNAIL_DIMENSION,
         useRgb565: Boolean = false
     ): ImageRequest {
+        val isVaultItem = LockedVaultManager.isVaultFileUri(context, uri) || uri.contains("locked_vault", ignoreCase = true)
         val builder = ImageRequest.Builder(context)
             .data(Uri.parse(uri))
             .size(widthPx, heightPx)
@@ -34,7 +54,7 @@ object ThumbnailUtils {
             // visible, so a crossfade only adds perceived latency while rapidly scrolling.
             .crossfade(false)
             .diskCacheKey(mediaThumbnailKey(uri))
-            .diskCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(if (isVaultItem) CachePolicy.DISABLED else CachePolicy.ENABLED)
             .memoryCacheKey(mediaThumbnailKey(uri))
             .memoryCachePolicy(CachePolicy.ENABLED)
             .allowHardware(true)
@@ -51,9 +71,10 @@ object ThumbnailUtils {
         uri: String,
         isVideo: Boolean
     ): ImageRequest {
+        val isVaultItem = LockedVaultManager.isVaultFileUri(context, uri) || uri.contains("locked_vault", ignoreCase = true)
         val builder = ImageRequest.Builder(context)
             .data(Uri.parse(uri))
-            .diskCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(if (isVaultItem) CachePolicy.DISABLED else CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
 
         if (isVideo) {

@@ -52,6 +52,7 @@ fun LockedFolderScreen(
     availableGalleryMedia: List<MediaItem>,
     isUnlocked: Boolean,
     hasPinSet: Boolean,
+    lockoutUntilMs: Long = 0L,
     onBack: () -> Unit,
     onOpen: (MediaItem) -> Unit,
     onUnlockItem: (MediaItem) -> Unit,
@@ -77,6 +78,7 @@ fun LockedFolderScreen(
     if (!isUnlocked) {
         LockedFolderAuthView(
             hasPinSet = hasPinSet,
+            lockoutUntilMs = lockoutUntilMs,
             onBack = onBack,
             onSetPin = onSetPin,
             onVerifyPin = onVerifyPin,
@@ -421,6 +423,7 @@ private fun LockedMediaCard(
 @Composable
 private fun LockedFolderAuthView(
     hasPinSet: Boolean,
+    lockoutUntilMs: Long = 0L,
     onBack: () -> Unit,
     onSetPin: (String) -> Unit,
     onVerifyPin: suspend (String) -> Boolean,
@@ -434,6 +437,17 @@ private fun LockedFolderAuthView(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isVerifying by remember { mutableStateOf(false) }
     var hasAutoPromptedBiometric by remember { mutableStateOf(false) }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(lockoutUntilMs) {
+        nowMs = System.currentTimeMillis()
+        while (lockoutUntilMs > nowMs) {
+            delay(500)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val remainingLockoutSec = ((lockoutUntilMs - nowMs + 999L) / 1000L).coerceAtLeast(0L)
+    val isLockedOut = hasPinSet && remainingLockoutSec > 0L
 
     val biometricAvailable = remember(context) { BiometricAuthHelper.isBiometricAvailable(context) }
 
@@ -461,7 +475,7 @@ private fun LockedFolderAuthView(
     }
 
     val onDigitClick: (String) -> Unit = { digit ->
-        if (enteredPin.length < 6 && !isVerifying) {
+        if (enteredPin.length < 6 && !isVerifying && !isLockedOut) {
             val newPin = enteredPin + digit
             enteredPin = newPin
 
@@ -639,14 +653,19 @@ private fun LockedFolderAuthView(
 
         Spacer(Modifier.height(12.dp))
 
+        val displayError = if (isLockedOut) {
+            "Too many attempts. Try again in ${remainingLockoutSec}s"
+        } else {
+            errorMessage
+        }
         // Error message text if any
         AnimatedVisibility(
-            visible = errorMessage != null,
+            visible = displayError != null,
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically()
         ) {
             Text(
-                text = errorMessage.orEmpty(),
+                text = displayError.orEmpty(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Medium,

@@ -307,14 +307,12 @@ object SpeedBoostDownloader {
             val finalSpeed = (probe.contentLength * 1000L) / elapsedMs
             onProgress?.invoke(probe.contentLength, probe.contentLength, finalSpeed, true)
 
-            runCatching {
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(finalFile.absolutePath),
-                    arrayOf(probe.mimeType),
-                    null
-                )
-            }
+            OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(
+                context = context,
+                file = finalFile,
+                mimeType = probe.mimeType,
+                domain = effectiveDomain
+            )
 
             SpeedBoostResult(
                 downloadResult = OkHttpDownloader.DownloadResult(

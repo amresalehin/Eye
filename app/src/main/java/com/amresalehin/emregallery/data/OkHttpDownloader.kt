@@ -548,7 +548,19 @@ object OkHttpDownloader {
     fun getTargetStorageDir(context: Context, domain: String? = null): File {
         val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val emreGalleryDir = File(publicDownloads, "Emre Gallery")
-        val baseDir = if (emreGalleryDir.exists() || emreGalleryDir.mkdirs()) {
+        val canWritePublic = runCatching {
+            if (!emreGalleryDir.exists()) emreGalleryDir.mkdirs()
+            if (emreGalleryDir.exists() && emreGalleryDir.isDirectory && emreGalleryDir.canWrite()) {
+                val probe = File(emreGalleryDir, ".emre_write_probe_${Thread.currentThread().id}")
+                probe.writeText("")
+                val deleted = probe.delete()
+                deleted || !probe.exists()
+            } else {
+                false
+            }
+        }.getOrDefault(false)
+
+        val baseDir = if (canWritePublic) {
             emreGalleryDir
         } else {
             val appExternal = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -563,13 +575,68 @@ object OkHttpDownloader {
 
         val cleanDomain = domain.replace(Regex("[^a-zA-Z0-9.-]"), "_").trim().takeIf { it.isNotBlank() } ?: "general"
         val domainDir = File(baseDir, cleanDomain)
-        if (!domainDir.exists()) {
-            domainDir.mkdirs()
-        }
-        return if (domainDir.exists() && domainDir.canWrite()) {
-            domainDir
+        val canWriteDomain = runCatching {
+            if (!domainDir.exists()) domainDir.mkdirs()
+            domainDir.exists() && domainDir.isDirectory && domainDir.canWrite()
+        }.getOrDefault(false)
+        return if (canWriteDomain) domainDir else baseDir
+    }
+
+    fun publishToDownloadsMediaStoreIfAppPrivate(
+        context: Context,
+        file: File,
+        mimeType: String? = null,
+        domain: String? = null
+    ) {
+        if (!file.exists() || file.length() <= 0L) return
+        val effectiveMime = mimeType?.takeIf { it.isNotBlank() }
+            ?: android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(file.extension.lowercase(Locale.ROOT))
+            ?: "application/octet-stream"
+
+        val publicDownloadsPath = runCatching {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).canonicalPath
+        }.getOrNull()
+        val fileCanonical = runCatching { file.canonicalPath }.getOrNull() ?: file.absolutePath
+        val isPublicDownloadFile = publicDownloadsPath != null &&
+            fileCanonical.startsWith(publicDownloadsPath + File.separator)
+
+        if (!isPublicDownloadFile && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            runCatching {
+                val cleanDomain = domain?.replace(Regex("[^a-zA-Z0-9.-]"), "_")?.trim()?.takeIf { it.isNotBlank() }
+                val relPath = if (cleanDomain != null) {
+                    "${Environment.DIRECTORY_DOWNLOADS}/Emre Gallery/$cleanDomain"
+                } else {
+                    "${Environment.DIRECTORY_DOWNLOADS}/Emre Gallery"
+                }
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, effectiveMime)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    FileInputStream(file).use { input ->
+                        resolver.openOutputStream(uri)?.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    values.clear()
+                    values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                }
+            }
         } else {
-            baseDir
+            runCatching {
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(file.absolutePath),
+                    arrayOf(effectiveMime),
+                    null
+                )
+            }
         }
     }
 
@@ -1168,12 +1235,8 @@ object OkHttpDownloader {
 
         if (moved && finalFile.exists() && finalFile.length() > 0L) {
             metaFile.delete()
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(finalFile.absolutePath),
-                arrayOf(mimeType),
-                null
-            )
+            val inferredDomain = finalFile.parentFile?.name?.takeUnless { it == "Emre Gallery" }
+            publishToDownloadsMediaStoreIfAppPrivate(context, finalFile, mimeType, inferredDomain)
             return DownloadResult(
                 file = finalFile,
                 isSuccessful = true,
@@ -1262,12 +1325,7 @@ object OkHttpDownloader {
             }
 
             finalFile.writeBytes(decodedBytes)
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(finalFile.absolutePath),
-                arrayOf(mimeType),
-                null
-            )
+            publishToDownloadsMediaStoreIfAppPrivate(context, finalFile, mimeType, domain)
 
             DownloadResult(
                 file = finalFile,

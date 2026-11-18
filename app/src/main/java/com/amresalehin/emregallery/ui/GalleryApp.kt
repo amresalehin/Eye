@@ -1,11 +1,14 @@
 package com.amresalehin.emregallery.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -44,6 +47,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
@@ -130,8 +137,39 @@ fun GalleryApp() {
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     val lockedFolderPinHash by prefs.lockedFolderPinHash.collectAsStateWithLifecycle(initialValue = null)
+    val lockedFolderLockoutUntilMs by prefs.lockedFolderLockoutUntilMs.collectAsStateWithLifecycle(initialValue = 0L)
     var isLockedFolderUnlocked by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isViewingLockedItem = selectedMedia != null &&
+        (selectedMedia?.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, selectedMedia?.uri))
+    val isVaultSensitiveScreen = destination == Destination.LOCKED_FOLDER ||
+        (destination == Destination.VIEWER && isViewingLockedItem)
+
+    DisposableEffect(isVaultSensitiveScreen, context) {
+        val window = (context as? Activity)?.window
+        if (isVaultSensitiveScreen) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                isLockedFolderUnlocked = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     val isWelcomeCompletedInit = remember { prefs.isWelcomeCompletedSync() }
     val hasCompletedWelcomeFlow by prefs.hasCompletedWelcome.collectAsStateWithLifecycle(initialValue = isWelcomeCompletedInit)
     val hasCompletedWelcome = hasCompletedWelcomeFlow || isWelcomeCompletedInit
@@ -247,29 +285,6 @@ fun GalleryApp() {
     fun permanentlyDelete(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val itemUris = items.map { it.uri }.distinct()
-        if (hasAllFilesAccess()) {
-            scope.launch {
-                val deleted = withContext(Dispatchers.IO) {
-                    itemUris.filter { uri ->
-                        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) > 0 }.getOrDefault(false)
-                    }
-                }
-                if (deleted.isNotEmpty()) {
-                    withContext(Dispatchers.IO) {
-                        FaceClusterStore(context).deleteMediaCompletely(deleted)
-                    }
-                    prefs.removePermanently(deleted)
-                    refreshMedia()
-                    snackbarHostState.showSnackbar(
-                        message = "${deleted.size} ${if (deleted.size == 1) "item" else "items"} permanently deleted",
-                        duration = SnackbarDuration.Short
-                    )
-                } else {
-                    snackbarHostState.showSnackbar("Permission denied: could not delete files")
-                }
-            }
-            return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -329,23 +344,6 @@ fun GalleryApp() {
     fun restoreFromDeviceTrash(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val uris = items.map { it.uri }.distinct()
-        if (hasAllFilesAccess()) {
-            scope.launch {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val cv = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 0)
-                    }
-                    withContext(Dispatchers.IO) {
-                        uris.forEach { u ->
-                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
-                        }
-                    }
-                }
-                prefs.setInBinBatch(uris.toSet(), false)
-                refreshMedia()
-            }
-            return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -399,32 +397,6 @@ fun GalleryApp() {
     fun moveToDeviceTrash(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val uris = items.map { it.uri }.distinct()
-        if (hasAllFilesAccess()) {
-            scope.launch {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val cv = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 1)
-                    }
-                    withContext(Dispatchers.IO) {
-                        uris.forEach { u ->
-                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
-                        }
-                    }
-                }
-                prefs.setInBinBatch(uris.toSet(), true)
-                prefs.setHiddenBatch(uris.toSet(), false)
-                refreshMedia()
-                val res = snackbarHostState.showSnackbar(
-                    message = if (uris.size == 1) "Moved to Bin" else "${uris.size} items moved to Bin",
-                    actionLabel = "Undo",
-                    duration = SnackbarDuration.Short
-                )
-                if (res == SnackbarResult.ActionPerformed) {
-                    restoreFromDeviceTrash(items)
-                }
-            }
-            return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -460,6 +432,23 @@ fun GalleryApp() {
         }
     }
 
+    val vaultOriginDeleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { _ ->
+        refreshMedia()
+    }
+
+    fun requestVaultOriginDeletion(pendingUris: List<String>) {
+        if (pendingUris.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            val request = android.provider.MediaStore.createDeleteRequest(
+                context.contentResolver,
+                pendingUris.map { Uri.parse(it) }
+            )
+            vaultOriginDeleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+        }
+    }
+
     fun moveItemsToLocked(uris: Set<String>) {
         if (uris.isEmpty()) return
         if (lockedFolderPinHash.isNullOrBlank()) {
@@ -468,10 +457,12 @@ fun GalleryApp() {
             scope.launch {
                 val itemsToLock = media.filter { it.uri in uris }
                 if (itemsToLock.isNotEmpty()) {
-                    val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(itemsToLock) }
+                    val lockResult = withContext(Dispatchers.IO) { lockedVaultManager.lockItemsWithPendingDeletes(itemsToLock) }
+                    val lockedList = lockResult.lockedItems
                     lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
                     prefs.setHiddenBatch(uris, true)
                     refreshMedia()
+                    requestVaultOriginDeletion(lockResult.pendingDeleteUris)
                     val res = snackbarHostState.showSnackbar(
                         message = if (uris.size == 1) "Moved to Locked folder" else "${uris.size} items moved to Locked folder",
                         actionLabel = "Undo",
@@ -769,8 +760,7 @@ fun GalleryApp() {
 
     val hasMediaPerm = hasMediaPermission(context)
     val hasNotifPerm = hasNotificationPermission(context)
-    val hasAllFilesPerm = hasAllFilesAccess()
-    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
+    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm)
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
             initialStep = if (hasCompletedWelcome) 2 else 0,
@@ -1022,6 +1012,7 @@ fun GalleryApp() {
                             availableGalleryMedia = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                             isUnlocked = isLockedFolderUnlocked,
                             hasPinSet = !lockedFolderPinHash.isNullOrBlank(),
+                            lockoutUntilMs = lockedFolderLockoutUntilMs,
                             onBack = {
                                 isLockedFolderUnlocked = false
                                 performBackNavigation()
@@ -1061,7 +1052,10 @@ fun GalleryApp() {
                             },
                             onSetPin = { newPin -> scope.launch { prefs.setLockedFolderPin(newPin) } },
                             onVerifyPin = { pin -> prefs.verifyLockedFolderPin(pin) },
-                            onUnlockSuccess = { isLockedFolderUnlocked = true },
+                            onUnlockSuccess = {
+                                scope.launch { prefs.resetLockedFolderLockout() }
+                                isLockedFolderUnlocked = true
+                            },
                             onLockAgain = { isLockedFolderUnlocked = false }
                         )
                     }
@@ -1479,10 +1473,12 @@ fun GalleryApp() {
                     } else {
                         scope.launch {
                             if (!isAlreadyLocked) {
-                                val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(listOf(currentItem)) }
+                                val lockResult = withContext(Dispatchers.IO) { lockedVaultManager.lockItemsWithPendingDeletes(listOf(currentItem)) }
+                                val lockedList = lockResult.lockedItems
                                 lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
                                 prefs.setHidden(currentItem.uri, true)
                                 refreshMedia()
+                                requestVaultOriginDeletion(lockResult.pendingDeleteUris)
                                 val res = snackbarHostState.showSnackbar(
                                     message = "Moved to Locked folder",
                                     actionLabel = "Undo",
@@ -1768,7 +1764,7 @@ fun GalleryApp() {
             },
             text = {
                 Text(
-                    "Create a 4-digit PIN first so you can safely access and protect your locked photos.",
+                    "Create a 6-digit PIN first so you can safely access and protect your locked photos.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -1865,12 +1861,28 @@ fun GalleryApp() {
 }
 
 private fun shareMultipleMediaItems(context: android.content.Context, items: List<MediaItem>) {
-    if (items.isEmpty()) return
+    val shareable = items.filterNot {
+        it.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, it.uri)
+    }
+    if (shareable.isEmpty()) {
+        if (items.isNotEmpty()) {
+            Toast.makeText(context, "Move out of Locked folder to share", Toast.LENGTH_SHORT).show()
+        }
+        return
+    }
+    fun resolveShareUri(rawUriString: String): Uri {
+        val raw = Uri.parse(rawUriString)
+        return if (raw.scheme == "file" && raw.path != null) {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(raw.path!!))
+        } else {
+            raw
+        }
+    }
     runCatching {
         val activity = context as? android.app.Activity
-        if (items.size == 1) {
-            val item = items.first()
-            val parsedUri = Uri.parse(item.uri)
+        if (shareable.size == 1) {
+            val item = shareable.first()
+            val parsedUri = resolveShareUri(item.uri)
             val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = mimeType
@@ -1886,17 +1898,17 @@ private fun shareMultipleMediaItems(context: android.content.Context, items: Lis
             }
             context.startActivity(chooserIntent)
         } else {
-            val uris = ArrayList(items.map { Uri.parse(it.uri) })
-            val allImages = items.all { !it.isVideo }
-            val allVideos = items.all { it.isVideo }
-            val commonMime = items.mapNotNull { it.mimeType }.distinct().singleOrNull()
+            val uris = ArrayList(shareable.map { resolveShareUri(it.uri) })
+            val allImages = shareable.all { !it.isVideo }
+            val allVideos = shareable.all { it.isVideo }
+            val commonMime = shareable.mapNotNull { it.mimeType }.distinct().singleOrNull()
             val mimeType = commonMime ?: when {
                 allImages -> "image/*"
                 allVideos -> "video/*"
                 else -> "*/*"
             }
             val firstUri = uris.first()
-            val clipData = android.content.ClipData.newUri(context.contentResolver, items.first().name, firstUri)
+            val clipData = android.content.ClipData.newUri(context.contentResolver, shareable.first().name, firstUri)
             for (i in 1 until uris.size) {
                 clipData.addItem(android.content.ClipData.Item(uris[i]))
             }

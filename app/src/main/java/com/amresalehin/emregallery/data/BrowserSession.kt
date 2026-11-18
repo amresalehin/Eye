@@ -72,7 +72,29 @@ class BrowserTabSession(
     fun registerMediaBatch(items: List<ScrapedMediaItem>, pageTitleHint: String? = null) {
         if (items.isEmpty()) return
         synchronized(itemsLock) {
-            val modified = MediaNormalizer.mergeCandidates(candidatesMap, items)
+            val remaining = (MAX_DISCOVERED_MEDIA_ITEMS - candidatesMap.size).coerceAtLeast(0)
+            val filtered = if (remaining > 0) {
+                items.filter { item ->
+                    val key = MediaNormalizer.canonicalKey(item.url)
+                    candidatesMap.containsKey(key) || candidatesMap.size < MAX_DISCOVERED_MEDIA_ITEMS
+                }.take(remaining + items.count { candidatesMap.containsKey(MediaNormalizer.canonicalKey(it.url)) })
+            } else {
+                items.filter { candidatesMap.containsKey(MediaNormalizer.canonicalKey(it.url)) }
+            }
+            if (filtered.isEmpty()) return
+            val bounded = ArrayList<ScrapedMediaItem>(filtered.size)
+            var newAdditions = 0
+            for (item in filtered) {
+                val key = MediaNormalizer.canonicalKey(item.url)
+                if (candidatesMap.containsKey(key)) {
+                    bounded.add(item)
+                } else if (candidatesMap.size + newAdditions < MAX_DISCOVERED_MEDIA_ITEMS) {
+                    bounded.add(item)
+                    newAdditions++
+                }
+            }
+            if (bounded.isEmpty()) return
+            val modified = MediaNormalizer.mergeCandidates(candidatesMap, bounded)
             if (modified) {
                 val list = candidatesMap.values.toList()
                 _detectedItems.value = list
@@ -83,6 +105,10 @@ class BrowserTabSession(
         if (!pageTitleHint.isNullOrBlank()) {
             _title.value = pageTitleHint
         }
+    }
+
+    companion object {
+        const val MAX_DISCOVERED_MEDIA_ITEMS = 500
     }
 
     fun getDetectedMedia(): List<ScrapedMediaItem> {
@@ -145,8 +171,14 @@ object BrowserSession {
     class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
         @android.webkit.JavascriptInterface
         fun reportMedia(url: String?) {
-            if (!url.isNullOrBlank()) {
-                onMediaFound(url)
+            val trimmed = url?.trim() ?: return
+            if (trimmed.isEmpty() || trimmed.length > 16384) return
+            val lower = trimmed.lowercase(Locale.ROOT)
+            val isAllowedScheme = lower.startsWith("http://") ||
+                lower.startsWith("https://") ||
+                lower.startsWith("data:image/")
+            if (isAllowedScheme) {
+                onMediaFound(trimmed)
             }
         }
     }
@@ -237,7 +269,7 @@ object BrowserSession {
                     loadWithOverviewMode = true
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                 }
 
@@ -245,9 +277,21 @@ object BrowserSession {
 
                 fun ingest(items: List<ScrapedMediaItem>) {
                     if (items.isEmpty() || isCompleted) return
-                    val modified = MediaNormalizer.mergeCandidates(seenMap, items)
+                    val bounded = ArrayList<ScrapedMediaItem>(items.size)
+                    var newAdditions = 0
+                    for (it in items) {
+                        val key = MediaNormalizer.canonicalKey(it.url)
+                        if (seenMap.containsKey(key)) {
+                            bounded.add(it)
+                        } else if (seenMap.size + newAdditions < BrowserTabSession.MAX_DISCOVERED_MEDIA_ITEMS) {
+                            bounded.add(it)
+                            newAdditions++
+                        }
+                    }
+                    if (bounded.isEmpty()) return
+                    val modified = MediaNormalizer.mergeCandidates(seenMap, bounded)
                     if (modified) {
-                        for (it in items) {
+                        for (it in bounded) {
                             onMediaDiscovered(it)
                             if (publishToDownloader) {
                                 DownloaderSession.addDiscoveredItem(it)
@@ -488,7 +532,7 @@ object BrowserSession {
                     loadWithOverviewMode = true
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     userAgentString = BotDetectionMitigator.STEALTH_USER_AGENT
                 }
 

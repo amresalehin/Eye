@@ -196,10 +196,10 @@ object GalleryDlEngine {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get gallery-dl status", e)
             GalleryDlStatus(
-                available = true,
-                version = "1.32.19",
+                available = false,
+                version = "Unavailable",
                 engineName = "yt-dlp (Primary) / gallery-dl (Secondary)",
-                supportedExtractorsCount = 287,
+                supportedExtractorsCount = 0,
                 popularSites = defaultPopularSites()
             )
         }
@@ -540,6 +540,11 @@ object GalleryDlEngine {
                     }
 
                     if (targetFile.exists() && targetFile.length() > 0L) {
+                        OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(
+                            context = context,
+                            file = targetFile,
+                            domain = effectiveDomain
+                        )
                         return@withContext targetFile
                     }
                 }

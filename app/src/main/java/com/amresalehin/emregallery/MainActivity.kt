@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery
 
-import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
@@ -15,10 +14,6 @@ import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 class MainActivity : FragmentActivity() {
-
-    private val prefs by lazy {
-        getSharedPreferences("window_refresh_rate_state", Context.MODE_PRIVATE)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,15 +37,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-apply and persist high refresh rate state when returning from pause/background
         applyHighRefreshRate()
-        prefs.edit().putBoolean("is_paused", false).apply()
-    }
-
-    override fun onPause() {
-        // Persist pause state
-        prefs.edit().putBoolean("is_paused", true).putLong("paused_at", System.currentTimeMillis()).apply()
-        super.onPause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -97,8 +84,6 @@ class MainActivity : FragmentActivity() {
 
             currentWindow.attributes = params
         }
-
-        prefs.edit().putFloat("configured_refresh_rate", targetFps).apply()
     }
 
     private fun warmupChromiumEngine() {

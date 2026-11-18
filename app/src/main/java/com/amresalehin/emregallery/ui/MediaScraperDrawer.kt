@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap
  * This composable delegates directly to DownloaderResultsPage to avoid maintaining duplicate
  * extraction pipelines.
  */
-@Deprecated("Use DownloaderResultsPage directly instead")
+@Deprecated("Use DiscoveredMediaPage + ExtractionCoordinator directly instead")
 @Composable
 fun MediaScraperDrawer(
     initialUrl: String? = null,
@@ -48,13 +48,25 @@ fun MediaScraperDrawer(
     showSearchBar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val coordinator = remember(context) { ExtractionCoordinator(context) }
+
+    LaunchedEffect(initialUrl) {
+        if (!initialUrl.isNullOrBlank()) {
+            DownloaderSession.startSession(initialUrl)
+            coordinator.extract(initialUrl, scope)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { coordinator.cancel() }
+    }
+
     if (!initialUrl.isNullOrBlank()) {
-        DownloaderResultsPage(
-            targetUrl = initialUrl,
+        DiscoveredMediaPage(
             onBack = onClose,
-            onOpenBrowser = onOpenBrowser,
-            onDownloadComplete = { onDownloadComplete() },
-            onViewSavedLibrary = onClose,
+            onDeepScanClick = { onOpenBrowser?.invoke(initialUrl) },
             modifier = modifier
         )
     }

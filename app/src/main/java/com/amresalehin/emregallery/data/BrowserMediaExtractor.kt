@@ -130,7 +130,7 @@ class BrowserMediaExtractor(private val context: Context) {
                     loadWithOverviewMode = true
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                     cacheMode = WebSettings.LOAD_DEFAULT
                     javaScriptCanOpenWindowsAutomatically = true
@@ -195,6 +195,9 @@ class BrowserMediaExtractor(private val context: Context) {
                     synchronized(seenMap) {
                         val existing = seenMap[key]
                         if (existing != null && MediaClassifier.compareMediaQuality(candidateItem, existing) <= 0) {
+                            return
+                        }
+                        if (existing == null && seenMap.size >= BrowserTabSession.MAX_DISCOVERED_MEDIA_ITEMS) {
                             return
                         }
                         seenMap[key] = candidateItem
@@ -499,8 +502,14 @@ class BrowserMediaExtractor(private val context: Context) {
         @Keep
         @android.webkit.JavascriptInterface
         fun reportMedia(url: String?) {
-            if (!url.isNullOrBlank()) {
-                onMediaFound(url)
+            val trimmed = url?.trim() ?: return
+            if (trimmed.isEmpty() || trimmed.length > 16384) return
+            val lower = trimmed.lowercase(Locale.ROOT)
+            val isAllowedScheme = lower.startsWith("http://") ||
+                lower.startsWith("https://") ||
+                lower.startsWith("data:image/")
+            if (isAllowedScheme) {
+                onMediaFound(trimmed)
             }
         }
     }

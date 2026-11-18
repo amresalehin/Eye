@@ -7,7 +7,7 @@ import android.webkit.WebView
 import coil.Coil
 
 /**
- * Actively monitors and enforces the 30% RAM limit to prevent app freezes,
+ * Actively monitors and enforces the 80% RAM limit to prevent app freezes,
  * OutOfMemory crashes, and Chromium renderer termination (code -1) on pages
  * with infinite scroll or heavy media buffers.
  */
@@ -15,12 +15,12 @@ object RamGovernor {
     private const val TAG = "RamGovernor"
 
     /**
-     * Strict 30% RAM threshold.
+     * Strict 80% RAM threshold.
      */
-    const val MAX_RAM_FRACTION = 0.30
+    const val MAX_RAM_FRACTION = 0.80
 
     /**
-     * Checks if current JVM heap usage has reached or exceeded the 30% RAM threshold.
+     * Checks if current JVM heap usage has reached or exceeded the 80% RAM threshold.
      */
     fun isHeapLimitExceeded(): Boolean {
         val runtime = Runtime.getRuntime()
@@ -43,14 +43,14 @@ object RamGovernor {
     }
 
     /**
-     * Enforces the 30% RAM ceiling by clearing Coil in-memory bitmap caches,
-     * dropping temporary decoders, clearing WebView RAM buffers, and triggering GC.
+     * Enforces the 80% RAM ceiling by clearing Coil in-memory bitmap caches,
+     * dropping temporary decoders, and clearing WebView RAM buffers.
      */
     fun enforceLimit(context: Context? = null, webView: WebView? = null) {
         if (!isHeapLimitExceeded()) return
 
         val fraction = getHeapUsageFraction()
-        Log.w(TAG, "Heap usage is ${(fraction * 100).toInt()}% (exceeds 30% RAM limit). Enforcing memory reclaim.")
+        Log.w(TAG, "Heap usage is ${(fraction * 100).toInt()}% (exceeds 80% RAM limit). Enforcing memory reclaim.")
 
         // 1. Evict in-memory Coil bitmap caches
         context?.let { ctx ->
@@ -70,9 +70,6 @@ object RamGovernor {
         try {
             webView?.clearCache(false)
         } catch (_: Throwable) {}
-
-        // 4. Force JVM garbage collection
-        System.gc()
     }
 
     /**

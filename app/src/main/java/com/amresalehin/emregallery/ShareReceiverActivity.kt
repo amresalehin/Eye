@@ -22,26 +22,42 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.data.BrowserSession
+import com.amresalehin.emregallery.data.DownloaderSession
+import com.amresalehin.emregallery.data.ExtractionCoordinator
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
-import com.amresalehin.emregallery.ui.DownloaderResultsPage
-import com.amresalehin.emregallery.ui.FullScreenBrowserView
+import com.amresalehin.emregallery.ui.DirectBrowserView
+import com.amresalehin.emregallery.ui.DiscoveredMediaPage
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * Translucent share-sheet target that opens directly over the sharing app
@@ -137,6 +153,19 @@ private fun ShareReceiverScreen(
     var showLiveBrowser by remember { mutableStateOf(false) }
     var liveBrowserUrl by remember { mutableStateOf(url) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val coordinator = remember(context) { ExtractionCoordinator(context) }
+    val extractionState by coordinator.state.collectAsState()
+
+    LaunchedEffect(url) {
+        liveBrowserUrl = url
+        DownloaderSession.startSession(url)
+        coordinator.extract(url, scope)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { coordinator.cancel() }
+    }
 
     BackHandler {
         if (showLiveBrowser) {
@@ -156,19 +185,19 @@ private fun ShareReceiverScreen(
                 onClick = onDismiss
             )
             .testTag("share_receiver_root"),
-        contentAlignment = androidx.compose.ui.Alignment.BottomCenter
+        contentAlignment = Alignment.BottomCenter
     ) {
         androidx.compose.material3.Surface(
             shape = androidx.compose.foundation.shape.RoundedCornerShape(
-                topStart = androidx.compose.ui.unit.Dp(28f),
-                topEnd = androidx.compose.ui.unit.Dp(28f)
+                topStart = 28.dp,
+                topEnd = 28.dp
             ),
-            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
-            tonalElevation = androidx.compose.ui.unit.Dp(6f),
-            shadowElevation = androidx.compose.ui.unit.Dp(16f),
+            color = MaterialTheme.colorScheme.background,
+            tonalElevation = 6.dp,
+            shadowElevation = 16.dp,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = androidx.compose.ui.unit.Dp(96f))
+                .padding(top = 96.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -176,55 +205,107 @@ private fun ShareReceiverScreen(
                 )
                 .testTag("share_receiver_bottom_sheet")
         ) {
-            androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 // Drag handle pill at top of translucent bottom sheet
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = androidx.compose.ui.unit.Dp(10f), bottom = androidx.compose.ui.unit.Dp(2f)),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
+                        .padding(top = 10.dp, bottom = 2.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(androidx.compose.ui.unit.Dp(38f))
-                            .height(androidx.compose.ui.unit.Dp(4f))
+                            .width(38.dp)
+                            .height(4.dp)
                             .background(
-                                androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                                 androidx.compose.foundation.shape.CircleShape
                             )
                     )
                 }
 
-                DownloaderResultsPage(
-                    targetUrl = url,
+                // Live extraction status bar with direct Browser and Library actions
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (extractionState.isRunning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Text(
+                        text = extractionState.errorMessage
+                            ?: extractionState.statusMessage.ifBlank { "Scanning shared link..." },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (extractionState.errorMessage != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = {
+                            BrowserSession.savedBrowserSite = liveBrowserUrl
+                            showLiveBrowser = true
+                        },
+                        modifier = Modifier.testTag("share_open_browser_btn")
+                    ) {
+                        Text("Browser")
+                    }
+                    TextButton(
+                        onClick = {
+                            val mainIntent = Intent(context, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            }
+                            context.startActivity(mainIntent)
+                            onDismiss()
+                        },
+                        modifier = Modifier.testTag("share_open_library_btn")
+                    ) {
+                        Text("Library")
+                    }
+                }
+                if (extractionState.isRunning) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
+                DiscoveredMediaPage(
                     onBack = onDismiss,
-                    onOpenBrowser = { browserUrl ->
-                        liveBrowserUrl = browserUrl
+                    onDeepScanClick = {
+                        BrowserSession.savedBrowserSite = liveBrowserUrl
                         showLiveBrowser = true
                     },
-                    onDownloadComplete = { _ ->
-                        onDownloadComplete()
-                    },
-                    onViewSavedLibrary = {
-                        val mainIntent = Intent(context, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        }
-                        context.startActivity(mainIntent)
-                        onDismiss()
-                    },
+                    isDeepScanning = extractionState.isRunning,
                     modifier = Modifier.fillMaxSize()
                 )
             }
         }
 
         if (showLiveBrowser) {
-            FullScreenBrowserView(
+            DirectBrowserView(
                 initialUrl = liveBrowserUrl,
                 onClose = {
                     showLiveBrowser = false
                 },
-                onDownloadComplete = {
+                onMediaExtracted = { item ->
+                    DownloaderSession.addDiscoveredItem(item)
+                },
+                onBatchExtracted = { batch, title, _ ->
+                    DownloaderSession.addDiscoveredItems(batch, title)
+                },
+                onOpenDownloads = {
                     onDownloadComplete()
+                },
+                onOpenDiscoveredMedia = {
+                    showLiveBrowser = false
                 },
                 modifier = Modifier.fillMaxSize().zIndex(25f)
             )

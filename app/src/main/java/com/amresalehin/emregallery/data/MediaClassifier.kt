@@ -1173,6 +1173,11 @@ object MediaClassifier {
      * used for deterministic quality comparisons when deduplicating variants.
      */
     fun parsePixelArea(item: ScrapedMediaItem): Long? {
+        val w = item.width
+        val h = item.height
+        if (w != null && h != null && w > 0 && h > 0) {
+            return w.toLong() * h.toLong()
+        }
         return parsePixelArea(item.resolutionHint, item.url)
     }
 
@@ -1772,7 +1777,7 @@ object MediaClassifier {
             val normName = item.title
                 .lowercase(Locale.ROOT)
                 .substringBeforeLast('.')
-                .replace(Regex("[\s_-]+"), " ")
+                .replace(Regex("""[\s_-]+"""), " ")
                 .trim()
             val metaKey = if (normName.length >= 4 && !normName.startsWith("media ") && !normName.startsWith("image ")) {
                 "${item.category.name}|$normName|${item.sizeBytes ?: -1L}"

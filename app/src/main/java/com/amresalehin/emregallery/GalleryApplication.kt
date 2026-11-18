@@ -9,7 +9,9 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import com.amresalehin.emregallery.data.VaultImageFetcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -45,6 +47,7 @@ class GalleryApplication : Application() {
                     .build()
             }
             .components {
+                add(VaultImageFetcher.Factory(this@GalleryApplication))
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
             }
@@ -66,12 +69,13 @@ class GalleryApplication : Application() {
         // Initialize Chaquopy Python SDK and gallery-dl media engine asynchronously in the background.
         // Running this off the UI thread eliminates the 2-4s main thread blockage on cold start,
         // allowing activities to launch instantly.
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        val appScope = kotlinx.coroutines.CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        appScope.launch {
             com.amresalehin.emregallery.data.GalleryDlEngine.init(this@GalleryApplication)
         }
 
         // Initialize DownloadActivityManager in background to avoid synchronous disk I/O on UI thread
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        appScope.launch {
             com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
         }
 
@@ -126,7 +130,6 @@ class GalleryApplication : Application() {
                 level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_COMPLETE || com.amresalehin.emregallery.data.RamGovernor.isHeapLimitExceeded() -> {
                     coilCache?.clear()
                     com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
-                    System.gc()
                 }
                 level >= TRIM_MEMORY_RUNNING_MODERATE || level >= TRIM_MEMORY_BACKGROUND -> {
                     coilCache?.trimMemory(level)

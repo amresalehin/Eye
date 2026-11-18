@@ -36,29 +36,6 @@ fun hasNotificationPermission(context: Context): Boolean {
     }
 }
 
-fun hasAllFilesAccess(): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        android.os.Environment.isExternalStorageManager()
-    } else {
-        true
-    }
-}
-
-fun requestAllFilesAccess(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val intent = try {
-            android.content.Intent(
-                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:${context.packageName}")
-            )
-        } catch (_: Exception) {
-            android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-        }
-        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { context.startActivity(intent) }
-    }
-}
-
 fun hasMediaLocationPermission(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED

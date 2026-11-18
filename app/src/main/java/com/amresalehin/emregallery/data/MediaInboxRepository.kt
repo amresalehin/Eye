@@ -32,7 +32,9 @@ data class MediaInboxStack(
     val items: List<MediaInboxItem>,
     val timestampMillis: Long = System.currentTimeMillis(),
     val description: String = "",
-    val previewImageUrl: String = ""
+    val previewImageUrl: String = "",
+    val tagIds: List<String> = emptyList(),
+    val notes: String = ""
 )
 
 class MediaInboxRepository(private val context: Context) {

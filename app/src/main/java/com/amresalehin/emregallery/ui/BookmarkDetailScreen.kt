@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -142,16 +143,25 @@ fun BookmarkDetailScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Edit Bookmark Dialog
+        val allTags by pocketRepo.tags.collectAsState()
+
+        // Edit Bookmark Dialog (with Faved nested tags & personal notes)
         editingStack?.let { currentEditing ->
             EditBookmarkDialog(
                 stack = currentEditing,
+                allTags = allTags,
+                onQuickCreateTag = { rawPath ->
+                    val segs = rawPath.split("/", "→").map { it.trim() }.filter { it.isNotBlank() }
+                    pocketRepo.getOrCreateTagPath(segs).first
+                },
                 onDismiss = { editingStack = null },
-                onSave = { updatedTitle, updatedDesc, updatedPreview ->
+                onSave = { updatedTitle, updatedDesc, updatedPreview, updatedTagIds, updatedNotes ->
                     val updated = currentEditing.copy(
                         title = updatedTitle,
                         description = updatedDesc,
-                        previewImageUrl = updatedPreview
+                        previewImageUrl = updatedPreview,
+                        tagIds = updatedTagIds,
+                        notes = updatedNotes
                     )
                     pocketRepo.updateBookmark(updated)
                     editingStack = null
@@ -1049,12 +1059,19 @@ fun PocketBookmarkViewerPage(
                                 dividerCol = dividerCol
                             )
 
-                            // 4. Tags Row
+                            // 4. Tags Row (Faved customizable nested tags + derived metadata chips, tap to edit)
+                            val viewerAllTags by pocketRepo.tags.collectAsState()
+                            val assignedFavedTags = remember(stack.tagIds, viewerAllTags) {
+                                val byId = viewerAllTags.associateBy { it.id }
+                                stack.tagIds.mapNotNull { byId[it] }
+                            }
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
                                 color = barSurface,
                                 border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(onClick = onEditNote)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1078,28 +1095,48 @@ fun PocketBookmarkViewerPage(
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .horizontalScroll(rememberScrollState())
                                     ) {
-                                        derivedTags.forEach { tag ->
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = PocketThemeColors.tagChipBg(isDark),
-                                                border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
-                                                modifier = Modifier.height(28.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                        if (assignedFavedTags.isNotEmpty()) {
+                                            assignedFavedTags.forEach { fTag ->
+                                                FavedTagPill(
+                                                    tag = fTag,
+                                                    isDark = isDark,
+                                                    showFullPath = true,
+                                                    allTags = viewerAllTags
+                                                )
+                                            }
+                                        } else {
+                                            derivedTags.forEach { tag ->
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = PocketThemeColors.tagChipBg(isDark),
+                                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
+                                                    modifier = Modifier.height(28.dp)
                                                 ) {
-                                                    Text(
-                                                        text = tag,
-                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                                                        color = textColor
-                                                    )
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.padding(horizontal = 10.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = tag,
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                                            color = textColor
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit tags",
+                                        tint = secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
                             }
 
@@ -1283,11 +1320,11 @@ fun PocketBookmarkViewerPage(
                                 }
                             }
 
-                            // 7. Note Row (Clickable to edit note)
+                            // 7. Note Row (Clickable to edit personal note & tags)
                             PocketDetailCardRow(
                                 icon = Icons.Default.Description,
                                 label = "Note",
-                                value = stack.description.ifBlank { "Tap to add note" },
+                                value = stack.notes.ifBlank { stack.description.ifBlank { "Tap to add note" } },
                                 trailingIcon = Icons.Default.Edit,
                                 onClick = onEditNote,
                                 textColor = textColor,

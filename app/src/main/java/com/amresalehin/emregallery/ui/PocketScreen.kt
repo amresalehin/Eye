@@ -7,6 +7,15 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import com.amresalehin.emregallery.data.BookmarkDisplayFields
+import com.amresalehin.emregallery.data.BookmarkImportResult
+import com.amresalehin.emregallery.data.BookmarkLayoutMode
+import com.amresalehin.emregallery.data.FavedTag
+import com.amresalehin.emregallery.data.FavedTagTreeHelper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -204,6 +213,19 @@ fun PocketScreen(
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val pocketRepo = remember { PocketRepository.getInstance(context) }
     val stacks by pocketRepo.bookmarks.collectAsState()
+    val allTags by pocketRepo.tags.collectAsState()
+    val tagRollupEnabled by pocketRepo.tagRollupEnabled.collectAsState()
+    val layoutMode by pocketRepo.layoutMode.collectAsState()
+    val displayFields by pocketRepo.displayFields.collectAsState()
+
+    var selectedTagId by remember { mutableStateOf<String?>(null) }
+    var untaggedOnly by remember { mutableStateOf(false) }
+    var showTagsSheet by remember { mutableStateOf(false) }
+    var tagEditorState by remember { mutableStateOf<Pair<FavedTag?, String?>?>(null) }
+    var tagPendingDelete by remember { mutableStateOf<FavedTag?>(null) }
+    var showBulkTagDialog by remember { mutableStateOf(false) }
+    var showImportExportDialog by remember { mutableStateOf(false) }
+    var lastImportResult by remember { mutableStateOf<BookmarkImportResult?>(null) }
 
     var searchQuery by remember { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
@@ -234,6 +256,81 @@ fun PocketScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val importFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val fileName = uri.lastPathSegment.orEmpty()
+                val content = runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                }.getOrNull().orEmpty()
+                val result = if (content.isBlank()) {
+                    BookmarkImportResult(errorMessage = "Selected file is empty or unreadable")
+                } else {
+                    pocketRepo.importBookmarksFromText(content, fileName)
+                }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    lastImportResult = result
+                    val msg = result.errorMessage
+                        ?: "Imported ${result.importedCount} bookmarks (${result.tagsCreated} tags created)"
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
+        }
+    }
+
+    val exportHtmlLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/html")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val ok = runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use {
+                        it.write(pocketRepo.exportBookmarksAsHtml())
+                    }
+                }.isSuccess
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    snackbarHostState.showSnackbar(if (ok) "Exported bookmarks to HTML" else "HTML export failed")
+                }
+            }
+        }
+    }
+
+    val exportCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val ok = runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use {
+                        it.write(pocketRepo.exportBookmarksAsCsv())
+                    }
+                }.isSuccess
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    snackbarHostState.showSnackbar(if (ok) "Exported bookmarks to CSV" else "CSV export failed")
+                }
+            }
+        }
+    }
+
+    val exportJsonLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val ok = runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use {
+                        it.write(pocketRepo.exportBookmarksAsJson())
+                    }
+                }.isSuccess
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    snackbarHostState.showSnackbar(if (ok) "Exported bookmarks to JSON" else "JSON export failed")
+                }
+            }
+        }
+    }
+
     // Clipboard check for quick paste affordance
     val clipboardManager = remember {
         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -254,14 +351,13 @@ fun PocketScreen(
         }
     }
 
-    // Filter and sort stacks
+    // Filter and sort stacks (with Faved nested tag filtering, rollup, and full-text tag/note search)
     val filteredStacks = remember(
-        stacks, searchQuery, sortOrder, filterType,
+        stacks, allTags, selectedTagId, untaggedOnly, tagRollupEnabled,
+        searchQuery, sortOrder, filterType,
         showSvg, showVideos, showStreams, showPng, showGif,
         minWidth, minHeight, minSizeKb
     ) {
-        // When type filters, dimensions, or size are set, hide non-compliant media items from found media
-        // within the bookmark stack, displaying the bookmark itself and remaining compliant media items.
         val sanitized = stacks.map { stack ->
             pocketRepo.sanitizeStack(
                 stack = stack,
@@ -276,6 +372,8 @@ fun PocketScreen(
             )
         }
 
+        val tagPathById = allTags.associate { it.id to FavedTagTreeHelper.buildHierarchyPath(it.id, allTags) }
+
         var result = sanitized.filter { stack ->
             val matchesQuery = if (searchQuery.isBlank()) {
                 true
@@ -283,21 +381,34 @@ fun PocketScreen(
                 stack.title.contains(searchQuery, ignoreCase = true) ||
                         stack.sourceDomain.contains(searchQuery, ignoreCase = true) ||
                         stack.sourceUrl.contains(searchQuery, ignoreCase = true) ||
-                        stack.description.contains(searchQuery, ignoreCase = true)
+                        stack.description.contains(searchQuery, ignoreCase = true) ||
+                        stack.notes.contains(searchQuery, ignoreCase = true) ||
+                        stack.tagIds.any { tid -> tagPathById[tid]?.contains(searchQuery, ignoreCase = true) == true }
             }
 
             val matchesFilter = when (filterType) {
                 "Web Links" -> stack.sourceUrl.isNotBlank()
-                "Notes" -> stack.description.isNotBlank()
+                "Notes" -> stack.notes.isNotBlank() || stack.description.isNotBlank()
+                "Untagged" -> stack.tagIds.isEmpty()
+                "Has Media" -> stack.items.isNotEmpty()
                 else -> true
             }
 
-            matchesQuery && matchesFilter
+            val matchesTag = FavedTagTreeHelper.bookmarkMatchesTagFilter(
+                bookmark = stack,
+                selectedTagId = selectedTagId,
+                untaggedOnly = untaggedOnly,
+                rollupEnabled = tagRollupEnabled,
+                allTags = allTags
+            )
+
+            matchesQuery && matchesFilter && matchesTag
         }
 
         result = when (sortOrder) {
             "Oldest" -> result.sortedBy { it.timestampMillis }
             "Title" -> result.sortedBy { it.title.lowercase() }
+            "Title (Z-A)" -> result.sortedByDescending { it.title.lowercase() }
             "Domain" -> result.sortedBy { it.sourceDomain.lowercase() }
             else -> result.sortedByDescending { it.timestampMillis } // Newest
         }
@@ -363,6 +474,15 @@ fun PocketScreen(
                                             putExtra(Intent.EXTRA_TEXT, urlsToShare.joinToString("\n\n"))
                                         }
                                         context.startActivity(Intent.createChooser(shareIntent, "Share bookmarks"))
+                                    }
+                                },
+                                onBulkTag = { showBulkTagDialog = true },
+                                onBulkRefetch = {
+                                    pocketRepo.bulkRefreshMetadata(selectedStackIds, context)
+                                    val count = selectedStackIds.size
+                                    selectedStackIds = emptySet()
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Refreshing metadata for $count bookmarks...")
                                     }
                                 },
                                 onDelete = { showDeleteConfirmDialog = true },
@@ -457,6 +577,40 @@ fun PocketScreen(
                                 isDark = isDark,
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            Spacer(Modifier.height(8.dp))
+
+                            FavedQuickBar(
+                                tags = allTags,
+                                selectedTagId = selectedTagId,
+                                untaggedOnly = untaggedOnly,
+                                tagRollupEnabled = tagRollupEnabled,
+                                layoutMode = layoutMode,
+                                onSelectAll = {
+                                    selectedTagId = null
+                                    untaggedOnly = false
+                                },
+                                onSelectUntagged = {
+                                    selectedTagId = null
+                                    untaggedOnly = true
+                                },
+                                onSelectTag = { tid ->
+                                    untaggedOnly = false
+                                    selectedTagId = tid
+                                },
+                                onOpenTagsSheet = { showTagsSheet = true },
+                                onCycleLayout = {
+                                    val next = when (layoutMode) {
+                                        BookmarkLayoutMode.CARD -> BookmarkLayoutMode.LIST
+                                        BookmarkLayoutMode.LIST -> BookmarkLayoutMode.TABLE
+                                        BookmarkLayoutMode.TABLE -> BookmarkLayoutMode.CARD
+                                    }
+                                    pocketRepo.setLayoutMode(next)
+                                },
+                                onOpenImportExport = { showImportExportDialog = true },
+                                onOpenAddDialog = { showAddBookmarkDialog = true },
+                                isDark = isDark
+                            )
                         }
                     }
                 }
@@ -468,45 +622,119 @@ fun PocketScreen(
                     .padding(innerPadding)
             ) {
                 if (filteredStacks.isNotEmpty()) {
-                    // Staggered 2-column masonry grid matching image_15171895.png
-                    LazyVerticalStaggeredGrid(
-                        columns = StaggeredGridCells.Fixed(2),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 12.dp)
-                            .testTag("pocket_bookmarks_grid"),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalItemSpacing = 14.dp
-                    ) {
-                        itemsIndexed(filteredStacks, key = { _, stack -> stack.id }) { index, stack ->
-                            val isSelected = stack.id in selectedStackIds
-                            PocketBookmarkStaggeredCard(
-                                stack = stack,
-                                index = index,
-                                isSelected = isSelected,
+                    when (layoutMode) {
+                        BookmarkLayoutMode.CARD -> {
+                            LazyVerticalStaggeredGrid(
+                                columns = StaggeredGridCells.Fixed(2),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp)
+                                    .testTag("pocket_bookmarks_grid"),
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalItemSpacing = 14.dp
+                            ) {
+                                itemsIndexed(filteredStacks, key = { _, stack -> stack.id }) { index, stack ->
+                                    val isSelected = stack.id in selectedStackIds
+                                    PocketBookmarkStaggeredCard(
+                                        stack = stack,
+                                        index = index,
+                                        isSelected = isSelected,
+                                        isSelectionMode = isSelectionMode,
+                                        allTags = allTags,
+                                        displayFields = displayFields,
+                                        onTagClick = { tid ->
+                                            untaggedOnly = false
+                                            selectedTagId = if (selectedTagId == tid) null else tid
+                                        },
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                selectedStackIds = if (isSelected) {
+                                                    selectedStackIds - stack.id
+                                                } else {
+                                                    selectedStackIds + stack.id
+                                                }
+                                            } else {
+                                                onOpenBookmarkDetail(stack)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            selectedStackIds = if (isSelectionMode) {
+                                                if (isSelected) selectedStackIds - stack.id else selectedStackIds + stack.id
+                                            } else {
+                                                setOf(stack.id)
+                                            }
+                                        },
+                                        isDark = isDark,
+                                        modifier = Modifier.testTag("pocket_bookmark_card_${stack.id}")
+                                    )
+                                }
+                            }
+                        }
+                        BookmarkLayoutMode.LIST -> {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp)
+                                    .testTag("pocket_bookmarks_list"),
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                items(filteredStacks, key = { it.id }) { stack ->
+                                    val isSelected = stack.id in selectedStackIds
+                                    PocketBookmarkListCard(
+                                        stack = stack,
+                                        allTags = allTags,
+                                        displayFields = displayFields,
+                                        isSelected = isSelected,
+                                        isSelectionMode = isSelectionMode,
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                selectedStackIds = if (isSelected) selectedStackIds - stack.id else selectedStackIds + stack.id
+                                            } else {
+                                                onOpenBookmarkDetail(stack)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            selectedStackIds = if (isSelectionMode) {
+                                                if (isSelected) selectedStackIds - stack.id else selectedStackIds + stack.id
+                                            } else {
+                                                setOf(stack.id)
+                                            }
+                                        },
+                                        onTagClick = { tid ->
+                                            untaggedOnly = false
+                                            selectedTagId = if (selectedTagId == tid) null else tid
+                                        },
+                                        isDark = isDark
+                                    )
+                                }
+                            }
+                        }
+                        BookmarkLayoutMode.TABLE -> {
+                            PocketBookmarkTableList(
+                                stacks = filteredStacks,
+                                allTags = allTags,
+                                displayFields = displayFields,
+                                selectedStackIds = selectedStackIds,
                                 isSelectionMode = isSelectionMode,
-                                onClick = {
+                                onBookmarkClick = { stack ->
+                                    val isSelected = stack.id in selectedStackIds
                                     if (isSelectionMode) {
-                                        selectedStackIds = if (isSelected) {
-                                            selectedStackIds - stack.id
-                                        } else {
-                                            selectedStackIds + stack.id
-                                        }
+                                        selectedStackIds = if (isSelected) selectedStackIds - stack.id else selectedStackIds + stack.id
                                     } else {
-                                        // Clicking bookmark opens a separate full screen bookmark detail page
                                         onOpenBookmarkDetail(stack)
                                     }
                                 },
-                                onLongClick = {
+                                onBookmarkLongClick = { stack ->
+                                    val isSelected = stack.id in selectedStackIds
                                     selectedStackIds = if (isSelectionMode) {
                                         if (isSelected) selectedStackIds - stack.id else selectedStackIds + stack.id
                                     } else {
                                         setOf(stack.id)
                                     }
                                 },
-                                isDark = isDark,
-                                modifier = Modifier.testTag("pocket_bookmark_card_${stack.id}")
+                                isDark = isDark
                             )
                         }
                     }
@@ -539,16 +767,28 @@ fun PocketScreen(
             }
         }
 
-        // Add Bookmark Dialog
+        // Add Bookmark Dialog (with Faved duplicate detection, nested tags & notes)
         if (showAddBookmarkDialog) {
             AddBookmarkDialog(
+                allTags = allTags,
+                findDuplicate = { pocketRepo.findDuplicateBookmark(it) },
+                onQuickCreateTag = { rawPath ->
+                    val segs = rawPath.split("/", "→").map { it.trim() }.filter { it.isNotBlank() }
+                    pocketRepo.getOrCreateTagPath(segs).first
+                },
+                onOpenExisting = { existing ->
+                    showAddBookmarkDialog = false
+                    onOpenBookmarkDetail(existing)
+                },
                 onDismiss = { showAddBookmarkDialog = false },
-                onSave = { title, url, description, previewUrl ->
-                    val added = pocketRepo.addBookmark(
+                onSave = { title, url, description, previewUrl, tagIds, notes ->
+                    pocketRepo.addBookmark(
                         title = title,
                         url = url,
                         description = description,
-                        previewImageUrl = previewUrl
+                        previewImageUrl = previewUrl,
+                        tagIds = tagIds,
+                        notes = notes
                     )
                     showAddBookmarkDialog = false
                     scope.launch {
@@ -563,12 +803,19 @@ fun PocketScreen(
         editingStack?.let { stack ->
             EditBookmarkDialog(
                 stack = stack,
+                allTags = allTags,
+                onQuickCreateTag = { rawPath ->
+                    val segs = rawPath.split("/", "→").map { it.trim() }.filter { it.isNotBlank() }
+                    pocketRepo.getOrCreateTagPath(segs).first
+                },
                 onDismiss = { editingStack = null },
-                onSave = { updatedTitle, updatedDesc, updatedPreview ->
+                onSave = { updatedTitle, updatedDesc, updatedPreview, updatedTagIds, updatedNotes ->
                     val updated = stack.copy(
                         title = updatedTitle,
                         description = updatedDesc,
-                        previewImageUrl = updatedPreview
+                        previewImageUrl = updatedPreview,
+                        tagIds = updatedTagIds,
+                        notes = updatedNotes
                     )
                     pocketRepo.updateBookmark(updated)
                     editingStack = null
@@ -576,6 +823,125 @@ fun PocketScreen(
                         snackbarHostState.showSnackbar("Bookmark updated")
                     }
                 },
+                isDark = isDark
+            )
+        }
+
+        // Faved Nested Tags Manager Sheet
+        if (showTagsSheet) {
+            FavedTagsManagerSheet(
+                tags = allTags,
+                bookmarks = stacks,
+                selectedTagId = selectedTagId,
+                untaggedOnly = untaggedOnly,
+                tagRollupEnabled = tagRollupEnabled,
+                onToggleRollup = { pocketRepo.setTagRollupEnabled(it) },
+                onSelectAll = {
+                    selectedTagId = null
+                    untaggedOnly = false
+                },
+                onSelectUntagged = {
+                    selectedTagId = null
+                    untaggedOnly = true
+                },
+                onSelectTag = { tid ->
+                    untaggedOnly = false
+                    selectedTagId = tid
+                },
+                onCreateTag = { parentId -> tagEditorState = null to parentId },
+                onEditTag = { tag -> tagEditorState = tag to tag.parentId },
+                onTogglePin = { tid -> pocketRepo.togglePinTag(tid) },
+                onDeleteTag = { tag -> tagPendingDelete = tag },
+                onDismiss = { showTagsSheet = false },
+                isDark = isDark
+            )
+        }
+
+        // Faved Create / Edit Nested Tag Dialog
+        tagEditorState?.let { (existingTag, initialParentId) ->
+            FavedTagEditorDialog(
+                existingTag = existingTag,
+                initialParentId = initialParentId,
+                allTags = allTags,
+                onDismiss = { tagEditorState = null },
+                onSave = { title, parentId, colorHex, description, isPinned ->
+                    if (existingTag == null) {
+                        pocketRepo.createTag(title, parentId, colorHex, description, isPinned)
+                    } else {
+                        pocketRepo.updateTag(existingTag.id, title, parentId, colorHex, description, isPinned)
+                    }
+                    tagEditorState = null
+                },
+                isDark = isDark
+            )
+        }
+
+        // Delete Tag Confirmation Dialog
+        tagPendingDelete?.let { tagToDelete ->
+            AlertDialog(
+                onDismissRequest = { tagPendingDelete = null },
+                containerColor = if (isDark) Color(0xFF1C1C1C) else Color(0xFFFFFFFF),
+                title = { Text("Delete Tag "${tagToDelete.title}"?", color = PocketThemeColors.primaryText(isDark)) },
+                text = {
+                    Text(
+                        text = "Bookmarks will be kept. Nested child tags will move up to the parent level.",
+                        color = PocketThemeColors.secondaryText(isDark)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (selectedTagId == tagToDelete.id) selectedTagId = null
+                            pocketRepo.deleteTag(tagToDelete.id, deleteChildren = false)
+                            tagPendingDelete = null
+                        }
+                    ) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { tagPendingDelete = null }) { Text("Cancel") }
+                }
+            )
+        }
+
+        // Bulk Tag Dialog
+        if (showBulkTagDialog && selectedStackIds.isNotEmpty()) {
+            FavedBulkTagDialog(
+                selectedCount = selectedStackIds.size,
+                allTags = allTags,
+                onAddTag = { tid ->
+                    pocketRepo.bulkAddTag(selectedStackIds, tid)
+                    scope.launch { snackbarHostState.showSnackbar("Applied tag to ${selectedStackIds.size} bookmarks") }
+                },
+                onRemoveTag = { tid ->
+                    pocketRepo.bulkRemoveTag(selectedStackIds, tid)
+                    scope.launch { snackbarHostState.showSnackbar("Removed tag from ${selectedStackIds.size} bookmarks") }
+                },
+                onQuickCreateAndAdd = { rawPath ->
+                    val segs = rawPath.split("/", "→").map { it.trim() }.filter { it.isNotBlank() }
+                    val created = pocketRepo.getOrCreateTagPath(segs).first
+                    if (created != null) {
+                        pocketRepo.bulkAddTag(selectedStackIds, created.id)
+                        scope.launch { snackbarHostState.showSnackbar("Created and applied "${created.title}"") }
+                    }
+                },
+                onDismiss = { showBulkTagDialog = false },
+                isDark = isDark
+            )
+        }
+
+        // Import / Export Dialog
+        if (showImportExportDialog) {
+            FavedImportExportDialog(
+                bookmarkCount = stacks.size,
+                tagCount = allTags.size,
+                lastImportResult = lastImportResult,
+                onImportFileClick = {
+                    importFileLauncher.launch(arrayOf("text/html", "text/csv", "text/comma-separated-values", "application/json", "text/plain", "*/*"))
+                },
+                onExportHtmlClick = { exportHtmlLauncher.launch("emre-bookmarks.html") },
+                onExportCsvClick = { exportCsvLauncher.launch("emre-bookmarks.csv") },
+                onExportJsonClick = { exportJsonLauncher.launch("emre-bookmarks-backup.json") },
+                onDismiss = { showImportExportDialog = false },
                 isDark = isDark
             )
         }
@@ -654,6 +1020,10 @@ fun PocketScreen(
                 onWidthChange = { pocketRepo.setMinWidth(it) },
                 onHeightChange = { pocketRepo.setMinHeight(it) },
                 onSizeChange = { pocketRepo.setMinSizeKb(it) },
+                layoutMode = layoutMode,
+                displayFields = displayFields,
+                onSelectLayout = { pocketRepo.setLayoutMode(it) },
+                onUpdateDisplayFields = { pocketRepo.setDisplayFields(it) },
                 onDismiss = { showFilterSheet = false },
                 isDark = isDark
             )
@@ -885,6 +1255,8 @@ fun PocketSelectionToolbar(
     onToggleSelectAll: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
+    onBulkTag: (() -> Unit)? = null,
+    onBulkRefetch: (() -> Unit)? = null,
     isDark: Boolean = false
 ) {
     val barColor = PocketThemeColors.barSurface(isDark)
@@ -939,6 +1311,32 @@ fun PocketSelectionToolbar(
                 )
             }
 
+            if (onBulkTag != null) {
+                IconButton(
+                    onClick = onBulkTag,
+                    modifier = Modifier.size(38.dp).testTag("selection_bulk_tag_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Sell,
+                        contentDescription = "Bulk tag selected bookmarks",
+                        tint = textColor
+                    )
+                }
+            }
+
+            if (onBulkRefetch != null) {
+                IconButton(
+                    onClick = onBulkRefetch,
+                    modifier = Modifier.size(38.dp).testTag("selection_bulk_refetch_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refetch metadata for selected bookmarks",
+                        tint = textColor
+                    )
+                }
+            }
+
             IconButton(
                 onClick = onShare,
                 modifier = Modifier.size(38.dp).testTag("selection_share_button")
@@ -980,6 +1378,9 @@ fun PocketBookmarkStaggeredCard(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    allTags: List<FavedTag> = emptyList(),
+    displayFields: BookmarkDisplayFields = BookmarkDisplayFields(),
+    onTagClick: ((String) -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1055,7 +1456,7 @@ fun PocketBookmarkStaggeredCard(
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Top Preview Image Area
-                Box(
+                if (displayFields.showPreview) Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(previewHeight)
@@ -1180,10 +1581,11 @@ fun PocketBookmarkStaggeredCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    if (stack.description.isNotBlank()) {
+                    val displayDesc = stack.notes.ifBlank { stack.description }
+                    if (displayFields.showDescription && displayDesc.isNotBlank()) {
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            text = stack.description,
+                            text = displayDesc,
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp
@@ -1194,19 +1596,46 @@ fun PocketBookmarkStaggeredCard(
                         )
                     }
 
-                    Spacer(Modifier.height(3.dp))
+                    if (displayFields.showDate) {
+                        Spacer(Modifier.height(3.dp))
 
-                    // Line 2: Date & Time (e.g. "Oct 29, 2026 · 4:06 AM")
-                    Text(
-                        text = dateTimeFormatted,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 12.sp
-                        ),
-                        color = secondaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                        // Line 2: Date & Time (e.g. "Oct 29, 2026 · 4:06 AM")
+                        Text(
+                            text = dateTimeFormatted,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 12.sp
+                            ),
+                            color = secondaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
+                    if (displayFields.showTags && stack.tagIds.isNotEmpty() && allTags.isNotEmpty()) {
+                        val cardTags = remember(stack.tagIds, allTags) {
+                            val byId = allTags.associateBy { it.id }
+                            stack.tagIds.mapNotNull { byId[it] }
+                        }
+                        if (cardTags.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                cardTags.forEach { tag ->
+                                    FavedTagPill(
+                                        tag = tag,
+                                        isDark = isDark,
+                                        onClick = onTagClick?.let { cb -> { cb(tag.id) } }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (displayFields.showDomain) {
                     Spacer(Modifier.height(6.dp))
 
                     // Line 3: Favicon & Site Address Pill (e.g. [🏛️ | britannica.com])
@@ -1260,6 +1689,7 @@ fun PocketBookmarkStaggeredCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                    }
                     }
                 }
             }
@@ -1382,7 +1812,11 @@ fun PocketEmptyState(
 @Composable
 fun AddBookmarkDialog(
     onDismiss: () -> Unit,
-    onSave: (title: String, url: String, description: String, previewImageUrl: String) -> Unit,
+    onSave: (title: String, url: String, description: String, previewImageUrl: String, tagIds: List<String>, notes: String) -> Unit,
+    allTags: List<FavedTag> = emptyList(),
+    findDuplicate: (String) -> MediaInboxStack? = { null },
+    onQuickCreateTag: (String) -> FavedTag? = { null },
+    onOpenExisting: ((MediaInboxStack) -> Unit)? = null,
     isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
     val context = LocalContext.current
@@ -1395,8 +1829,22 @@ fun AddBookmarkDialog(
     var urlText by remember { mutableStateOf("") }
     var titleText by remember { mutableStateOf("") }
     var descText by remember { mutableStateOf("") }
+    var notesText by remember { mutableStateOf("") }
     var previewImageUrl by remember { mutableStateOf("") }
+    var selectedTagIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var isFetchingMetadata by remember { mutableStateOf(false) }
+    val duplicateBookmark = remember(urlText) {
+        if (urlText.trim().length > 6) findDuplicate(urlText.trim()) else null
+    }
+    val suggestedTags = remember(urlText, titleText, descText, allTags, selectedTagIds) {
+        FavedTagTreeHelper.suggestTagIdsForBookmark(
+            url = urlText,
+            title = titleText,
+            description = descText,
+            allTags = allTags,
+            alreadyAssigned = selectedTagIds.toSet()
+        )
+    }
 
     fun triggerAutoFetch(urlToFetch: String) {
         val trimmed = urlToFetch.trim()
@@ -1567,6 +2015,53 @@ fun AddBookmarkDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Duplicate Bookmark Detection banner (denho/faved)
+                if (duplicateBookmark != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Duplicate bookmark",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Already bookmarked",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                                Text(
+                                    text = duplicateBookmark.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = secondaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (onOpenExisting != null) {
+                                TextButton(
+                                    onClick = { onOpenExisting(duplicateBookmark) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Open", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Fetching progress status
                 if (isFetchingMetadata) {
                     Spacer(Modifier.height(6.dp))
@@ -1639,11 +2134,41 @@ fun AddBookmarkDialog(
                 OutlinedTextField(
                     value = descText,
                     onValueChange = { descText = it },
-                    label = { Text("Notes / Description (auto-fetched or custom)") },
-                    placeholder = { Text("Add notes or details") },
+                    label = { Text("Description (auto-fetched)") },
+                    placeholder = { Text("Page description") },
+                    maxLines = 2,
+                    colors = textFieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = notesText,
+                    onValueChange = { notesText = it },
+                    label = { Text("Personal Notes") },
+                    placeholder = { Text("Add your thoughts or highlights") },
                     maxLines = 3,
                     colors = textFieldColors,
                     modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                FavedTagSelectorSection(
+                    allTags = allTags,
+                    selectedTagIds = selectedTagIds,
+                    onToggleTag = { tid ->
+                        selectedTagIds = if (tid in selectedTagIds) selectedTagIds - tid else selectedTagIds + tid
+                    },
+                    onQuickCreateTag = { rawPath ->
+                        val created = onQuickCreateTag(rawPath)
+                        if (created != null && created.id !in selectedTagIds) {
+                            selectedTagIds = selectedTagIds + created.id
+                        }
+                    },
+                    suggestedTags = suggestedTags,
+                    isDark = isDark
                 )
 
                 Spacer(Modifier.height(20.dp))
@@ -1662,7 +2187,7 @@ fun AddBookmarkDialog(
                     Button(
                         onClick = {
                             if (urlText.isNotBlank()) {
-                                onSave(titleText, urlText, descText, previewImageUrl)
+                                onSave(titleText, urlText, descText, previewImageUrl, selectedTagIds, notesText)
                             }
                         },
                         enabled = urlText.isNotBlank(),
@@ -1688,7 +2213,9 @@ fun AddBookmarkDialog(
 fun EditBookmarkDialog(
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
-    onSave: (title: String, description: String, previewImageUrl: String) -> Unit,
+    onSave: (title: String, description: String, previewImageUrl: String, tagIds: List<String>, notes: String) -> Unit,
+    allTags: List<FavedTag> = emptyList(),
+    onQuickCreateTag: (String) -> FavedTag? = { null },
     isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
     val context = LocalContext.current
@@ -1700,8 +2227,19 @@ fun EditBookmarkDialog(
 
     var titleText by remember { mutableStateOf(stack.title) }
     var descText by remember { mutableStateOf(stack.description) }
+    var notesText by remember { mutableStateOf(stack.notes) }
     var previewImageUrl by remember { mutableStateOf(stack.previewImageUrl) }
+    var selectedTagIds by remember { mutableStateOf(stack.tagIds) }
     var isFetching by remember { mutableStateOf(false) }
+    val suggestedTags = remember(stack.sourceUrl, titleText, descText, allTags, selectedTagIds) {
+        FavedTagTreeHelper.suggestTagIdsForBookmark(
+            url = stack.sourceUrl,
+            title = titleText,
+            description = descText,
+            allTags = allTags,
+            alreadyAssigned = selectedTagIds.toSet()
+        )
+    }
 
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = textColor,
@@ -1809,10 +2347,39 @@ fun EditBookmarkDialog(
                 OutlinedTextField(
                     value = descText,
                     onValueChange = { descText = it },
-                    label = { Text("Notes / Description") },
+                    label = { Text("Description") },
+                    maxLines = 2,
+                    colors = textFieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = notesText,
+                    onValueChange = { notesText = it },
+                    label = { Text("Personal Notes") },
                     maxLines = 3,
                     colors = textFieldColors,
                     modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                FavedTagSelectorSection(
+                    allTags = allTags,
+                    selectedTagIds = selectedTagIds,
+                    onToggleTag = { tid ->
+                        selectedTagIds = if (tid in selectedTagIds) selectedTagIds - tid else selectedTagIds + tid
+                    },
+                    onQuickCreateTag = { rawPath ->
+                        val created = onQuickCreateTag(rawPath)
+                        if (created != null && created.id !in selectedTagIds) {
+                            selectedTagIds = selectedTagIds + created.id
+                        }
+                    },
+                    suggestedTags = suggestedTags,
+                    isDark = isDark
                 )
 
                 Spacer(Modifier.height(20.dp))
@@ -1829,7 +2396,7 @@ fun EditBookmarkDialog(
                     }
                     Spacer(Modifier.width(8.dp))
                     Button(
-                        onClick = { onSave(titleText, descText, previewImageUrl) },
+                        onClick = { onSave(titleText, descText, previewImageUrl, selectedTagIds, notesText) },
                         enabled = titleText.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
@@ -1873,6 +2440,10 @@ fun PocketFilterBottomSheet(
     onHeightChange: (Int) -> Unit,
     onSizeChange: (Int) -> Unit,
     onDismiss: () -> Unit,
+    layoutMode: BookmarkLayoutMode = BookmarkLayoutMode.CARD,
+    displayFields: BookmarkDisplayFields = BookmarkDisplayFields(),
+    onSelectLayout: (BookmarkLayoutMode) -> Unit = {},
+    onUpdateDisplayFields: (BookmarkDisplayFields) -> Unit = {},
     isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
     val textColor = PocketThemeColors.primaryText(isDark)
@@ -1887,6 +2458,7 @@ fun PocketFilterBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
@@ -1907,9 +2479,11 @@ fun PocketFilterBottomSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            val sortOptions = listOf("Newest", "Oldest", "Title", "Domain")
+            val sortOptions = listOf("Newest", "Oldest", "Title", "Title (Z-A)", "Domain")
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 sortOptions.forEach { sort ->
@@ -1942,9 +2516,11 @@ fun PocketFilterBottomSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            val filterOptions = listOf("All", "Web Links", "Notes")
+            val filterOptions = listOf("All", "Web Links", "Notes", "Untagged", "Has Media")
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1966,6 +2542,71 @@ fun PocketFilterBottomSheet(
                         )
                     )
                 }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Layout Mode selector (Card / List / Table)
+            Text(
+                text = "Layout",
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryText
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                BookmarkLayoutMode.entries.forEach { mode ->
+                    val selected = layoutMode == mode
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onSelectLayout(mode) },
+                        label = { Text(mode.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // Visible Fields customization (denho/faved)
+            Text(
+                text = "Visible Fields",
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryText
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = displayFields.showPreview,
+                    onClick = { onUpdateDisplayFields(displayFields.copy(showPreview = !displayFields.showPreview)) },
+                    label = { Text("Preview") }
+                )
+                FilterChip(
+                    selected = displayFields.showDescription,
+                    onClick = { onUpdateDisplayFields(displayFields.copy(showDescription = !displayFields.showDescription)) },
+                    label = { Text("Description") }
+                )
+                FilterChip(
+                    selected = displayFields.showTags,
+                    onClick = { onUpdateDisplayFields(displayFields.copy(showTags = !displayFields.showTags)) },
+                    label = { Text("Tags") }
+                )
+                FilterChip(
+                    selected = displayFields.showDomain,
+                    onClick = { onUpdateDisplayFields(displayFields.copy(showDomain = !displayFields.showDomain)) },
+                    label = { Text("Domain") }
+                )
+                FilterChip(
+                    selected = displayFields.showDate,
+                    onClick = { onUpdateDisplayFields(displayFields.copy(showDate = !displayFields.showDate)) },
+                    label = { Text("Date") }
+                )
             }
 
             Spacer(Modifier.height(18.dp))

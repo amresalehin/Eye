@@ -40,10 +40,53 @@ class PocketRepository(
         if (!exists()) mkdirs()
     }
     private val bookmarksFile: File = File(pocketStorageDir, "bookmarks.json")
+    private val tagsFile: File = File(pocketStorageDir, "tags.json")
     private val bookmarkLock = Any()
+    private val tagLock = Any()
 
     private val _bookmarks = MutableStateFlow<List<MediaInboxStack>>(emptyList())
     val bookmarks: StateFlow<List<MediaInboxStack>> = _bookmarks.asStateFlow()
+
+    private val _tags = MutableStateFlow<List<FavedTag>>(emptyList())
+    val tags: StateFlow<List<FavedTag>> = _tags.asStateFlow()
+
+    private val _tagRollupEnabled = MutableStateFlow(prefs.getBoolean(KEY_TAG_ROLLUP, true))
+    val tagRollupEnabled: StateFlow<Boolean> = _tagRollupEnabled.asStateFlow()
+
+    private val _layoutMode = MutableStateFlow(BookmarkLayoutMode.fromName(prefs.getString(KEY_LAYOUT_MODE, BookmarkLayoutMode.CARD.name)))
+    val layoutMode: StateFlow<BookmarkLayoutMode> = _layoutMode.asStateFlow()
+
+    private val _displayFields = MutableStateFlow(
+        BookmarkDisplayFields(
+            showPreview = prefs.getBoolean(KEY_FIELD_PREVIEW, true),
+            showDescription = prefs.getBoolean(KEY_FIELD_DESCRIPTION, true),
+            showTags = prefs.getBoolean(KEY_FIELD_TAGS, true),
+            showDomain = prefs.getBoolean(KEY_FIELD_DOMAIN, true),
+            showDate = prefs.getBoolean(KEY_FIELD_DATE, true)
+        )
+    )
+    val displayFields: StateFlow<BookmarkDisplayFields> = _displayFields.asStateFlow()
+
+    fun setTagRollupEnabled(enabled: Boolean) {
+        _tagRollupEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_TAG_ROLLUP, enabled).apply()
+    }
+
+    fun setLayoutMode(mode: BookmarkLayoutMode) {
+        _layoutMode.value = mode
+        prefs.edit().putString(KEY_LAYOUT_MODE, mode.name).apply()
+    }
+
+    fun setDisplayFields(fields: BookmarkDisplayFields) {
+        _displayFields.value = fields
+        prefs.edit()
+            .putBoolean(KEY_FIELD_PREVIEW, fields.showPreview)
+            .putBoolean(KEY_FIELD_DESCRIPTION, fields.showDescription)
+            .putBoolean(KEY_FIELD_TAGS, fields.showTags)
+            .putBoolean(KEY_FIELD_DOMAIN, fields.showDomain)
+            .putBoolean(KEY_FIELD_DATE, fields.showDate)
+            .apply()
+    }
 
     private val _showSvg = MutableStateFlow(prefs.getBoolean(KEY_SHOW_SVG, false))
     val showSvg: StateFlow<Boolean> = _showSvg.asStateFlow()
@@ -437,6 +480,7 @@ class PocketRepository(
     }
 
     init {
+        loadTags()
         loadBookmarks()
     }
 
@@ -489,6 +533,15 @@ class PocketRepository(
                     }
                 }
 
+                val tagIdsArr = obj.optJSONArray("tagIds")
+                val tagIdsList = mutableListOf<String>()
+                if (tagIdsArr != null) {
+                    for (tIdx in 0 until tagIdsArr.length()) {
+                        val tid = tagIdsArr.optString(tIdx)
+                        if (tid.isNotBlank()) tagIdsList.add(tid)
+                    }
+                }
+
                 list.add(
                     MediaInboxStack(
                         id = obj.getString("id"),
@@ -498,7 +551,9 @@ class PocketRepository(
                         items = itemsList,
                         timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
                         description = obj.optString("description", ""),
-                        previewImageUrl = obj.optString("previewImageUrl", "")
+                        previewImageUrl = obj.optString("previewImageUrl", ""),
+                        tagIds = tagIdsList.distinct(),
+                        notes = obj.optString("notes", "")
                     )
                 )
             }
@@ -564,6 +619,8 @@ class PocketRepository(
                         put("timestampMillis", bookmark.timestampMillis)
                         put("description", bookmark.description)
                         put("previewImageUrl", bookmark.previewImageUrl)
+                        put("notes", bookmark.notes)
+                        put("tagIds", JSONArray(bookmark.tagIds))
 
                         val itemsArr = JSONArray()
                         bookmark.items.forEach { itm ->
@@ -618,6 +675,18 @@ class PocketRepository(
      * When autoFetchMetadata is true, automatically queries the web page in the background
      * for its title, description, link preview image, and site media items, then smoothly updates the bookmark.
      */
+    /**
+     * Checks whether a bookmark with the same canonical URL already exists in Pocket.
+     */
+    fun findDuplicateBookmark(url: String): MediaInboxStack? {
+        val bookmarkKey = MediaClassifier.bookmarkDeduplicationKey(url.trim())
+        if (bookmarkKey.isBlank()) return null
+        return _bookmarks.value.firstOrNull { existing ->
+            existing.sourceUrl.isNotBlank() &&
+                MediaClassifier.bookmarkDeduplicationKey(existing.sourceUrl) == bookmarkKey
+        }
+    }
+
     fun addBookmark(
         title: String,
         url: String,
@@ -625,7 +694,10 @@ class PocketRepository(
         description: String = "",
         previewImageUrl: String = "",
         autoFetchMetadata: Boolean = true,
-        initialItems: List<MediaInboxItem> = emptyList()
+        initialItems: List<MediaInboxItem> = emptyList(),
+        tagIds: List<String> = emptyList(),
+        notes: String = "",
+        timestampMillis: Long = System.currentTimeMillis()
     ): MediaInboxStack {
         val cleanUrl = url.trim()
         val cleanDomain = domain.ifBlank { MediaClassifier.cleanDomainFromUrl(cleanUrl) }
@@ -705,18 +777,23 @@ class PocketRepository(
                     ?: ""
         }
 
+        val mergedTagIds = ((existingBookmark?.tagIds ?: emptyList()) + tagIds).distinct()
+        val resolvedNotes = notes.ifBlank { existingBookmark?.notes.orEmpty() }
+
         val bookmark = MediaInboxStack(
             id = existingBookmark?.id ?: "bookmark_${UUID.randomUUID()}",
             title = resolvedTitle,
             sourceDomain = existingBookmark?.sourceDomain?.ifBlank { cleanDomain } ?: cleanDomain,
             sourceUrl = existingBookmark?.sourceUrl ?: cleanUrl,
             items = finalItems,
-            timestampMillis = System.currentTimeMillis(),
+            timestampMillis = timestampMillis,
             description = description.ifBlank {
                 existingBookmark?.description?.takeIf { it.isNotBlank() }
                     ?: if (isMedia) (if (isDirectVideo) "Saved Video" else "Saved Image") else ""
             },
-            previewImageUrl = initialPreview
+            previewImageUrl = initialPreview,
+            tagIds = mergedTagIds,
+            notes = resolvedNotes
         )
         val updated = listOf(bookmark) + _bookmarks.value.filter { existing ->
             val isCanonicalDuplicate = bookmarkKey.isNotBlank() &&
@@ -1069,6 +1146,388 @@ class PocketRepository(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Faved Nested Tags, Bulk Actions & Import/Export
+    // -------------------------------------------------------------------------
+
+    private fun loadTags() {
+        if (!tagsFile.exists() || tagsFile.length() == 0L) {
+            _tags.value = emptyList()
+            return
+        }
+        try {
+            val raw = tagsFile.readText()
+            val arr = JSONArray(raw)
+            val loaded = mutableListOf<FavedTag>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("id").ifBlank { continue }
+                val title = obj.optString("title").trim().ifBlank { continue }
+                loaded.add(
+                    FavedTag(
+                        id = id,
+                        title = title,
+                        parentId = obj.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
+                        colorHex = obj.optString("colorHex", FavedTagColorPalette.DEFAULT_HEX),
+                        description = obj.optString("description", ""),
+                        isPinned = obj.optBoolean("isPinned", false),
+                        createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis())
+                    )
+                )
+            }
+            _tags.value = loaded
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading Faved tags", e)
+            _tags.value = emptyList()
+        }
+    }
+
+    private fun persistTags() {
+        synchronized(tagLock) {
+            try {
+                val arr = JSONArray()
+                _tags.value.forEach { tag ->
+                    arr.put(
+                        JSONObject().apply {
+                            put("id", tag.id)
+                            put("title", tag.title)
+                            put("parentId", tag.parentId ?: JSONObject.NULL)
+                            put("colorHex", tag.colorHex)
+                            put("description", tag.description)
+                            put("isPinned", tag.isPinned)
+                            put("createdAtMillis", tag.createdAtMillis)
+                        }
+                    )
+                }
+                if (!pocketStorageDir.exists() && !pocketStorageDir.mkdirs()) {
+                    throw IllegalStateException("Could not create Pocket storage directory")
+                }
+                val tmp = File(pocketStorageDir, "tags.json.tmp")
+                tmp.writeText(arr.toString())
+                try {
+                    Files.move(
+                        tmp.toPath(),
+                        tagsFile.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING
+                    )
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(
+                        tmp.toPath(),
+                        tagsFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error persisting Faved tags", e)
+            }
+        }
+    }
+
+    fun createTag(
+        title: String,
+        parentId: String? = null,
+        colorHex: String = FavedTagColorPalette.DEFAULT_HEX,
+        description: String = "",
+        isPinned: Boolean = false
+    ): FavedTag? {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return null
+        synchronized(tagLock) {
+            val validParent = parentId?.takeIf { pid -> _tags.value.any { it.id == pid } }
+            val existing = _tags.value.firstOrNull {
+                it.parentId == validParent && it.title.equals(cleanTitle, ignoreCase = true)
+            }
+            if (existing != null) return existing
+
+            val newTag = FavedTag(
+                id = "tag_${UUID.randomUUID()}",
+                title = cleanTitle,
+                parentId = validParent,
+                colorHex = colorHex.ifBlank { FavedTagColorPalette.DEFAULT_HEX },
+                description = description.trim(),
+                isPinned = isPinned,
+                createdAtMillis = System.currentTimeMillis()
+            )
+            _tags.value = _tags.value + newTag
+            persistTags()
+            return newTag
+        }
+    }
+
+    fun updateTag(
+        tagId: String,
+        title: String,
+        parentId: String?,
+        colorHex: String,
+        description: String,
+        isPinned: Boolean
+    ): Boolean {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return false
+        synchronized(tagLock) {
+            val currentList = _tags.value
+            if (currentList.none { it.id == tagId }) return false
+            if (FavedTagTreeHelper.wouldCreateCycle(tagId, parentId, currentList)) return false
+
+            val validParent = parentId?.takeIf { pid -> currentList.any { it.id == pid } }
+            _tags.value = currentList.map { tag ->
+                if (tag.id == tagId) {
+                    tag.copy(
+                        title = cleanTitle,
+                        parentId = validParent,
+                        colorHex = colorHex.ifBlank { FavedTagColorPalette.DEFAULT_HEX },
+                        description = description.trim(),
+                        isPinned = isPinned
+                    )
+                } else tag
+            }
+            persistTags()
+            return true
+        }
+    }
+
+    fun togglePinTag(tagId: String) {
+        synchronized(tagLock) {
+            _tags.value = _tags.value.map { tag ->
+                if (tag.id == tagId) tag.copy(isPinned = !tag.isPinned) else tag
+            }
+            persistTags()
+        }
+    }
+
+    /**
+     * Deletes [tagId]. If [deleteChildren] is true, removes all descendant tags as well;
+     * otherwise reparents immediate children to the deleted tag's parent.
+     * Also cleans removed tag IDs from all bookmarks.
+     */
+    fun deleteTag(tagId: String, deleteChildren: Boolean = false) {
+        val removedIds: Set<String>
+        synchronized(tagLock) {
+            val current = _tags.value
+            val target = current.firstOrNull { it.id == tagId } ?: return
+            if (deleteChildren) {
+                removedIds = FavedTagTreeHelper.getDescendantIds(tagId, current, includeSelf = true)
+                _tags.value = current.filter { it.id !in removedIds }
+            } else {
+                removedIds = setOf(tagId)
+                _tags.value = current
+                    .filter { it.id != tagId }
+                    .map { if (it.parentId == tagId) it.copy(parentId = target.parentId) else it }
+            }
+            persistTags()
+        }
+        synchronized(bookmarkLock) {
+            var changed = false
+            _bookmarks.value = _bookmarks.value.map { bm ->
+                if (bm.tagIds.any { it in removedIds }) {
+                    changed = true
+                    bm.copy(tagIds = bm.tagIds.filterNot { it in removedIds })
+                } else bm
+            }
+            if (changed) persist()
+        }
+    }
+
+    /**
+     * Ensures every segment in [segments] exists as a nested tag chain and returns the leaf tag.
+     */
+    fun getOrCreateTagPath(
+        segments: List<String>,
+        defaultColorHex: String = FavedTagColorPalette.DEFAULT_HEX
+    ): Pair<FavedTag?, Int> {
+        val cleanSegments = segments.map { it.trim() }.filter { it.isNotBlank() }
+        if (cleanSegments.isEmpty()) return null to 0
+
+        var createdCount = 0
+        var currentParentId: String? = null
+        var leafTag: FavedTag? = null
+
+        synchronized(tagLock) {
+            for ((idx, seg) in cleanSegments.withIndex()) {
+                val existing = _tags.value.firstOrNull {
+                    it.parentId == currentParentId && it.title.equals(seg, ignoreCase = true)
+                }
+                if (existing != null) {
+                    currentParentId = existing.id
+                    leafTag = existing
+                } else {
+                    val paletteColor = if (defaultColorHex != FavedTagColorPalette.DEFAULT_HEX) {
+                        defaultColorHex
+                    } else {
+                        val colorIdx = (seg.hashCode().ushr(1) + idx) % FavedTagColorPalette.options.size
+                        FavedTagColorPalette.options[colorIdx].hex
+                    }
+                    val created = FavedTag(
+                        id = "tag_${UUID.randomUUID()}",
+                        title = seg,
+                        parentId = currentParentId,
+                        colorHex = paletteColor,
+                        createdAtMillis = System.currentTimeMillis()
+                    )
+                    _tags.value = _tags.value + created
+                    createdCount++
+                    currentParentId = created.id
+                    leafTag = created
+                }
+            }
+            if (createdCount > 0) persistTags()
+        }
+        return leafTag to createdCount
+    }
+
+    fun setBookmarkTags(bookmarkId: String, tagIds: List<String>) {
+        val distinctIds = tagIds.distinct()
+        synchronized(bookmarkLock) {
+            _bookmarks.value = _bookmarks.value.map { bm ->
+                if (bm.id == bookmarkId) bm.copy(tagIds = distinctIds) else bm
+            }
+            persist()
+        }
+    }
+
+    fun bulkAddTag(bookmarkIds: Set<String>, tagId: String) {
+        if (bookmarkIds.isEmpty() || tagId.isBlank()) return
+        synchronized(bookmarkLock) {
+            var changed = false
+            _bookmarks.value = _bookmarks.value.map { bm ->
+                if (bm.id in bookmarkIds && tagId !in bm.tagIds) {
+                    changed = true
+                    bm.copy(tagIds = bm.tagIds + tagId)
+                } else bm
+            }
+            if (changed) persist()
+        }
+    }
+
+    fun bulkRemoveTag(bookmarkIds: Set<String>, tagId: String) {
+        if (bookmarkIds.isEmpty() || tagId.isBlank()) return
+        synchronized(bookmarkLock) {
+            var changed = false
+            _bookmarks.value = _bookmarks.value.map { bm ->
+                if (bm.id in bookmarkIds && tagId in bm.tagIds) {
+                    changed = true
+                    bm.copy(tagIds = bm.tagIds.filterNot { it == tagId })
+                } else bm
+            }
+            if (changed) persist()
+        }
+    }
+
+    fun bulkRefreshMetadata(bookmarkIds: Set<String>, extractionContext: Context? = null) {
+        bookmarkIds.forEach { id ->
+            fetchSiteMedia(id, extractionContext)
+        }
+    }
+
+    /**
+     * Imports bookmarks and nested tags from Chrome/Safari/Firefox/Edge HTML,
+     * Raindrop.io CSV, Pocket CSV/HTML, or JSON backup.
+     * Skips canonical duplicates while merging any newly imported tags onto existing bookmarks.
+     */
+    fun importBookmarksFromText(content: String, fileName: String = ""): BookmarkImportResult {
+        return try {
+            val batch = BookmarkImportExportEngine.parseAuto(content, fileName)
+            var imported = 0
+            var skipped = 0
+            var tagsCreated = 0
+
+            // Pre-create imported tag metadata (colors, descriptions, pins) if present in JSON backups
+            if (batch.importedTags.isNotEmpty()) {
+                for (t in batch.importedTags) {
+                    val segs = FavedTagTreeHelper.getPathSegments(t.id, batch.importedTags)
+                    val (resolved, newlyCreated) = getOrCreateTagPath(segs, t.colorHex)
+                    tagsCreated += newlyCreated
+                    if (resolved != null && newlyCreated > 0 && (t.description.isNotBlank() || t.isPinned)) {
+                        updateTag(
+                            tagId = resolved.id,
+                            title = resolved.title,
+                            parentId = resolved.parentId,
+                            colorHex = t.colorHex,
+                            description = t.description,
+                            isPinned = t.isPinned
+                        )
+                    }
+                }
+            }
+
+            val existingKeys = HashMap<String, MediaInboxStack>()
+            _bookmarks.value.forEach { bm ->
+                val key = MediaClassifier.bookmarkDeduplicationKey(bm.sourceUrl)
+                if (key.isNotBlank()) existingKeys[key] = bm
+            }
+
+            val newBookmarks = mutableListOf<MediaInboxStack>()
+            val tagMerges = HashMap<String, MutableSet<String>>()
+
+            for (entry in batch.entries) {
+                val resolvedTagIds = mutableListOf<String>()
+                for (path in entry.tagPaths) {
+                    val (leaf, created) = getOrCreateTagPath(path)
+                    tagsCreated += created
+                    if (leaf != null) resolvedTagIds.add(leaf.id)
+                }
+
+                val key = MediaClassifier.bookmarkDeduplicationKey(entry.url)
+                val duplicate = if (key.isNotBlank()) existingKeys[key] else null
+                if (duplicate != null) {
+                    skipped++
+                    if (resolvedTagIds.isNotEmpty()) {
+                        tagMerges.getOrPut(duplicate.id) { duplicate.tagIds.toMutableSet() }.addAll(resolvedTagIds)
+                    }
+                    continue
+                }
+
+                val cleanDomain = MediaClassifier.cleanDomainFromUrl(entry.url)
+                val newStack = MediaInboxStack(
+                    id = "bookmark_${UUID.randomUUID()}",
+                    title = entry.title.ifBlank { cleanDomain.ifBlank { entry.url } },
+                    sourceDomain = cleanDomain,
+                    sourceUrl = entry.url.trim(),
+                    items = emptyList(),
+                    timestampMillis = entry.timestampMillis,
+                    description = entry.description,
+                    previewImageUrl = entry.previewImageUrl,
+                    tagIds = resolvedTagIds.distinct(),
+                    notes = entry.notes
+                )
+                newBookmarks.add(newStack)
+                if (key.isNotBlank()) existingKeys[key] = newStack
+                imported++
+            }
+
+            if (newBookmarks.isNotEmpty() || tagMerges.isNotEmpty()) {
+                synchronized(bookmarkLock) {
+                    val updatedExisting = _bookmarks.value.map { bm ->
+                        val merged = tagMerges[bm.id]
+                        if (merged != null) bm.copy(tagIds = merged.toList()) else bm
+                    }
+                    _bookmarks.value = newBookmarks + updatedExisting
+                    persist()
+                }
+            }
+
+            BookmarkImportResult(
+                importedCount = imported,
+                skippedDuplicates = skipped,
+                tagsCreated = tagsCreated,
+                detectedFormat = batch.formatName
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Bookmark import failed", e)
+            BookmarkImportResult(errorMessage = e.message ?: "Failed to import bookmarks")
+        }
+    }
+
+    fun exportBookmarksAsHtml(): String =
+        BookmarkImportExportEngine.exportToNetscapeHtml(_bookmarks.value, _tags.value)
+
+    fun exportBookmarksAsCsv(): String =
+        BookmarkImportExportEngine.exportToCsv(_bookmarks.value, _tags.value)
+
+    fun exportBookmarksAsJson(): String =
+        BookmarkImportExportEngine.exportToJson(_bookmarks.value, _tags.value)
+
     companion object {
         private const val TAG = "PocketRepository"
         private const val KEY_BOOKMARKS_JSON = "pocket_bookmarks_json"
@@ -1080,6 +1539,13 @@ class PocketRepository(
         private const val KEY_MIN_WIDTH = "pocket_filter_min_width"
         private const val KEY_MIN_HEIGHT = "pocket_filter_min_height"
         private const val KEY_MIN_SIZE_KB = "pocket_filter_min_size_kb"
+        private const val KEY_TAG_ROLLUP = "pocket_faved_tag_rollup"
+        private const val KEY_LAYOUT_MODE = "pocket_faved_layout_mode"
+        private const val KEY_FIELD_PREVIEW = "pocket_faved_field_preview"
+        private const val KEY_FIELD_DESCRIPTION = "pocket_faved_field_description"
+        private const val KEY_FIELD_TAGS = "pocket_faved_field_tags"
+        private const val KEY_FIELD_DOMAIN = "pocket_faved_field_domain"
+        private const val KEY_FIELD_DATE = "pocket_faved_field_date"
         const val DEFAULT_MIN_WIDTH = 480
         const val DEFAULT_MIN_HEIGHT = 540
         const val DEFAULT_MIN_SIZE_KB = 10

@@ -54,6 +54,7 @@ import com.amresalehin.emregallery.data.BrowserSession
 import com.amresalehin.emregallery.data.DownloaderSession
 import com.amresalehin.emregallery.data.ExtractionCoordinator
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.PocketRepository
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.DirectBrowserView
 import com.amresalehin.emregallery.ui.DiscoveredMediaPage
@@ -252,6 +253,28 @@ private fun ShareReceiverScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    var savedToPocket by remember(liveBrowserUrl) { mutableStateOf(false) }
+                    TextButton(
+                        onClick = {
+                            val pocketRepo = PocketRepository.getInstance(context)
+                            val existing = pocketRepo.findDuplicateBookmark(liveBrowserUrl)
+                            if (existing != null) {
+                                savedToPocket = true
+                                Toast.makeText(context, "Already saved in Pocket: ${existing.title}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val domain = MediaClassifier.cleanDomainFromUrl(liveBrowserUrl)
+                                pocketRepo.addBookmark(
+                                    title = domain.ifBlank { liveBrowserUrl },
+                                    url = liveBrowserUrl
+                                )
+                                savedToPocket = true
+                                Toast.makeText(context, "Bookmark saved to Pocket", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.testTag("share_save_bookmark_btn")
+                    ) {
+                        Text(if (savedToPocket) "Saved" else "Bookmark")
+                    }
                     TextButton(
                         onClick = {
                             BrowserSession.savedBrowserSite = liveBrowserUrl

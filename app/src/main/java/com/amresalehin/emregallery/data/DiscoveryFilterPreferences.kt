@@ -28,16 +28,20 @@ data class DiscoveryFilterState(
     val minWidth: Int = 480,
     val minHeight: Int = 540,
     val minSizeBytes: Long = 10 * 1024L,
-    val enabledCategories: Set<String> = setOf("ALL", "VIDEOS", "STREAMS", "IMAGES", "AUDIO"),
-    val enabledFormats: Set<String> = DEFAULT_ENABLED_FORMATS
+    val enabledCategories: Set<String> = setOf("ALL", "VIDEOS", "STREAMS", "IMAGES", "AUDIO", "SUBTITLES", "FILES"),
+    val enabledFormats: Set<String> = DEFAULT_ENABLED_FORMATS,
+    val hideUnknownSizeImages: Boolean = false,
+    val intelligentDeduplication: Boolean = true
 ) {
     companion object {
         val IMAGE_FORMATS = listOf("JPG", "WEBP", "PNG", "SVG", "GIF", "AVIF", "BMP")
-        val VIDEO_FORMATS = listOf("MP4", "WEBM", "MOV", "MKV")
+        val VIDEO_FORMATS = listOf("MP4", "WEBM", "MOV", "MKV", "AVI", "FLV", "TS", "M4V")
         val STREAM_FORMATS = listOf("M3U8", "MPD")
-        val AUDIO_FORMATS = listOf("MP3", "M4A", "AAC", "WAV", "FLAC", "OPUS")
+        val AUDIO_FORMATS = listOf("MP3", "M4A", "AAC", "WAV", "FLAC", "OPUS", "OGG")
+        val SUBTITLE_FORMATS = listOf("VTT", "SRT", "ASS", "SSA", "TTML")
+        val FILE_FORMATS = listOf("PDF", "ZIP", "RAR", "7Z", "EPUB", "DOCX", "XLSX", "PPTX", "APK")
 
-        val ALL_FORMATS: List<String> = IMAGE_FORMATS + VIDEO_FORMATS + STREAM_FORMATS + AUDIO_FORMATS
+        val ALL_FORMATS: List<String> = IMAGE_FORMATS + VIDEO_FORMATS + STREAM_FORMATS + AUDIO_FORMATS + SUBTITLE_FORMATS + FILE_FORMATS
 
         // PNG and SVG disabled by default as required
         val DEFAULT_ENABLED_FORMATS: Set<String> = ALL_FORMATS.filter {
@@ -58,6 +62,8 @@ object DiscoveryFilterManager {
     private const val KEY_MIN_SIZE = "min_size_bytes"
     private const val KEY_FORMATS = "enabled_formats"
     private const val KEY_CATEGORIES = "enabled_categories"
+    private const val KEY_HIDE_UNKNOWN_SIZE = "hide_unknown_size_images"
+    private const val KEY_INTELLIGENT_DEDUP = "intelligent_deduplication"
 
     private var prefs: SharedPreferences? = null
     private val _filterState = MutableStateFlow(DiscoveryFilterState())
@@ -80,14 +86,18 @@ object DiscoveryFilterManager {
         val minSize = sp.getLong(KEY_MIN_SIZE, 10 * 1024L)
 
         val formats = sp.getStringSet(KEY_FORMATS, null) ?: DiscoveryFilterState.DEFAULT_ENABLED_FORMATS
-        val categories = sp.getStringSet(KEY_CATEGORIES, null) ?: setOf("ALL", "VIDEOS", "STREAMS", "IMAGES", "AUDIO")
+        val categories = sp.getStringSet(KEY_CATEGORIES, null) ?: setOf("ALL", "VIDEOS", "STREAMS", "IMAGES", "AUDIO", "SUBTITLES", "FILES")
+        val hideUnknown = sp.getBoolean(KEY_HIDE_UNKNOWN_SIZE, false)
+        val dedup = sp.getBoolean(KEY_INTELLIGENT_DEDUP, true)
 
         _filterState.value = DiscoveryFilterState(
             minWidth = minW,
             minHeight = minH,
             minSizeBytes = minSize,
             enabledCategories = categories,
-            enabledFormats = formats
+            enabledFormats = formats,
+            hideUnknownSizeImages = hideUnknown,
+            intelligentDeduplication = dedup
         )
     }
 
@@ -106,6 +116,8 @@ object DiscoveryFilterManager {
                 putLong(KEY_MIN_SIZE, newState.minSizeBytes)
                 putStringSet(KEY_FORMATS, newState.enabledFormats)
                 putStringSet(KEY_CATEGORIES, newState.enabledCategories)
+                putBoolean(KEY_HIDE_UNKNOWN_SIZE, newState.hideUnknownSizeImages)
+                putBoolean(KEY_INTELLIGENT_DEDUP, newState.intelligentDeduplication)
                 apply()
             }
         }
@@ -146,7 +158,31 @@ object DiscoveryFilterManager {
             fmt.contains("WAV") || urlLower.contains(".wav") || mimeLower.contains("wav") -> "WAV"
             fmt.contains("FLAC") || urlLower.contains(".flac") || mimeLower.contains("flac") -> "FLAC"
             fmt.contains("OPUS") || urlLower.contains(".opus") || mimeLower.contains("opus") -> "OPUS"
+            fmt.contains("OGG") || urlLower.contains(".ogg") || mimeLower.contains("audio/ogg") -> "OGG"
 
+            fmt.contains("AVI") || urlLower.contains(".avi") -> "AVI"
+            fmt.contains("FLV") || urlLower.contains(".flv") -> "FLV"
+            fmt.contains("M4V") || urlLower.contains(".m4v") -> "M4V"
+            fmt == "TS" || urlLower.substringBefore("?").endsWith(".ts") -> "TS"
+
+            fmt.contains("VTT") || urlLower.contains(".vtt") || mimeLower.contains("text/vtt") -> "VTT"
+            fmt.contains("SRT") || urlLower.contains(".srt") || mimeLower.contains("subrip") -> "SRT"
+            fmt == "ASS" || urlLower.contains(".ass") -> "ASS"
+            fmt == "SSA" || urlLower.contains(".ssa") -> "SSA"
+            fmt.contains("TTML") || urlLower.contains(".ttml") || urlLower.contains(".dfxp") -> "TTML"
+
+            fmt == "PDF" || urlLower.contains(".pdf") || mimeLower == "application/pdf" -> "PDF"
+            fmt == "ZIP" || urlLower.contains(".zip") || mimeLower == "application/zip" -> "ZIP"
+            fmt == "RAR" || urlLower.contains(".rar") -> "RAR"
+            fmt == "7Z" || urlLower.contains(".7z") -> "7Z"
+            fmt == "EPUB" || urlLower.contains(".epub") -> "EPUB"
+            fmt == "DOCX" || urlLower.contains(".docx") -> "DOCX"
+            fmt == "XLSX" || urlLower.contains(".xlsx") -> "XLSX"
+            fmt == "PPTX" || urlLower.contains(".pptx") -> "PPTX"
+            fmt == "APK" || urlLower.contains(".apk") -> "APK"
+
+            item.category == MediaCategory.SUBTITLES -> "VTT"
+            item.category == MediaCategory.FILES -> "ZIP"
             item.isStream -> "M3U8"
             item.isVideo -> "MP4"
             item.isAudio -> "MP3"
@@ -170,6 +206,8 @@ object DiscoveryFilterManager {
 
         // 2. Category check (Category switches)
         val matchesCategory = when {
+            item.category == MediaCategory.SUBTITLES -> filter.enabledCategories.contains("SUBTITLES") || filter.enabledCategories.contains("ALL")
+            item.category == MediaCategory.FILES -> filter.enabledCategories.contains("FILES") || filter.enabledCategories.contains("ALL")
             item.isStream -> filter.enabledCategories.contains("STREAMS") || filter.enabledCategories.contains("ALL")
             item.isVideo -> filter.enabledCategories.contains("VIDEOS") || filter.enabledCategories.contains("ALL")
             item.isAudio -> filter.enabledCategories.contains("AUDIO") || filter.enabledCategories.contains("ALL")
@@ -177,9 +215,12 @@ object DiscoveryFilterManager {
         }
         if (!matchesCategory) return false
 
-        // 3. Dimensions check (Pocket screen reference: videos/streams/audio are not restricted by width/height)
+        val isImageItem = !item.isVideo && !item.isStream && !item.isAudio &&
+            item.category != MediaCategory.SUBTITLES && item.category != MediaCategory.FILES
+
+        // 3. Dimensions check (Pocket screen reference: non-images are not restricted by width/height)
         if (filter.minWidth > 0 || filter.minHeight > 0) {
-            if (!item.isVideo && !item.isStream && !item.isAudio) {
+            if (isImageItem) {
                 val w = item.width ?: MediaCaptureEngine.extractDimension(item.resolutionHint, item.url, isWidth = true)
                 val h = item.height ?: MediaCaptureEngine.extractDimension(item.resolutionHint, item.url, isWidth = false)
                 if (w != null && filter.minWidth > 0 && w < filter.minWidth) {
@@ -191,14 +232,34 @@ object DiscoveryFilterManager {
             }
         }
 
-        // 4. Minimum media size check (Pocket screen reference)
+        // 4. Minimum media size & Hide Unknown Size Images check (Website Media Downloader)
+        val sizeBytes = item.sizeBytes ?: MediaClassifier.estimateDataUriSizeBytes(item.url)
+        if (filter.hideUnknownSizeImages && isImageItem && (sizeBytes == null || sizeBytes <= 0L)) {
+            return false
+        }
         if (filter.minSizeBytes > 0) {
-            val sizeBytes = item.sizeBytes ?: MediaClassifier.estimateDataUriSizeBytes(item.url)
             if (sizeBytes != null && sizeBytes < filter.minSizeBytes) {
                 return false
             }
         }
 
         return true
+    }
+
+    /**
+     * Global real-time search across filenames/titles, URLs, hostnames, formats, and page URLs.
+     */
+    fun matchesSearchQuery(item: ScrapedMediaItem, rawQuery: String): Boolean {
+        val query = rawQuery.trim().lowercase(Locale.ROOT)
+        if (query.isBlank()) return true
+        val tokens = query.split(Regex("\s+")).filter { it.isNotBlank() }
+        val haystack = buildString {
+            append(item.title.lowercase(Locale.ROOT)).append(' ')
+            append(item.url.lowercase(Locale.ROOT)).append(' ')
+            append(item.format.lowercase(Locale.ROOT)).append(' ')
+            append(item.category.label.lowercase(Locale.ROOT)).append(' ')
+            append(item.provenance.pageUrl.lowercase(Locale.ROOT))
+        }
+        return tokens.all { haystack.contains(it) }
     }
 }

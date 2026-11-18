@@ -19,7 +19,15 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.ui.res.painterResource
@@ -41,6 +49,10 @@ import com.amresalehin.emregallery.data.DiscoveryFilterManager
 import com.amresalehin.emregallery.data.DiscoveryFilterState
 import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.DownloaderSession
+import com.amresalehin.emregallery.data.ExtractionSource
+import com.amresalehin.emregallery.data.MediaCaptureEngine
+import com.amresalehin.emregallery.data.MediaCategory
+import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
@@ -111,6 +123,11 @@ fun DiscoveredMediaPage(
 
     val filterState by DiscoveryFilterManager.filterState.collectAsState()
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showAddUrlDialog by remember { mutableStateOf(false) }
+    var manualUrlInput by remember { mutableStateOf("") }
+    var qrShareItem by remember { mutableStateOf<ScrapedMediaItem?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var dismissedIds by remember { mutableStateOf(setOf<String>()) }
 
     val tabSession = remember { BrowserSession.getTabSession("tab_main") }
     val tabItems by tabSession.detectedItems.collectAsState()
@@ -118,28 +135,43 @@ fun DiscoveredMediaPage(
     val sourceUrl by DownloaderSession.currentUrl.collectAsState()
     val sourceDomain by DownloaderSession.sourceDomain.collectAsState()
 
-    val rawDiscoveredItems = remember(tabItems, sessionItems) {
-        (sessionItems + tabItems).distinctBy { it.id.ifBlank { it.url } }
+    val rawDiscoveredItems = remember(tabItems, sessionItems, dismissedIds, filterState.intelligentDeduplication) {
+        val combined = (sessionItems + tabItems)
+            .filterNot { dismissedIds.contains(it.id.ifBlank { it.url }) }
+        if (filterState.intelligentDeduplication) {
+            MediaClassifier.intelligentDeduplicate(combined)
+        } else {
+            combined.distinctBy { it.id.ifBlank { it.url } }
+        }
     }
 
-    val discoveredItems = remember(rawDiscoveredItems, filterState) {
+    val discoveredItems = remember(rawDiscoveredItems, filterState, searchQuery) {
         rawDiscoveredItems.filter { item ->
-            DiscoveryFilterManager.matchesFilters(item, filterState)
+            DiscoveryFilterManager.matchesFilters(item, filterState) &&
+                DiscoveryFilterManager.matchesSearchQuery(item, searchQuery)
         }
     }
 
     var selectedFilter by remember { mutableStateOf("All") }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
 
-    val videoCount = remember(discoveredItems) { discoveredItems.count { it.isVideo || it.isStream } }
-    val imageCount = remember(discoveredItems) { discoveredItems.count { !it.isVideo && !it.isStream && !it.isAudio } }
+    val videoCount = remember(discoveredItems) { discoveredItems.count { it.isVideo && !it.isStream } }
+    val streamCount = remember(discoveredItems) { discoveredItems.count { it.isStream } }
     val audioCount = remember(discoveredItems) { discoveredItems.count { it.isAudio } }
+    val imageCount = remember(discoveredItems) {
+        discoveredItems.count { !it.isVideo && !it.isStream && !it.isAudio && !it.isSubtitle && !it.isOtherFile }
+    }
+    val subtitleCount = remember(discoveredItems) { discoveredItems.count { it.isSubtitle } }
+    val fileCount = remember(discoveredItems) { discoveredItems.count { it.isOtherFile } }
 
     val filteredItems = remember(discoveredItems, selectedFilter) {
         when (selectedFilter) {
-            "Videos" -> discoveredItems.filter { it.isVideo || it.isStream }
-            "Images" -> discoveredItems.filter { !it.isVideo && !it.isStream && !it.isAudio }
+            "Videos" -> discoveredItems.filter { it.isVideo && !it.isStream }
+            "Streams" -> discoveredItems.filter { it.isStream }
             "Audio" -> discoveredItems.filter { it.isAudio }
+            "Images" -> discoveredItems.filter { !it.isVideo && !it.isStream && !it.isAudio && !it.isSubtitle && !it.isOtherFile }
+            "Subtitles" -> discoveredItems.filter { it.isSubtitle }
+            "Files" -> discoveredItems.filter { it.isOtherFile }
             else -> discoveredItems
         }
     }
@@ -202,8 +234,19 @@ fun DiscoveredMediaPage(
                     )
                 }
 
-                // Completely clean & clear center area (removed 'Choose media to download' heading and description)
                 Spacer(modifier = Modifier.weight(1f))
+
+                // Manual URL Entry button ("Add URL" from Website Media Downloader)
+                IconButton(
+                    onClick = { showAddUrlDialog = true },
+                    modifier = Modifier.testTag("discovered_media_add_url_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddLink,
+                        contentDescription = "Add direct URL",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
 
                 // Filter icon button to open drawer sheet for discovery filters
                 IconButton(
@@ -288,7 +331,30 @@ fun DiscoveredMediaPage(
             }
         }
 
-        // Filter pills row (All, Videos, Images, Audio)
+        // Global real-time search bar across all media groups
+        if (rawDiscoveredItems.isNotEmpty()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search filename, URL, format, or host...", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("discovered_media_search_field")
+            )
+        }
+
+        // 6-Category Media Grouping pills with live counts (Videos, Audio, Streams, Images, Subtitles, Files)
         if (discoveredItems.isNotEmpty()) {
             LazyRow(
                 modifier = Modifier
@@ -300,8 +366,11 @@ fun DiscoveredMediaPage(
                 val filters = buildList {
                     add("All" to discoveredItems.size)
                     if (videoCount > 0) add("Videos" to videoCount)
-                    if (imageCount > 0) add("Images" to imageCount)
                     if (audioCount > 0) add("Audio" to audioCount)
+                    if (streamCount > 0) add("Streams" to streamCount)
+                    if (imageCount > 0) add("Images" to imageCount)
+                    if (subtitleCount > 0) add("Subtitles" to subtitleCount)
+                    if (fileCount > 0) add("Files" to fileCount)
                 }
                 items(filters) { (label, count) ->
                     val isSelected = selectedFilter == label
@@ -433,14 +502,35 @@ fun DiscoveredMediaPage(
 
                                 Spacer(Modifier.width(10.dp))
 
-                                AsyncImage(
-                                    model = item.thumbnailUrl?.takeIf { it.isNotBlank() } ?: item.url,
-                                    contentDescription = item.title,
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .clip(RoundedCornerShape(10.dp)),
-                                    contentScale = ContentScale.Crop
-                                )
+                                if (item.isSubtitle || item.isOtherFile || (item.isAudio && item.thumbnailUrl.isNullOrBlank())) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(68.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.secondaryContainer),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = when {
+                                                item.isSubtitle -> Icons.Default.Subtitles
+                                                item.isOtherFile -> Icons.Default.InsertDriveFile
+                                                else -> Icons.Default.Audiotrack
+                                            },
+                                            contentDescription = item.category.label,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                } else {
+                                    AsyncImage(
+                                        model = item.thumbnailUrl?.takeIf { it.isNotBlank() } ?: item.url,
+                                        contentDescription = item.title,
+                                        modifier = Modifier
+                                            .size(68.dp)
+                                            .clip(RoundedCornerShape(10.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
 
                                 Spacer(Modifier.width(12.dp))
 
@@ -478,6 +568,19 @@ fun DiscoveredMediaPage(
                                 }
 
                                 Spacer(Modifier.width(8.dp))
+
+                                // QR Code share button for cross-device transfer
+                                IconButton(
+                                    onClick = { qrShareItem = item },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.QrCode2,
+                                        contentDescription = "Share QR code for ${item.title}",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
 
                                 // Single item download button
                                 IconButton(
@@ -529,17 +632,37 @@ fun DiscoveredMediaPage(
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        Button(
-                            onClick = {
-                                val targets = if (selectedIds.isEmpty()) {
-                                    filteredItems
-                                } else {
-                                    filteredItems.filter { selectedIds.contains(it.id.ifBlank { it.url }) }
-                                }
-                                downloadBatch(targets)
-                            },
-                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            if (selectedIds.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        dismissedIds = dismissedIds + selectedIds
+                                        selectedIds = emptySet()
+                                    },
+                                    modifier = Modifier.testTag("discovered_media_batch_remove_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = "Remove selected",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    val targets = if (selectedIds.isEmpty()) {
+                                        filteredItems
+                                    } else {
+                                        filteredItems.filter { selectedIds.contains(it.id.ifBlank { it.url }) }
+                                    }
+                                    downloadBatch(targets)
+                                },
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                            ) {
                             Icon(
                                 imageVector = Icons.Default.Download,
                                 contentDescription = null,
@@ -549,6 +672,7 @@ fun DiscoveredMediaPage(
                             Text(
                                 text = if (selectedIds.isEmpty()) "Download All" else "Download Selected"
                             )
+                            }
                         }
                     }
                 }
@@ -563,6 +687,81 @@ fun DiscoveredMediaPage(
                     DiscoveryFilterManager.updateFilters(newFilter)
                 },
                 onDismissRequest = { showFilterSheet = false }
+            )
+        }
+
+        // Manual Direct URL Download Dialog ("Add URL")
+        if (showAddUrlDialog) {
+            AlertDialog(
+                onDismissRequest = { showAddUrlDialog = false },
+                title = { Text("Add Direct Download URL", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Paste a direct link to any video, audio, image, HLS/DASH stream, subtitle, or file.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = manualUrlInput,
+                            onValueChange = { manualUrlInput = it },
+                            placeholder = { Text("https://example.com/video.mp4") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val trimmed = manualUrlInput.trim()
+                            if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
+                                val built = MediaCaptureEngine.buildMediaItem(
+                                    rawUrl = trimmed,
+                                    source = ExtractionSource.STATIC_HTML,
+                                    baseUrl = sourceUrl.ifBlank { trimmed }
+                                ) ?: run {
+                                    val cls = MediaClassifier.classify(trimmed)
+                                    ScrapedMediaItem(
+                                        id = "manual_${System.currentTimeMillis()}_${trimmed.hashCode()}",
+                                        url = trimmed,
+                                        title = MediaClassifier.deriveFileName(trimmed, cls.format, 0),
+                                        isVideo = cls.isVideo,
+                                        isAudio = cls.isAudio,
+                                        isStream = cls.isStream,
+                                        category = cls.category,
+                                        format = cls.format,
+                                        mimeType = cls.mimeType,
+                                        source = "Manual URL"
+                                    )
+                                }
+                                DownloaderSession.addDiscoveredItem(built)
+                                downloadItem(built)
+                                Toast.makeText(context, "Queued ${built.title}", Toast.LENGTH_SHORT).show()
+                                manualUrlInput = ""
+                                showAddUrlDialog = false
+                            } else {
+                                Toast.makeText(context, "Enter a valid http:// or https:// URL", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text("Download")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddUrlDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // QR Code Sharing Dialog
+        qrShareItem?.let { item ->
+            QrCodeShareDialog(
+                title = item.title,
+                url = item.url,
+                onDismiss = { qrShareItem = null }
             )
         }
     }

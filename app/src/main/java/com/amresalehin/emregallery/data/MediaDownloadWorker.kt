@@ -17,6 +17,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import org.json.JSONObject
 import java.io.File
+import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
 import com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo
 import kotlin.math.abs
@@ -144,6 +145,16 @@ class MediaDownloadWorker(
                 mediaUrl.contains(".m4a", ignoreCase = true) ||
                 mediaUrl.contains(".wav", ignoreCase = true) ||
                 mediaUrl.contains(".flac", ignoreCase = true) ||
+                mediaUrl.contains(".vtt", ignoreCase = true) ||
+                mediaUrl.contains(".srt", ignoreCase = true) ||
+                mediaUrl.contains(".ass", ignoreCase = true) ||
+                mediaUrl.contains(".ttml", ignoreCase = true) ||
+                mediaUrl.contains(".pdf", ignoreCase = true) ||
+                mediaUrl.contains(".zip", ignoreCase = true) ||
+                mediaUrl.contains(".rar", ignoreCase = true) ||
+                mediaUrl.contains(".7z", ignoreCase = true) ||
+                mediaUrl.contains(".epub", ignoreCase = true) ||
+                mediaUrl.contains(".apk", ignoreCase = true) ||
                 (mediaUrl.contains(".mp4", ignoreCase = true) && !sourceUrl.contains("youtube.com", ignoreCase = true) && !sourceUrl.contains("youtu.be", ignoreCase = true))
             )
 
@@ -167,10 +178,72 @@ class MediaDownloadWorker(
             val effectiveDomain = sourceDomain.takeIf { it.isNotBlank() }
                 ?: OkHttpDownloader.extractDomain(sourceUrl.ifBlank { mediaUrl })
 
-            // Strategy 1: Direct HTTP media via OkHttp (fast path, byte-level ranges, resumable)
-            if (isDirectHttpAsset) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.25f, KEY_STATUS to "Downloading via OkHttp: $title..."))
-                val okResult = OkHttpDownloader.downloadMediaFileDetailed(
+            val speedBoostEnabled = DownloaderPreferencesManager.isSpeedBoostEnabledSync(applicationContext)
+            val speedBoostConnections = DownloaderPreferencesManager.getSpeedBoostConnectionsSync(applicationContext)
+            val maxVideoHeight = DownloaderPreferencesManager.getVideoQualityCapSync(applicationContext).maxHeight
+
+            // Strategy 0: Native parallel HLS/DASH stream reconstruction (Speed Boost segment pool + AES-128 + MP4/TS fallback)
+            val isDirectHls = mediaUrl.contains(".m3u8", ignoreCase = true)
+            val isDirectDash = mediaUrl.contains(".mpd", ignoreCase = true)
+            if (isStream && (isDirectHls || isDirectDash) && !isYouTubeSource) {
+                val streamConns = if (speedBoostEnabled) speedBoostConnections else 1
+                setProgress(workDataOf(KEY_PROGRESS to 0.20f, KEY_STATUS to "Reconstructing stream (${streamConns}x): $title..."))
+                val streamRes = if (isDirectHls) {
+                    StreamReconstructionEngine.downloadHlsStream(
+                        context = applicationContext,
+                        manifestUrl = mediaUrl,
+                        fileName = fileName,
+                        referer = referer ?: sourceUrl,
+                        headers = downloadHeaders,
+                        domain = effectiveDomain,
+                        maxHeight = maxVideoHeight,
+                        parallelConnections = streamConns,
+                        onProgress = { done, total, bytes, speed ->
+                            val ratio = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0.1f, 0.95f) else 0.5f
+                            DownloadActivityManager.updateProgress(
+                                itemId = itemId,
+                                progress = ratio,
+                                bytesRead = bytes,
+                                totalBytes = 0L,
+                                speedBytesPerSec = speed,
+                                isSpeedBoostActive = streamConns > 1,
+                                activeConnections = streamConns
+                            )
+                        }
+                    )
+                } else {
+                    StreamReconstructionEngine.downloadDashStream(
+                        context = applicationContext,
+                        manifestUrl = mediaUrl,
+                        fileName = fileName,
+                        referer = referer ?: sourceUrl,
+                        headers = downloadHeaders,
+                        domain = effectiveDomain,
+                        maxHeight = maxVideoHeight,
+                        parallelConnections = streamConns,
+                        onProgress = { done, total, bytes, speed ->
+                            val ratio = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0.1f, 0.95f) else 0.5f
+                            DownloadActivityManager.updateProgress(
+                                itemId = itemId,
+                                progress = ratio,
+                                bytesRead = bytes,
+                                totalBytes = 0L,
+                                speedBytesPerSec = speed,
+                                isSpeedBoostActive = streamConns > 1,
+                                activeConnections = streamConns
+                            )
+                        }
+                    )
+                }
+                if (streamRes.isSuccessful && streamRes.file != null && streamRes.file.exists() && streamRes.file.length() > 0L) {
+                    downloadedFile = streamRes.file
+                }
+            }
+
+            // Strategy 1: Direct HTTP media via SpeedBoostDownloader (multi-threaded HTTP Range >2MB, auto fallback to OkHttp)
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && isDirectHttpAsset) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.25f, KEY_STATUS to "Downloading: $title..."))
+                val boostResult = SpeedBoostDownloader.downloadWithSpeedBoost(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
@@ -178,11 +251,22 @@ class MediaDownloadWorker(
                     downloadId = itemId,
                     headers = downloadHeaders,
                     domain = effectiveDomain,
-                    onProgress = { bytesRead, totalBytes ->
+                    speedBoostEnabled = speedBoostEnabled,
+                    connections = speedBoostConnections,
+                    onProgress = { bytesRead, totalBytes, speed, boostActive ->
                         val ratio = if (totalBytes > 0L) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0.1f, 0.95f) else 0.5f
-                        DownloadActivityManager.updateProgress(itemId, ratio, bytesRead, totalBytes, 0L)
+                        DownloadActivityManager.updateProgress(
+                            itemId = itemId,
+                            progress = ratio,
+                            bytesRead = bytesRead,
+                            totalBytes = totalBytes,
+                            speedBytesPerSec = speed,
+                            isSpeedBoostActive = boostActive,
+                            activeConnections = if (boostActive) speedBoostConnections else 1
+                        )
                     }
                 )
+                val okResult = boostResult.downloadResult
                 if (okResult.isSuccessful && okResult.file != null && okResult.file.exists() && okResult.file.length() > 0L) {
                     downloadedFile = okResult.file
                 }

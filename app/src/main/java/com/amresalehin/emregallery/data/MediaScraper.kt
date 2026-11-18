@@ -41,7 +41,12 @@ data class ScrapedMediaItem(
     val detectedAt: Long = System.currentTimeMillis(),
     val width: Int? = null,
     val height: Int? = null
-)
+) {
+    val isSubtitle: Boolean
+        get() = category == MediaCategory.SUBTITLES
+    val isOtherFile: Boolean
+        get() = category == MediaCategory.FILES
+}
 
 data class ScrapeResult(
     val sourceUrl: String,

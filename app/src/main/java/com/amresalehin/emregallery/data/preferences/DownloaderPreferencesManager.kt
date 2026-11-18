@@ -199,6 +199,63 @@ class DownloaderPreferencesManager(private val context: Context) {
         prefs[KEY_REDDIT_POST_AUTHORS] ?: syncPrefs.getBoolean(PREF_REDDIT_POST_AUTHORS, false)
     }.distinctUntilChanged()
 
+    // Website Media Downloader settings (Speed Boost & Redirect Protection)
+    val speedBoostEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_SPEED_BOOST_ENABLED] ?: syncPrefs.getBoolean(PREF_SPEED_BOOST_ENABLED, true)
+    }.distinctUntilChanged()
+
+    val speedBoostConnections: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_SPEED_BOOST_CONNECTIONS] ?: syncPrefs.getInt(PREF_SPEED_BOOST_CONNECTIONS, 4)).coerceIn(1, 16)
+    }.distinctUntilChanged()
+
+    val redirectProtectionEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_REDIRECT_PROTECTION_ENABLED] ?: syncPrefs.getBoolean(PREF_REDIRECT_PROTECTION_ENABLED, true)
+    }.distinctUntilChanged()
+
+    val redirectTapsToOpen: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_REDIRECT_TAPS_TO_OPEN] ?: syncPrefs.getInt(PREF_REDIRECT_TAPS_TO_OPEN, 2)).coerceIn(1, 5)
+    }.distinctUntilChanged()
+
+    val hideBlockedRedirectElements: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_HIDE_BLOCKED_ELEMENTS] ?: syncPrefs.getBoolean(PREF_HIDE_BLOCKED_ELEMENTS, true)
+    }.distinctUntilChanged()
+
+    val adBlockEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_AD_BLOCK_ENABLED] ?: syncPrefs.getBoolean(PREF_AD_BLOCK_ENABLED, true)
+    }.distinctUntilChanged()
+
+    suspend fun setSpeedBoostEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_SPEED_BOOST_ENABLED, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST_ENABLED] = enabled }
+    }
+
+    suspend fun setSpeedBoostConnections(connections: Int) {
+        val clamped = connections.coerceIn(1, 16)
+        syncPrefs.edit().putInt(PREF_SPEED_BOOST_CONNECTIONS, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST_CONNECTIONS] = clamped }
+    }
+
+    suspend fun setRedirectProtectionEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_REDIRECT_PROTECTION_ENABLED, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_REDIRECT_PROTECTION_ENABLED] = enabled }
+    }
+
+    suspend fun setRedirectTapsToOpen(taps: Int) {
+        val clamped = taps.coerceIn(1, 5)
+        syncPrefs.edit().putInt(PREF_REDIRECT_TAPS_TO_OPEN, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_REDIRECT_TAPS_TO_OPEN] = clamped }
+    }
+
+    suspend fun setHideBlockedRedirectElements(hide: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_HIDE_BLOCKED_ELEMENTS, hide).apply()
+        appContext.galleryDataStore.edit { it[KEY_HIDE_BLOCKED_ELEMENTS] = hide }
+    }
+
+    suspend fun setAdBlockEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_AD_BLOCK_ENABLED, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_AD_BLOCK_ENABLED] = enabled }
+    }
+
     suspend fun setRedditConfig(config: RedditDlConfig) {
         val clampedLimit = config.limit.coerceIn(1, 500)
         syncPrefs.edit()
@@ -247,6 +304,12 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_REDDIT_USERNAME = "reddit_dl_username"
         private const val PREF_REDDIT_PASSWORD = "reddit_dl_password"
         private const val PREF_REDDIT_REFRESH_TOKEN = "reddit_dl_refresh_token"
+        private const val PREF_SPEED_BOOST_ENABLED = "wmd_speed_boost_enabled"
+        private const val PREF_SPEED_BOOST_CONNECTIONS = "wmd_speed_boost_connections"
+        private const val PREF_REDIRECT_PROTECTION_ENABLED = "wmd_redirect_protection_enabled"
+        private const val PREF_REDIRECT_TAPS_TO_OPEN = "wmd_redirect_taps_to_open"
+        private const val PREF_HIDE_BLOCKED_ELEMENTS = "wmd_hide_blocked_elements"
+        private const val PREF_AD_BLOCK_ENABLED = "wmd_ad_block_enabled"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -264,11 +327,30 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_REDDIT_LIMIT = intPreferencesKey(PREF_REDDIT_LIMIT)
         private val KEY_REDDIT_COMMENTS = booleanPreferencesKey(PREF_REDDIT_COMMENTS)
         private val KEY_REDDIT_POST_AUTHORS = booleanPreferencesKey(PREF_REDDIT_POST_AUTHORS)
+        private val KEY_SPEED_BOOST_ENABLED = booleanPreferencesKey(PREF_SPEED_BOOST_ENABLED)
+        private val KEY_SPEED_BOOST_CONNECTIONS = intPreferencesKey(PREF_SPEED_BOOST_CONNECTIONS)
+        private val KEY_REDIRECT_PROTECTION_ENABLED = booleanPreferencesKey(PREF_REDIRECT_PROTECTION_ENABLED)
+        private val KEY_REDIRECT_TAPS_TO_OPEN = intPreferencesKey(PREF_REDIRECT_TAPS_TO_OPEN)
+        private val KEY_HIDE_BLOCKED_ELEMENTS = booleanPreferencesKey(PREF_HIDE_BLOCKED_ELEMENTS)
+        private val KEY_AD_BLOCK_ENABLED = booleanPreferencesKey(PREF_AD_BLOCK_ENABLED)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext
                 .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(PREF_WIFI_ONLY, false)
+        }
+
+        fun isSpeedBoostEnabledSync(context: Context): Boolean {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_SPEED_BOOST_ENABLED, true)
+        }
+
+        fun getSpeedBoostConnectionsSync(context: Context): Int {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(PREF_SPEED_BOOST_CONNECTIONS, 4)
+                .coerceIn(1, 16)
         }
 
         fun getVideoQualityCapSync(context: Context): DownloaderVideoQuality {

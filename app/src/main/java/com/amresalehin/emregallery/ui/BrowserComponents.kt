@@ -1986,9 +1986,21 @@ fun BrowserSettingsBottomSheet(
     onDesktopModeChange: (Boolean) -> Unit,
     onClearCacheClick: () -> Unit,
     onDismiss: () -> Unit,
-    isDark: Boolean = false
+    isDark: Boolean = false,
+    adBlockEnabled: Boolean = true,
+    onAdBlockChange: ((Boolean) -> Unit)? = null,
+    redirectProtectionEnabled: Boolean = true,
+    onRedirectProtectionChange: ((Boolean) -> Unit)? = null,
+    redirectTapsToOpen: Int = 2,
+    onRedirectTapsChange: ((Int) -> Unit)? = null,
+    hideBlockedElements: Boolean = true,
+    onHideBlockedElementsChange: ((Boolean) -> Unit)? = null,
+    speedBoostEnabled: Boolean = true,
+    onSpeedBoostChange: ((Boolean) -> Unit)? = null,
+    speedBoostConnections: Int = 4,
+    onSpeedBoostConnectionsChange: ((Int) -> Unit)? = null
 ) {
-    var adBlockEnabled by remember { mutableStateOf(true) }
+    var localAdBlock by remember(adBlockEnabled) { mutableStateOf(adBlockEnabled) }
     var jsEnabled by remember { mutableStateOf(true) }
 
     ModalBottomSheet(
@@ -1999,6 +2011,7 @@ fun BrowserSettingsBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
             Text(
@@ -2023,13 +2036,121 @@ fun BrowserSettingsBottomSheet(
                     Text("Blocks intrusive scripts and ads", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
                 }
                 Switch(
-                    checked = adBlockEnabled,
-                    onCheckedChange = { adBlockEnabled = it },
+                    checked = localAdBlock,
+                    onCheckedChange = {
+                        localAdBlock = it
+                        onAdBlockChange?.invoke(it)
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = BrowserThemeColors.background(isDark),
                         checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
                     )
                 )
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // Redirect & Unwanted Ad Protection (Website Media Downloader)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Block Unwanted Redirects", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("Prevents surprise cross-origin redirects & ad popups", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = redirectProtectionEnabled,
+                    onCheckedChange = { onRedirectProtectionChange?.invoke(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            if (redirectProtectionEnabled) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Taps Required to Open External Link", fontSize = 13.sp, color = BrowserThemeColors.textSecondary(isDark))
+                        Text("${redirectTapsToOpen}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BrowserThemeColors.textPrimary(isDark))
+                    }
+                    Slider(
+                        value = redirectTapsToOpen.toFloat(),
+                        onValueChange = { onRedirectTapsChange?.invoke(it.toInt().coerceIn(1, 5)) },
+                        valueRange = 1f..5f,
+                        steps = 3
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text("Hide Blocked Content", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                            Text("Hides elements after they trigger a blocked redirect", fontSize = 11.sp, color = BrowserThemeColors.textSecondary(isDark))
+                        }
+                        Switch(
+                            checked = hideBlockedElements,
+                            onCheckedChange = { onHideBlockedElementsChange?.invoke(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = BrowserThemeColors.background(isDark),
+                                checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                            )
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = BrowserThemeColors.divider(isDark))
+
+            // Speed Boost Multi-Threaded Downloads (Website Media Downloader)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Speed Boost Downloads", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = BrowserThemeColors.textPrimary(isDark))
+                    Text("Parallel HTTP Range chunks & concurrent stream segments", fontSize = 12.sp, color = BrowserThemeColors.textSecondary(isDark))
+                }
+                Switch(
+                    checked = speedBoostEnabled,
+                    onCheckedChange = { onSpeedBoostChange?.invoke(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = BrowserThemeColors.background(isDark),
+                        checkedTrackColor = BrowserThemeColors.textPrimary(isDark)
+                    )
+                )
+            }
+
+            if (speedBoostEnabled) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Parallel Connections", fontSize = 13.sp, color = BrowserThemeColors.textSecondary(isDark))
+                        Text("${speedBoostConnections} threads", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BrowserThemeColors.textPrimary(isDark))
+                    }
+                    Slider(
+                        value = speedBoostConnections.toFloat(),
+                        onValueChange = { onSpeedBoostConnectionsChange?.invoke(it.toInt().coerceIn(1, 16)) },
+                        valueRange = 1f..16f,
+                        steps = 14
+                    )
+                }
             }
 
             HorizontalDivider(color = BrowserThemeColors.divider(isDark))

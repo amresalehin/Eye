@@ -245,7 +245,68 @@ fun DiscoveryFilterBottomSheet(
                 testTagPrefix = "min_size"
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // Website Media Downloader Smart Filters: Hide Unknown Size Images & Intelligent Deduplication
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = "Hide Unknown-Size Images",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Filter out images whose file size cannot be determined",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = filterState.hideUnknownSizeImages,
+                    onCheckedChange = { checked ->
+                        onFilterChange(filterState.copy(hideUnknownSizeImages = checked))
+                    },
+                    modifier = Modifier.testTag("filter_hide_unknown_size_switch")
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = "Intelligent Deduplication",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Hide duplicate entries sharing filename and metadata",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = filterState.intelligentDeduplication,
+                    onCheckedChange = { checked ->
+                        onFilterChange(filterState.copy(intelligentDeduplication = checked))
+                    },
+                    modifier = Modifier.testTag("filter_intelligent_dedup_switch")
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(Modifier.height(20.dp))
 
@@ -344,6 +405,40 @@ fun DiscoveryFilterBottomSheet(
             FormatCategorySection(
                 title = "Audio Formats",
                 formats = DiscoveryFilterState.AUDIO_FORMATS,
+                enabledFormats = filterState.enabledFormats,
+                onToggleFormat = { fmt ->
+                    val updated = if (filterState.enabledFormats.contains(fmt)) {
+                        filterState.enabledFormats - fmt
+                    } else {
+                        filterState.enabledFormats + fmt
+                    }
+                    onFilterChange(filterState.copy(enabledFormats = updated))
+                }
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // Subtitles Section
+            FormatCategorySection(
+                title = "Subtitles",
+                formats = DiscoveryFilterState.SUBTITLE_FORMATS,
+                enabledFormats = filterState.enabledFormats,
+                onToggleFormat = { fmt ->
+                    val updated = if (filterState.enabledFormats.contains(fmt)) {
+                        filterState.enabledFormats - fmt
+                    } else {
+                        filterState.enabledFormats + fmt
+                    }
+                    onFilterChange(filterState.copy(enabledFormats = updated))
+                }
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // Other Downloadable Files Section
+            FormatCategorySection(
+                title = "Other Files",
+                formats = DiscoveryFilterState.FILE_FORMATS,
                 enabledFormats = filterState.enabledFormats,
                 onToggleFormat = { fmt ->
                     val updated = if (filterState.enabledFormats.contains(fmt)) {

@@ -14,7 +14,9 @@ enum class MediaCategory(val label: String) {
     IMAGES("Images"),
     VIDEOS("Videos"),
     AUDIO("Audio"),
-    STREAMS("Streams")
+    STREAMS("Streams"),
+    SUBTITLES("Subtitles"),
+    FILES("Files")
 }
 
 /**
@@ -480,10 +482,22 @@ object MediaClassifier {
         return null
     }
 
+    val SUBTITLE_EXTENSIONS = setOf("vtt", "srt", "ass", "ssa", "ttml", "dfxp")
+
+    val OTHER_FILE_EXTENSIONS = setOf(
+        "zip", "rar", "7z", "tar", "gz", "pdf", "epub",
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "apk", "dmg", "iso", "bin", "exe", "msi"
+    )
+
     val KNOWN_MEDIA_EXTENSIONS = setOf(
         "jpg", "jpeg", "png", "webp", "gif", "svg", "avif", "bmp", "heic", "heif", "ico",
-        "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "m3u8", "mpd",
-        "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma"
+        "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "mpeg", "mpg", "vob", "m2t", "m2ts", "ogv",
+        "m3u8", "mpd", "ism", "isml", "smil",
+        "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma", "ac3", "aif", "aiff", "alac", "weba", "oga",
+        "vtt", "srt", "ass", "ssa", "ttml", "dfxp",
+        "zip", "rar", "7z", "tar", "gz", "pdf", "epub",
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "apk", "dmg", "iso"
     )
 
     /**
@@ -1625,6 +1639,89 @@ object MediaClassifier {
             )
         }
 
+        // 3b. Subtitle formats (Website Media Downloader)
+        val ext = cleanPath.substringAfterLast('.', "")
+        if (ext in SUBTITLE_EXTENSIONS || mimeLower.contains("text/vtt") || mimeLower.contains("subrip") || mimeLower.contains("ttml")) {
+            val subFmt = when {
+                ext.isNotBlank() && ext in SUBTITLE_EXTENSIONS -> ext.uppercase(Locale.ROOT)
+                mimeLower.contains("vtt") -> "VTT"
+                mimeLower.contains("ttml") -> "TTML"
+                else -> "SRT"
+            }
+            val subMime = when (subFmt) {
+                "VTT" -> "text/vtt"
+                "TTML", "DFXP" -> "application/ttml+xml"
+                else -> "application/x-subrip"
+            }
+            return ClassificationResult(
+                category = MediaCategory.SUBTITLES,
+                format = subFmt,
+                mimeType = subMime,
+                isVideo = false,
+                isAudio = false,
+                isStream = false
+            )
+        }
+
+        // 3c. Extended Video / Audio / Stream formats
+        if (ext in setOf("avi", "flv", "m4v", "3gp", "mpeg", "mpg", "vob", "m2t", "m2ts", "ogv", "ts")) {
+            return ClassificationResult(
+                category = MediaCategory.VIDEOS,
+                format = ext.uppercase(Locale.ROOT),
+                mimeType = if (ext == "ts" || ext == "m2ts") "video/mp2t" else "video/$ext",
+                isVideo = true,
+                isAudio = false,
+                isStream = false
+            )
+        }
+        if (ext in setOf("ac3", "aif", "aiff", "alac", "wma", "weba", "oga")) {
+            return ClassificationResult(
+                category = MediaCategory.AUDIO,
+                format = ext.uppercase(Locale.ROOT),
+                mimeType = "audio/$ext",
+                isVideo = false,
+                isAudio = true,
+                isStream = false
+            )
+        }
+        if (ext in setOf("ism", "isml", "smil")) {
+            return ClassificationResult(
+                category = MediaCategory.STREAMS,
+                format = ext.uppercase(Locale.ROOT),
+                mimeType = "application/vnd.ms-sstr+xml",
+                isVideo = true,
+                isAudio = false,
+                isStream = true
+            )
+        }
+
+        // 3d. Downloadable Other Files (archives, documents, packages)
+        if (ext in OTHER_FILE_EXTENSIONS || mimeLower == "application/pdf" || mimeLower == "application/zip" ||
+            mimeLower == "application/epub+zip" || mimeLower == "application/vnd.android.package-archive"
+        ) {
+            val fileFmt = if (ext in OTHER_FILE_EXTENSIONS) ext.uppercase(Locale.ROOT) else when (mimeLower) {
+                "application/pdf" -> "PDF"
+                "application/zip" -> "ZIP"
+                "application/epub+zip" -> "EPUB"
+                else -> "FILE"
+            }
+            val fileMime = mimeLower.takeIf { it.isNotBlank() } ?: when (fileFmt) {
+                "PDF" -> "application/pdf"
+                "ZIP" -> "application/zip"
+                "EPUB" -> "application/epub+zip"
+                "APK" -> "application/vnd.android.package-archive"
+                else -> "application/octet-stream"
+            }
+            return ClassificationResult(
+                category = MediaCategory.FILES,
+                format = fileFmt,
+                mimeType = fileMime,
+                isVideo = false,
+                isAudio = false,
+                isStream = false
+            )
+        }
+
         // 4. Image formats
         val format = when {
             lower.contains(".webp") || mimeLower.contains("webp") -> "WEBP"
@@ -1653,6 +1750,41 @@ object MediaClassifier {
             isAudio = false,
             isStream = false
         )
+    }
+
+    /**
+     * Intelligent deduplication inspired by Website Media Downloader:
+     * collapses redundant entries sharing the same canonical URL OR the same normalized
+     * filename + category + file size (keeping the highest-quality / highest-resolution entry).
+     */
+    fun intelligentDeduplicate(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> {
+        if (items.size <= 1) return items
+        val byCanonical = LinkedHashMap<String, ScrapedMediaItem>()
+        for (item in items) {
+            val urlKey = canonicalKey(item.url)
+            val existing = byCanonical[urlKey]
+            if (existing == null || compareMediaQuality(item, existing) > 0) {
+                byCanonical[urlKey] = item
+            }
+        }
+        val byFilenameMeta = LinkedHashMap<String, ScrapedMediaItem>()
+        for (item in byCanonical.values) {
+            val normName = item.title
+                .lowercase(Locale.ROOT)
+                .substringBeforeLast('.')
+                .replace(Regex("[\s_-]+"), " ")
+                .trim()
+            val metaKey = if (normName.length >= 4 && !normName.startsWith("media ") && !normName.startsWith("image ")) {
+                "${item.category.name}|$normName|${item.sizeBytes ?: -1L}"
+            } else {
+                "url|${canonicalKey(item.url)}"
+            }
+            val existing = byFilenameMeta[metaKey]
+            if (existing == null || compareMediaQuality(item, existing) > 0) {
+                byFilenameMeta[metaKey] = item
+            }
+        }
+        return byFilenameMeta.values.toList()
     }
 
     /**

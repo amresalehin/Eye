@@ -57,6 +57,8 @@ import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.PocketDeepScanEngine
 import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.data.RedirectProtectionEngine
+import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import android.webkit.URLUtil
 import kotlinx.coroutines.Job
@@ -89,6 +91,13 @@ fun DirectBrowserView(
     val sessionDiscoveredItems by DownloaderSession.discoveredItems.collectAsState()
 
     val prefsRepo = remember { PreferencesRepository(context) }
+    val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
+    val adBlockEnabled by downloaderPrefs.adBlockEnabled.collectAsState(initial = true)
+    val redirectProtectionEnabled by downloaderPrefs.redirectProtectionEnabled.collectAsState(initial = true)
+    val redirectTapsToOpen by downloaderPrefs.redirectTapsToOpen.collectAsState(initial = 2)
+    val hideBlockedElements by downloaderPrefs.hideBlockedRedirectElements.collectAsState(initial = true)
+    val speedBoostEnabled by downloaderPrefs.speedBoostEnabled.collectAsState(initial = true)
+    val speedBoostConnections by downloaderPrefs.speedBoostConnections.collectAsState(initial = 4)
     val themePref by prefsRepo.theme.collectAsState(initial = "system")
     val systemInDark = isSystemInDarkTheme()
     val isDark = when (themePref) {
@@ -891,13 +900,49 @@ fun DirectBrowserView(
 
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val reqUrl = request?.url?.toString() ?: return false
-                                    return handleExternalNavigation(view, reqUrl)
+                                    if (handleExternalNavigation(view, reqUrl)) return true
+                                    val decision = RedirectProtectionEngine.evaluateNavigation(
+                                        currentPageUrl = currentUrl,
+                                        targetUrl = reqUrl,
+                                        isServerRedirect = request.isRedirect,
+                                        hasUserGesture = request.hasGesture(),
+                                        enabled = redirectProtectionEnabled,
+                                        tapsToOpen = redirectTapsToOpen,
+                                        hideBlockedElements = hideBlockedElements
+                                    )
+                                    if (!decision.allowed) {
+                                        if (decision.shouldHideClickedElement) {
+                                            view?.evaluateJavascript(RedirectProtectionEngine.getHideLastClickedElementScript(), null)
+                                        }
+                                        decision.reason?.let { msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
+                                        return true
+                                    }
+                                    return false
                                 }
 
                                 @Suppress("DEPRECATION")
                                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                                     if (url.isNullOrBlank()) return false
-                                    return handleExternalNavigation(view, url)
+                                    if (handleExternalNavigation(view, url)) return true
+                                    val decision = RedirectProtectionEngine.evaluateNavigation(
+                                        currentPageUrl = currentUrl,
+                                        targetUrl = url,
+                                        enabled = redirectProtectionEnabled,
+                                        tapsToOpen = redirectTapsToOpen,
+                                        hideBlockedElements = hideBlockedElements
+                                    )
+                                    if (!decision.allowed) {
+                                        if (decision.shouldHideClickedElement) {
+                                            view?.evaluateJavascript(RedirectProtectionEngine.getHideLastClickedElementScript(), null)
+                                        }
+                                        decision.reason?.let { msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
+                                        return true
+                                    }
+                                    return false
                                 }
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -937,6 +982,9 @@ fun DirectBrowserView(
                                     }
                                     BotDetectionMitigator.injectStealth(view)
                                     BotDetectionMitigator.syncCookiesFromWebView(url)
+                                    if (redirectProtectionEnabled && hideBlockedElements) {
+                                        view?.evaluateJavascript(RedirectProtectionEngine.getTrackClickTargetScript(), null)
+                                    }
                                     currentUrl = url
                                     addressInput = url
                                     onUrlChange?.invoke(url)
@@ -974,9 +1022,23 @@ fun DirectBrowserView(
                                     val reqUrl = request?.url?.toString() ?: return null
                                     if (reqUrl.startsWith("about:")) return null
 
-                                    // Ad & tracker blocking for lightweight, high-performance browsing
-                                    if (AdBlockEngine.isAdOrTracker(reqUrl)) {
+                                    // Ad & tracker blocking when enabled
+                                    if (adBlockEnabled && AdBlockEngine.isAdOrTracker(reqUrl)) {
                                         return AdBlockEngine.createEmptyResponse()
+                                    }
+
+                                    // Live background network media interception (Videos, Audio, Streams, Images, Subtitles, Files)
+                                    val activePage = currentUrl
+                                    if (activePage.isNotBlank() && activePage != "about:blank") {
+                                        return MediaCaptureEngine.shouldInterceptRequest(
+                                            request = request,
+                                            baseUrl = activePage,
+                                            onMediaDiscovered = { item ->
+                                                tabSession.registerMedia(item)
+                                                DownloaderSession.addDiscoveredItem(item)
+                                                onMediaExtracted(item)
+                                            }
+                                        )
                                     }
 
                                     return null
@@ -1232,9 +1294,34 @@ fun DirectBrowserView(
                 webViewInstance?.clearCache(true)
                 CookieManager.getInstance().removeAllCookies(null)
                 CookieManager.getInstance().flush()
+                RedirectProtectionEngine.clearHistory()
             },
             onDismiss = { showSettingsSheet = false },
-            isDark = isDark
+            isDark = isDark,
+            adBlockEnabled = adBlockEnabled,
+            onAdBlockChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setAdBlockEnabled(enabled) }
+            },
+            redirectProtectionEnabled = redirectProtectionEnabled,
+            onRedirectProtectionChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setRedirectProtectionEnabled(enabled) }
+            },
+            redirectTapsToOpen = redirectTapsToOpen,
+            onRedirectTapsChange = { taps ->
+                coroutineScope.launch { downloaderPrefs.setRedirectTapsToOpen(taps) }
+            },
+            hideBlockedElements = hideBlockedElements,
+            onHideBlockedElementsChange = { hide ->
+                coroutineScope.launch { downloaderPrefs.setHideBlockedRedirectElements(hide) }
+            },
+            speedBoostEnabled = speedBoostEnabled,
+            onSpeedBoostChange = { enabled ->
+                coroutineScope.launch { downloaderPrefs.setSpeedBoostEnabled(enabled) }
+            },
+            speedBoostConnections = speedBoostConnections,
+            onSpeedBoostConnectionsChange = { conns ->
+                coroutineScope.launch { downloaderPrefs.setSpeedBoostConnections(conns) }
+            }
         )
     }
 }

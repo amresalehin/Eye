@@ -87,6 +87,7 @@ object MediaCaptureEngine {
                     }
 
                     // Direct src & data-lazy attributes
+                    var candidateUrls = [];
                     var rawSrc = img.src || img.getAttribute('src');
                     var dataSrc = img.getAttribute('data-src') || img.getAttribute('data-original') ||
                                   img.getAttribute('data-lazy-src') || img.getAttribute('data-large-file') ||
@@ -205,6 +206,45 @@ object MediaCaptureEngine {
                         list.push({u: ifr, s: 'IFRAME', r: 'iframe'});
                     }
                 }
+
+                // 7. Subtitle <track> elements (VTT/SRT/ASS/TTML)
+                var tracks = document.querySelectorAll('track[src]');
+                for (var t = 0; t < tracks.length; t++) {
+                    var tUrl = resolveAbs(tracks[t].getAttribute('src') || tracks[t].src);
+                    if (tUrl && !tUrl.startsWith('data:')) {
+                        var tLabel = tracks[t].getAttribute('label') || tracks[t].getAttribute('srclang') || 'subtitle';
+                        list.push({u: tUrl, s: 'DOM', r: tLabel});
+                    }
+                }
+
+                // 8. Direct downloadable file & subtitle links (<a href>)
+                var anchors = document.querySelectorAll('a[href]');
+                var maxAnchors = Math.min(anchors.length, 250);
+                var directFileRe = /\.(?:mp4|mkv|webm|mov|avi|flv|mp3|m4a|flac|wav|ogg|opus|m3u8|mpd|vtt|srt|ass|ssa|ttml|pdf|zip|rar|7z|epub|docx?|xlsx?|pptx?|apk)(?:[?#]|$)/i;
+                for (var an = 0; an < maxAnchors; an++) {
+                    var href = resolveAbs(anchors[an].getAttribute('href'));
+                    if (href && directFileRe.test(href)) {
+                        list.push({u: href, s: 'DOM', r: 'link'});
+                    }
+                }
+
+                // 9. Open Shadow DOM media scan (shallow pass)
+                try {
+                    var allEls = document.querySelectorAll('*');
+                    var maxShadow = Math.min(allEls.length, 300);
+                    for (var sIdx = 0; sIdx < maxShadow; sIdx++) {
+                        var sr = allEls[sIdx].shadowRoot;
+                        if (sr) {
+                            var sMedia = sr.querySelectorAll('video, audio, source, img, track');
+                            for (var sm = 0; sm < sMedia.length; sm++) {
+                                var su = resolveAbs(sMedia[sm].src || sMedia[sm].getAttribute('src') || sMedia[sm].getAttribute('data-src'));
+                                if (su && !su.startsWith('blob:') && !su.startsWith('data:')) {
+                                    list.push({u: su, s: 'DOM', r: 'shadow-dom'});
+                                }
+                            }
+                        }
+                    }
+                } catch(e) {}
 
                 return JSON.stringify(list);
             })();
@@ -445,6 +485,7 @@ object MediaCaptureEngine {
 
         val headers = mutableMapOf<String, String>()
         headers["Referer"] = baseUrl
+        SpeedBoostDownloader.extractOrigin(baseUrl)?.let { headers["Origin"] = it }
         headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
         val cookieStr = customCookie ?: if (source != ExtractionSource.NETWORK_INTERCEPT) {
             OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
@@ -598,7 +639,17 @@ object MediaCaptureEngine {
 
         val isImage = hasImageExt && !acceptHeader.contains("text/html")
 
-        if (isVideo || isAudio || isImage) {
+        val isSubtitle = cleanReqPath.endsWith(".vtt") || cleanReqPath.endsWith(".srt") ||
+                cleanReqPath.endsWith(".ass") || cleanReqPath.endsWith(".ssa") ||
+                cleanReqPath.endsWith(".ttml") || cleanReqPath.endsWith(".dfxp") ||
+                acceptHeader.contains("text/vtt")
+
+        val isDownloadableFile = cleanReqPath.endsWith(".pdf") || cleanReqPath.endsWith(".zip") ||
+                cleanReqPath.endsWith(".rar") || cleanReqPath.endsWith(".7z") ||
+                cleanReqPath.endsWith(".epub") || cleanReqPath.endsWith(".apk") ||
+                cleanReqPath.endsWith(".docx") || cleanReqPath.endsWith(".xlsx") || cleanReqPath.endsWith(".pptx")
+
+        if (isVideo || isAudio || isImage || isSubtitle || isDownloadableFile) {
             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
             val alreadyCaptured = synchronized(seenInterceptUrls) {
                 !seenInterceptUrls.add(cleanReqUrl)

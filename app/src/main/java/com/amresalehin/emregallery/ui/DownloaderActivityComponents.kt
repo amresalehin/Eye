@@ -895,10 +895,14 @@ private fun ActiveDownloadRow(
                     "${DownloadActivityManager.formatBytes(item.bytesRead)} downloaded"
                 }
 
+                val boostTag = if (item.isSpeedBoostActive && item.activeConnections > 1) {
+                    " • Speed Boost ${item.activeConnections}x"
+                } else ""
                 Text(
-                    text = "$bytesText • $speedText",
+                    text = "$bytesText • $speedText$boostTag",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (item.isSpeedBoostActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (item.isSpeedBoostActive) FontWeight.Bold else FontWeight.Normal,
                     fontSize = 11.sp
                 )
             }
@@ -912,7 +916,11 @@ private fun ActiveDownloadRow(
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp)),
-                color = if (item.isRetrying) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface,
+                color = when {
+                    item.isRetrying -> Color(0xFFFFB74D)
+                    item.isSpeedBoostActive -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
         }

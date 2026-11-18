@@ -22,7 +22,8 @@ enum class Destination {
     SEARCH,
     VIEWER,
     MEDIA_INBOX,
-    BROWSER
+    BROWSER,
+    YTDLNIS
 }
 
 enum class SearchStage {

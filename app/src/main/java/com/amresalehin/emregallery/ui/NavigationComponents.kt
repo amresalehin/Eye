@@ -332,6 +332,7 @@ fun SideNavigationDrawer(
                         ),
                         listOf(
                             Triple(Destination.BROWSER, "Browser", Icons.Default.TravelExplore),
+                            Triple(Destination.YTDLNIS, "YTDLnis Downloader", Icons.Default.Download),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
                         )
                     )

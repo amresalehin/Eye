@@ -646,7 +646,8 @@ fun GalleryApp() {
                 Destination.ARCHIVE,
                 Destination.PEOPLE,
                 Destination.MAP,
-                Destination.BROWSER
+                Destination.BROWSER,
+                Destination.YTDLNIS
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
@@ -1387,6 +1388,28 @@ fun GalleryApp() {
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                    Destination.YTDLNIS -> com.amresalehin.emregallery.ui.ytdlnis.YtdlnisScreen(
+                        onBack = { performBackNavigation() },
+                        initialUrl = browserInitialUrl,
+                        onOpenMediaFile = { filePath ->
+                            val file = java.io.File(filePath)
+                            val name = if (file.exists()) file.name else filePath.substringAfterLast('/').ifBlank { "media_item" }
+                            val isVid = name.endsWith(".mp4", true) || name.endsWith(".webm", true) || name.endsWith(".mkv", true)
+                            val item = MediaItem(
+                                uri = if (file.exists()) android.net.Uri.fromFile(file).toString() else filePath,
+                                name = name,
+                                bucketName = "YTDLnis",
+                                dateAddedSec = System.currentTimeMillis() / 1000L,
+                                isVideo = isVid
+                            )
+                            openMediaInViewer(item, listOf(item))
+                        },
+                        onOpenBrowserForCookies = { url ->
+                            browserInitialUrl = url
+                            navigateTo(dest = Destination.BROWSER, rememberPrevious = true)
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                     Destination.SEARCH -> {
                         val searchScopeMedia = remember(media, hidden, inBin, archive) {
                             media.filter {
@@ -1597,7 +1620,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.BOOKMARK_DETAIL
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.YTDLNIS && destination != Destination.BOOKMARK_DETAIL
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1635,7 +1658,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Pocket, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.BOOKMARK_DETAIL && !isPocketDetailOpen
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.YTDLNIS && destination != Destination.BOOKMARK_DETAIL && !isPocketDetailOpen
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier

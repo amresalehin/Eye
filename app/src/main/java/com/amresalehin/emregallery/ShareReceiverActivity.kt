@@ -59,6 +59,12 @@ import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.DirectBrowserView
 import com.amresalehin.emregallery.ui.DiscoveredMediaPage
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
+import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisDownloadConfigCard
+import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadItem
+import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadType
+import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker
+import com.amresalehin.emregallery.ytdlnis.YtdlnisRepository
+import com.amresalehin.emregallery.ytdlnis.YtdlnisVideoInfo
 
 /**
  * Translucent share-sheet target that opens directly over the sharing app
@@ -84,6 +90,27 @@ class ShareReceiverActivity : ComponentActivity() {
             finish()
             return
         }
+        // YTDLnis-compatible Tasker / third-party automation intent support (TYPE + BACKGROUND)
+        val backgroundExtra = intent?.getBooleanExtra("BACKGROUND", false) == true ||
+            intent?.getStringExtra("BACKGROUND").equals("true", ignoreCase = true)
+        if (backgroundExtra) {
+            val typeExtra = YtdlnisDownloadType.fromId(intent?.getStringExtra("TYPE"))
+            val repo = YtdlnisRepository.getInstance(applicationContext)
+            val bgItem = YtdlnisDownloadItem(
+                url = extracted,
+                title = extracted,
+                type = typeExtra,
+                container = if (typeExtra == YtdlnisDownloadType.AUDIO) "m4a" else "mp4",
+                filenameTemplate = repo.defaultFilenameTemplate.value,
+                subfolderMode = repo.defaultSubfolderMode.value,
+                incognito = repo.incognitoMode.value
+            )
+            YtdlnisDownloadWorker.enqueue(applicationContext, bgItem)
+            Toast.makeText(this, "YTDLnis background ${typeExtra.label} download started", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+
         sharedUrlState.value = extracted
 
         setContent {
@@ -153,6 +180,7 @@ private fun ShareReceiverScreen(
     onDownloadComplete: () -> Unit
 ) {
     var showLiveBrowser by remember { mutableStateOf(false) }
+    var showYtdlnisCard by remember { mutableStateOf(false) }
     var liveBrowserUrl by remember { mutableStateOf(url) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -285,6 +313,12 @@ private fun ShareReceiverScreen(
                         Text("Browser")
                     }
                     TextButton(
+                        onClick = { showYtdlnisCard = !showYtdlnisCard },
+                        modifier = Modifier.testTag("share_open_ytdlnis_btn")
+                    ) {
+                        Text(if (showYtdlnisCard) "Media" else "YTDLnis")
+                    }
+                    TextButton(
                         onClick = {
                             val mainIntent = Intent(context, MainActivity::class.java).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -301,15 +335,44 @@ private fun ShareReceiverScreen(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
-                DiscoveredMediaPage(
-                    onBack = onDismiss,
-                    onDeepScanClick = {
-                        BrowserSession.savedBrowserSite = liveBrowserUrl
-                        showLiveBrowser = true
-                    },
-                    isDeepScanning = extractionState.isRunning,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (showYtdlnisCard) {
+                    val ytdlnisRepo = remember(context) { YtdlnisRepository.getInstance(context) }
+                    val ytdlnisTemplates by ytdlnisRepo.commandTemplates.collectAsState()
+                    val ytdlnisDefTpl by ytdlnisRepo.defaultFilenameTemplate.collectAsState()
+                    val ytdlnisDefSub by ytdlnisRepo.defaultSubfolderMode.collectAsState()
+                    val ytdlnisIncog by ytdlnisRepo.incognitoMode.collectAsState()
+                    YtdlnisDownloadConfigCard(
+                        initialInfo = YtdlnisVideoInfo(
+                            url = liveBrowserUrl,
+                            title = MediaClassifier.cleanDomainFromUrl(liveBrowserUrl).ifBlank { liveBrowserUrl }
+                        ),
+                        templates = ytdlnisTemplates,
+                        defaultFilenameTemplate = ytdlnisDefTpl,
+                        defaultSubfolderMode = ytdlnisDefSub,
+                        incognito = ytdlnisIncog,
+                        onEnqueue = { item ->
+                            YtdlnisDownloadWorker.enqueue(context, item)
+                            onDownloadComplete()
+                        },
+                        onSaveForLater = { item ->
+                            ytdlnisRepo.upsertDownload(item)
+                            Toast.makeText(context, "Saved in YTDLnis", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
+                        onDismiss = { showYtdlnisCard = false },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    DiscoveredMediaPage(
+                        onBack = onDismiss,
+                        onDeepScanClick = {
+                            BrowserSession.savedBrowserSite = liveBrowserUrl
+                            showLiveBrowser = true
+                        },
+                        isDeepScanning = extractionState.isRunning,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 

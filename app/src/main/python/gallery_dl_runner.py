@@ -70,6 +70,13 @@ except Exception:
     _media_scraper_extractor = None
     MEDIA_SCRAPER_AVAILABLE = False
 
+try:
+    import ytdlnis_engine as _ytdlnis_engine
+    YTDLNIS_AVAILABLE = True
+except Exception:
+    _ytdlnis_engine = None
+    YTDLNIS_AVAILABLE = False
+
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
     {"name": "Imgur", "domains": ["imgur.com", "i.imgur.com"], "icon": "image"},
@@ -110,6 +117,8 @@ def get_engine_status():
         "media_dl_version": media_dl_ver,
         "media_scraper_available": MEDIA_SCRAPER_AVAILABLE,
         "media_scraper_version": media_scraper_ver,
+        "ytdlnis_available": YTDLNIS_AVAILABLE,
+        "ytdlnis_version": _ytdlnis_engine.get_version() if YTDLNIS_AVAILABLE else "N/A",
         "ffmpeg_available": True,
         "ffmpeg_kit_installed": True,
         "ffmpeg_version": "8.1.9",

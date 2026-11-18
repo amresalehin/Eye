@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -22,12 +23,17 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         applyHighRefreshRate()
         warmupChromiumEngine()
 
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
+            val initialTheme = remember { preferences.getThemeSync() }
+            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
             EmreGalleryTheme(theme) {
                 GalleryApp()
             }

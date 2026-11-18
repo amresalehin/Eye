@@ -7,13 +7,10 @@ import java.net.URL
 
 /**
  * Single source of truth for downloader sessions across:
- * - DownloaderResultsPage
  * - FullScreenBrowserView
  * - DownloaderSearchMainPage
- * - ShareReceiverActivity
  *
- * Ensures discoveries made in the live browser automatically merge into the
- * results page and vice versa.
+ * Ensures discoveries made in the live browser automatically merge across sessions.
  */
 object DownloaderSession {
 
@@ -44,6 +41,51 @@ object DownloaderSession {
     private val itemsLock = Any()
     private val canonicalMap = mutableMapOf<String, ScrapedMediaItem>()
 
+    fun clear() {
+        synchronized(itemsLock) {
+            _currentUrl.value = ""
+            _sourceDomain.value = ""
+            _pageTitle.value = ""
+            canonicalMap.clear()
+            _discoveredItems.value = emptyList()
+            _selectedItemIds.value = emptySet()
+            _isExtracting.value = false
+            _statusMessage.value = "Browser home"
+            _errorMessage.value = null
+        }
+    }
+
+    /**
+     * Synchronizes the shared discovered-media review with the active browser page.
+     * Unlike startSession(), this does not mark an extraction job as running.
+     */
+    fun updateBrowserPage(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isBlank() || trimmed == "about:blank") {
+            clear()
+            return
+        }
+        val normalized = if (!trimmed.startsWith("http://", true) &&
+            !trimmed.startsWith("https://", true)
+        ) {
+            "https://$trimmed"
+        } else trimmed
+        val domain = runCatching { URL(normalized).host }.getOrDefault("")
+
+        synchronized(itemsLock) {
+            if (normalized == _currentUrl.value) return
+            _currentUrl.value = normalized
+            _sourceDomain.value = domain
+            _pageTitle.value = domain
+            canonicalMap.clear()
+            _discoveredItems.value = emptyList()
+            _selectedItemIds.value = emptySet()
+            _isExtracting.value = false
+            _statusMessage.value = if (normalized.isBlank()) "Browser home" else "Browsing page"
+            _errorMessage.value = null
+        }
+    }
+
     fun startSession(url: String) {
         val trimmed = url.trim()
         val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
@@ -68,22 +110,19 @@ object DownloaderSession {
     fun addDiscoveredItems(newItems: List<ScrapedMediaItem>, title: String? = null) {
         if (newItems.isEmpty()) return
         synchronized(itemsLock) {
-            var updated = false
-            for (item in newItems) {
-                val key = MediaClassifier.canonicalKey(item.url)
-                val existing = canonicalMap[key]
-                if (existing == null) {
-                    canonicalMap[key] = item
-                    updated = true
-                } else if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
-                    canonicalMap[key] = item.copy(
-                        id = existing.id,
-                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
-                    )
-                    updated = true
-                }
-            }
+            val updated = MediaNormalizer.mergeCandidates(canonicalMap, newItems)
             if (updated) {
+                // Keep discovered list bounded to prevent memory leaks on endless browsing
+                if (canonicalMap.size > 250) {
+                    val excess = canonicalMap.size - 250
+                    val it = canonicalMap.iterator()
+                    var removed = 0
+                    while (it.hasNext() && removed < excess) {
+                        it.next()
+                        it.remove()
+                        removed++
+                    }
+                }
                 val sorted = canonicalMap.values.toList()
                 _discoveredItems.value = sorted
                 // Auto-select all items by default if user hasn't explicitly customized selection

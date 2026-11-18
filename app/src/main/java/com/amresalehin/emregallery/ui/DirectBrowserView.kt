@@ -7,52 +7,62 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import android.webkit.*
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
+import android.view.MotionEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import android.app.Activity
+import android.os.Build
 import com.amresalehin.emregallery.data.AdBlockEngine
+import com.amresalehin.emregallery.data.BotDetectionMitigator
 import com.amresalehin.emregallery.data.BrowserHistoryManager
-import com.amresalehin.emregallery.data.BrowserMediaExtractor
-import com.amresalehin.emregallery.data.BrowserSite
+import com.amresalehin.emregallery.data.RamGovernor
+import com.amresalehin.emregallery.data.BrowserSession
+import com.amresalehin.emregallery.data.BrowserShortcut
+import com.amresalehin.emregallery.data.BrowserTabItem
+import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.DownloaderSession
 import com.amresalehin.emregallery.data.ExtractionSource
 import com.amresalehin.emregallery.data.MediaCaptureEngine
+import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.MediaProvenance
+import com.amresalehin.emregallery.data.PocketDeepScanEngine
+import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import android.webkit.URLUtil
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import java.net.URL
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -60,66 +70,412 @@ import java.net.URL
 fun DirectBrowserView(
     initialUrl: String = "",
     onClose: (() -> Unit)? = null,
+    onMenuClick: (() -> Unit)? = null,
     onUrlChange: ((String) -> Unit)? = null,
     onPageTitleChanged: ((String) -> Unit)? = null,
-    discoveredCount: Int = 0,
     onMediaExtracted: (ScrapedMediaItem) -> Unit,
     onBatchExtracted: (List<ScrapedMediaItem>, pageTitle: String?, domain: String?) -> Unit,
-    onSwitchToMediaTab: () -> Unit,
+    onSwitchToMediaTab: () -> Unit = {},
+    onOpenDownloads: (() -> Unit)? = null,
+    onOpenDiscoveredMedia: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
-    val appContext = LocalContext.current
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val historyManager = remember { BrowserHistoryManager(context) }
+    val tabSession = remember { BrowserSession.getTabSession("tab_main") }
+    val tabDetectedCount by tabSession.detectedCount.collectAsState()
+    val sessionDiscoveredItems by DownloaderSession.discoveredItems.collectAsState()
+
+    val prefsRepo = remember { PreferencesRepository(context) }
+    val themePref by prefsRepo.theme.collectAsState(initial = "system")
+    val systemInDark = isSystemInDarkTheme()
+    val isDark = when (themePref) {
+        "dark" -> true
+        "light" -> false
+        else -> systemInDark
+    }
+
+    val shortcutsList by historyManager.shortcuts.collectAsState(initial = historyManager.defaultShortcuts)
+    val allHistorySites by historyManager.allSites.collectAsState(initial = historyManager.defaultRecentSites)
+    val tabsList by historyManager.openTabs.collectAsState(initial = historyManager.defaultTabs)
 
     val startUrl = remember {
+        val savedSite = BrowserSession.savedBrowserSite.trim()
         val trimmed = initialUrl.trim()
-        if (trimmed.isNotBlank()) {
-            val engine = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getSearchEngineSync(appContext)
-            MediaClassifier.formatQueryOrUrl(trimmed, engine)
-        } else {
-            "" // Empty home page by default
+        when {
+            savedSite.isNotBlank() -> savedSite
+            trimmed.isNotBlank() -> MediaClassifier.formatQueryOrUrl(trimmed)
+            else -> "" // Clean monochrome home page by default
         }
     }
 
+    // Discovery & Deep Scan states
+    var isDeepScanning by remember { mutableStateOf(false) }
+    var hasInitiatedScanInStage by remember { mutableStateOf(false) }
+    var deepScanJob by remember { mutableStateOf<Job?>(null) }
+
     var currentUrl by remember { mutableStateOf(startUrl) }
+    val totalDetectedCount = remember(currentUrl, tabDetectedCount, sessionDiscoveredItems.size) {
+        if (currentUrl.isBlank() || currentUrl == "about:blank") 0
+        else maxOf(tabDetectedCount, sessionDiscoveredItems.size)
+    }
     var addressInput by remember { mutableStateOf(startUrl) }
     var pageTitle by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
+    var isDesktopMode by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webViewRecreateEpoch by remember { mutableIntStateOf(0) }
+
+    // Dialog & Sheet States
+    var showAddShortcutDialog by remember { mutableStateOf(false) }
+    var selectedShortcutForEdit by remember { mutableStateOf<BrowserShortcut?>(null) }
+    var showHistorySheet by remember { mutableStateOf(false) }
+    var showTabsSheet by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
+    var showDiscoveredMediaOverlay by remember { mutableStateOf(false) }
+    var activeTabId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(tabsList) {
+        if (tabsList.isEmpty()) {
+            val newId = "tab_${System.currentTimeMillis()}"
+            val initialTab = BrowserTabItem(
+                id = newId,
+                title = if (pageTitle.isNotBlank()) pageTitle else if (currentUrl.isNotBlank()) MediaClassifier.cleanDomainFromUrl(currentUrl) else "Home",
+                url = currentUrl
+            )
+            activeTabId = newId
+            historyManager.saveTabs(listOf(initialTab))
+        } else if (activeTabId == null || tabsList.none { it.id == activeTabId }) {
+            val matching = tabsList.firstOrNull { it.url.isNotBlank() && it.url.equals(currentUrl, ignoreCase = true) }
+                ?: tabsList.first()
+            activeTabId = matching.id
+        }
+    }
+
+    fun syncCurrentTabWithPage(targetUrl: String, targetTitle: String) {
+        val tabId = activeTabId ?: return
+        val currentTabs = tabsList
+        val existing = currentTabs.firstOrNull { it.id == tabId }
+        val displayTitle = if (targetTitle.isNotBlank() && targetTitle != "about:blank") {
+            targetTitle
+        } else if (targetUrl.isNotBlank() && targetUrl != "about:blank") {
+            MediaClassifier.cleanDomainFromUrl(targetUrl)
+        } else {
+            "Home"
+        }
+        val cleanUrl = if (targetUrl == "about:blank") "" else targetUrl
+        if (existing == null || existing.url != cleanUrl || existing.title != displayTitle) {
+            val updatedTabs = if (existing == null) {
+                currentTabs + BrowserTabItem(id = tabId, title = displayTitle, url = cleanUrl)
+            } else {
+                currentTabs.map {
+                    if (it.id == tabId) it.copy(title = displayTitle, url = cleanUrl, timestamp = System.currentTimeMillis())
+                    else it
+                }
+            }
+            coroutineScope.launch {
+                historyManager.saveTabs(updatedTabs)
+            }
+        }
+    }
+
+    val currentView = LocalView.current
+    DisposableEffect(isDark) {
+        val window = (currentView.context as? Activity)?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, currentView)
+            insetsController.isAppearanceLightStatusBars = !isDark
+            insetsController.isAppearanceLightNavigationBars = !isDark
+        }
+        onDispose { }
+    }
+
+    val scrollHandler = remember { BrowserToolbarScrollHandler() }
+
+    LaunchedEffect(currentUrl) {
+        if (currentUrl.isBlank()) {
+            scrollHandler.show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (startUrl.isBlank()) {
+            tabSession.clearMedia()
+            tabSession.updateNavigation("")
+            DownloaderSession.clear()
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
             webViewInstance?.let { wv ->
                 wv.stopLoading()
+                wv.loadUrl("about:blank")
+                wv.onPause()
                 wv.webViewClient = WebViewClient()
                 wv.webChromeClient = WebChromeClient()
-                wv.destroy()
+                wv.post {
+                    try { wv.destroy() } catch (_: Throwable) {}
+                }
                 webViewInstance = null
             }
         }
     }
 
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val historyManager = remember { BrowserHistoryManager(context) }
+    fun returnToBrowserHome() {
+        currentUrl = ""
+        addressInput = ""
+        pageTitle = ""
+        canGoBack = false
+        canGoForward = false
+        onUrlChange?.invoke("")
+        tabSession.clearMedia()
+        tabSession.updateNavigation("")
+        DownloaderSession.clear()
+        scrollHandler.show()
+        webViewInstance?.clearHistory()
+        webViewInstance?.loadUrl("about:blank")
+    }
 
-    // Intercept back button when browser can navigate back
-    BackHandler(enabled = canGoBack) {
-        webViewInstance?.goBack()
+    // Synchronized back navigation for DirectBrowserView (shared by native BackHandler and search bar back button)
+    fun handleBrowserBackNavigation() {
+        when {
+            showDiscoveredMediaOverlay -> {
+                showDiscoveredMediaOverlay = false
+                deepScanJob?.cancel()
+                deepScanJob = null
+                isDeepScanning = false
+                hasInitiatedScanInStage = false
+            }
+            showHistorySheet -> showHistorySheet = false
+            showTabsSheet -> showTabsSheet = false
+            showSettingsSheet -> showSettingsSheet = false
+            showAddShortcutDialog -> showAddShortcutDialog = false
+            selectedShortcutForEdit != null -> selectedShortcutForEdit = null
+            currentUrl.isNotBlank() -> {
+                if (canGoBack && webViewInstance?.canGoBack() == true) {
+                    webViewInstance?.goBack()
+                } else {
+                    returnToBrowserHome()
+                }
+            }
+            onClose != null -> onClose()
+        }
+    }
+
+    // Intercept back button when browser can navigate back, return to home, dismiss a sheet, or exit the browser
+    BackHandler(
+        enabled = showDiscoveredMediaOverlay || showHistorySheet || showTabsSheet || showSettingsSheet ||
+                showAddShortcutDialog || selectedShortcutForEdit != null ||
+                currentUrl.isNotBlank() || onClose != null
+    ) {
+        handleBrowserBackNavigation()
+    }
+
+    fun scanCurrentPageDOM(wv: WebView?, onCompleted: (() -> Unit)? = null) {
+        if (wv == null) {
+            onCompleted?.invoke()
+            return
+        }
+        val current = wv.url ?: run {
+            onCompleted?.invoke()
+            return
+        }
+        if (current.isBlank() || current == "about:blank" || currentUrl.isBlank()) {
+            onCompleted?.invoke()
+            return
+        }
+
+        wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { jsonRaw ->
+            val discovered = MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
+            if (discovered.isNotEmpty()) {
+                val domain = runCatching { URL(current).host }.getOrDefault("")
+                tabSession.registerMediaBatch(discovered, pageTitle)
+                onBatchExtracted(discovered, pageTitle, domain)
+                DownloaderSession.addDiscoveredItems(discovered, pageTitle)
+            }
+            onCompleted?.invoke()
+        }
+    }
+
+    fun stopBrowserDeepScan() {
+        deepScanJob?.cancel()
+        deepScanJob = null
+        PocketDeepScanEngine.stopScan()
+        isDeepScanning = false
+    }
+
+    fun startBrowserDeepScan() {
+        val current = currentUrl.ifBlank { webViewInstance?.url.orEmpty() }
+        if (current.isBlank() || current == "about:blank") return
+
+        stopBrowserDeepScan()
+        isDeepScanning = true
+        hasInitiatedScanInStage = true
+
+        // 1. Immediately scan active DOM on the visible WebView WITHOUT any visual scrolling
+        // Promote lazy attributes in-place without moving the visible viewport
+        webViewInstance?.let { wv ->
+            wv.evaluateJavascript(
+                """
+                (function() {
+                    try {
+                        var lazyImgs = document.querySelectorAll('img[data-src], img[data-original], img[data-lazy], img[data-url], img[data-highres]');
+                        for (var i = 0; i < lazyImgs.length; i++) {
+                            var img = lazyImgs[i];
+                            var realSrc = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy') || img.getAttribute('data-url') || img.getAttribute('data-highres');
+                            if (realSrc && !img.src) img.src = realSrc;
+                        }
+                        var lazyVideos = document.querySelectorAll('video[data-src], source[data-src], video[data-url], source[data-url]');
+                        for (var j = 0; j < lazyVideos.length; j++) {
+                            var v = lazyVideos[j];
+                            var vSrc = v.getAttribute('data-src') || v.getAttribute('data-url');
+                            if (vSrc && !v.src) v.src = vSrc;
+                        }
+                        window.dispatchEvent(new Event('scroll'));
+                        window.dispatchEvent(new Event('resize'));
+                    } catch(e) {}
+                })();
+                """.trimIndent(),
+                null
+            )
+            scanCurrentPageDOM(wv)
+        }
+
+        // 2. Run isolated background deep scan with full scrolling & JS offscreen
+        // The active browser viewport NEVER scrolls; the user's reading view remains 100% still!
+        PocketDeepScanEngine.startScan(
+            context = context,
+            bookmarkId = "browser_active_${System.currentTimeMillis()}",
+            targetUrl = current,
+            scope = coroutineScope,
+            onIncrementalMediaDiscovered = { newItems ->
+                val scraped = newItems.map { item ->
+                    ScrapedMediaItem(
+                        id = item.id.ifBlank { "deep_${item.sourceUrl.hashCode()}" },
+                        url = item.sourceUrl,
+                        title = item.title.ifBlank { pageTitle },
+                        source = ExtractionSource.DOM_SCRAPE.label,
+                        isVideo = item.isVideo || item.isStream,
+                        isAudio = item.isAudio,
+                        isStream = item.isStream,
+                        sizeBytes = item.sizeBytes
+                    )
+                }
+                tabSession.registerMediaBatch(scraped, pageTitle)
+                val domain = runCatching { URL(current).host }.getOrDefault("")
+                onBatchExtracted(scraped, pageTitle, domain)
+                DownloaderSession.addDiscoveredItems(scraped, pageTitle)
+            },
+            onCompleted = {
+                isDeepScanning = false
+            }
+        )
+    }
+
+    fun handleDiscoveredMediaClick() {
+        if (!hasInitiatedScanInStage) {
+            // First tap: Do NOT open the discovery page immediately.
+            // On tapping update media counts via explicitly requested 30s deep scan.
+            startBrowserDeepScan()
+        } else {
+            // Tapping discover button again in this stage opens the discovery page.
+            stopBrowserDeepScan()
+
+            val wv = webViewInstance
+            val site = currentUrl.ifBlank { wv?.url.orEmpty() }
+
+            // Save last scroll position and site before opening discovery page
+            val scrollX = wv?.scrollX ?: 0
+            val scrollY = wv?.scrollY ?: 0
+
+            BrowserSession.savedBrowserSite = site
+            BrowserSession.savedScrollX = scrollX
+            BrowserSession.savedScrollY = scrollY
+            BrowserSession.pendingScrollRestore = true
+
+            // Also probe JavaScript for high-precision scroll offsets
+            wv?.evaluateJavascript(
+                "(function() { return JSON.stringify({ x: window.pageXOffset || 0, y: window.pageYOffset || 0 }); })();"
+            ) { rawJson ->
+                try {
+                    if (!rawJson.isNullOrBlank() && rawJson != "null") {
+                        val clean = if (rawJson.startsWith("\"") && rawJson.endsWith("\"")) {
+                            org.json.JSONObject(org.json.JSONTokener(rawJson).nextValue().toString())
+                        } else {
+                            org.json.JSONObject(rawJson)
+                        }
+                        val jsX = clean.optInt("x", scrollX)
+                        val jsY = clean.optInt("y", scrollY)
+                        if (jsY > 0) BrowserSession.savedScrollY = jsY
+                        if (jsX > 0) BrowserSession.savedScrollX = jsX
+                    }
+                } catch (_: Throwable) {}
+            }
+
+            // Open discovered media page without killing webpage for super fast instant return
+            showDiscoveredMediaOverlay = true
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            stopBrowserDeepScan()
+        }
+    }
+
+    // Reset to idle state and restore scroll position when returning from discovery page
+    LaunchedEffect(Unit) {
+        if (BrowserSession.pendingScrollRestore && BrowserSession.savedBrowserSite.isNotBlank()) {
+            isDeepScanning = false
+            hasInitiatedScanInStage = false
+            deepScanJob?.cancel()
+            deepScanJob = null
+
+            val targetX = BrowserSession.savedScrollX
+            val targetY = BrowserSession.savedScrollY
+
+            webViewInstance?.let { wv ->
+                wv.postDelayed({
+                    wv.scrollTo(targetX, targetY)
+                    wv.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
+                }, 100)
+                wv.postDelayed({
+                    wv.scrollTo(targetX, targetY)
+                    wv.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
+                }, 350)
+                wv.postDelayed({
+                    wv.scrollTo(targetX, targetY)
+                    wv.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
+                }, 750)
+            }
+            BrowserSession.pendingScrollRestore = false
+        }
     }
 
     fun navigateToUrl(target: String) {
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
-        val engine = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getSearchEngineSync(context)
-        val formatted = MediaClassifier.formatQueryOrUrl(trimmed, engine)
+        stopBrowserDeepScan()
+        hasInitiatedScanInStage = false
+        BrowserSession.pendingScrollRestore = false
+        BrowserSession.savedBrowserSite = ""
+        scrollHandler.show()
+        val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
+        tabSession.clearMedia()
+        DownloaderSession.clear()
         addressInput = formatted
         currentUrl = formatted
         onUrlChange?.invoke(formatted)
+        tabSession.updateNavigation(formatted, pageTitle)
+        DownloaderSession.updateBrowserPage(formatted)
+        syncCurrentTabWithPage(formatted, pageTitle)
         coroutineScope.launch {
             historyManager.recordVisit(formatted)
         }
@@ -127,253 +483,167 @@ fun DirectBrowserView(
         focusManager.clearFocus()
     }
 
-    fun scanCurrentPageDOM(wv: WebView?) {
-        if (wv == null) return
-        val current = wv.url ?: return
-        if (current.isBlank() || current == "about:blank" || currentUrl.isBlank()) return
-
-        wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { jsonRaw ->
-            val discovered = MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
-            if (discovered.isNotEmpty()) {
-                val domain = runCatching { java.net.URL(current).host }.getOrDefault("")
-                onBatchExtracted(discovered, pageTitle, domain)
-                DownloaderSession.addDiscoveredItems(discovered, pageTitle)
-            }
-        }
-    }
-
-    Box(
+    Surface(
         modifier = modifier
             .fillMaxSize()
-            .testTag("direct_browser_view")
+            .testTag("direct_browser_view"),
+        color = BrowserThemeColors.background(isDark)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Browser Navigation and Address Bar
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth().statusBarsPadding()
+        Box(modifier = Modifier.fillMaxSize()) {
+            // The toolbar is a fixed layout section; webpage content begins below it.
+            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(BrowserThemeColors.background(isDark))
+                    .testTag("browser_pinned_top_controls")
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (onClose != null) {
-                        IconButton(
-                            onClick = onClose,
-                            modifier = Modifier.size(36.dp).testTag("browser_close_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close browser",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
+            // 1. Minimalist Monochrome Top Bar (always visible)
+            BrowserTopBar(
+                addressInput = addressInput,
+                onAddressChange = { addressInput = it },
+                onNavigate = { navigateToUrl(it) },
+                onHamburgerClick = {
+                    if (onMenuClick != null) {
+                        onMenuClick.invoke()
+                    } else {
+                        showTabsSheet = true
+                    }
+                },
+                onDiscoveredMediaClick = {
+                    handleDiscoveredMediaClick()
+                },
+                discoveredCount = totalDetectedCount,
+                isDeepScanning = isDeepScanning,
+                onNewTabClick = {
+                    val newId = "tab_${System.currentTimeMillis()}"
+                    val newTab = BrowserTabItem(id = newId, title = "New Tab", url = "")
+                    activeTabId = newId
+                    currentUrl = ""
+                    addressInput = ""
+                    pageTitle = ""
+                    onUrlChange?.invoke("")
+                    tabSession.clearMedia()
+                    tabSession.updateNavigation("")
+                    DownloaderSession.clear()
+                    scrollHandler.show()
+                    webViewInstance?.loadUrl("about:blank")
+                    coroutineScope.launch {
+                        historyManager.saveTabs(tabsList + newTab)
+                    }
+                },
+                onReloadClick = {
+                    if (isLoading) webViewInstance?.stopLoading() else webViewInstance?.reload()
+                },
+                onPinCurrentSite = {
+                    if (currentUrl.isNotBlank()) {
+                        coroutineScope.launch {
+                            historyManager.addShortcut(pageTitle.ifBlank { currentUrl }, currentUrl)
+                        }
+                    }
+                },
+                onSaveToPocket = {
+                    if (currentUrl.isNotBlank()) {
+                        val pocketRepo = com.amresalehin.emregallery.data.PocketRepository.getInstance(context)
+                        val effectiveTitle = pageTitle.ifBlank { webViewInstance?.title ?: currentUrl }
+                        
+                        // Collect all already fetched / discovered media from the active browser session
+                        val currentDetected = tabSession.getDetectedMedia()
+                        val currentDiscovered = DownloaderSession.discoveredItems.value
+                        val allScraped = (currentDetected + currentDiscovered).distinctBy { it.url }
+                        val alreadyFetchedMediaItems = allScraped.map { scraped ->
+                            com.amresalehin.emregallery.data.MediaInboxItem(
+                                id = scraped.id.ifBlank { "media_${scraped.url.hashCode().toUInt().toString(16)}" },
+                                title = scraped.title.ifBlank { effectiveTitle },
+                                localUri = "",
+                                sourceUrl = scraped.url,
+                                isVideo = scraped.isVideo,
+                                isAudio = scraped.isAudio,
+                                isStream = scraped.isStream,
+                                format = scraped.format,
+                                sizeBytes = scraped.sizeBytes ?: 0L,
+                                dateAddedMillis = scraped.detectedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                                width = scraped.width ?: 0,
+                                height = scraped.height ?: 0
                             )
                         }
-                    }
 
-                    // Navigation Controls: Back & Forward
-                    IconButton(
-                        onClick = { webViewInstance?.goBack() },
-                        enabled = canGoBack,
-                        modifier = Modifier.size(34.dp).testTag("browser_back_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (canGoBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.size(19.dp)
+                        // Save bookmark to Pocket directly without preview saving
+                        val bookmark = pocketRepo.addBookmark(
+                            title = effectiveTitle,
+                            url = currentUrl,
+                            description = "",
+                            previewImageUrl = "",
+                            autoFetchMetadata = true,
+                            initialItems = alreadyFetchedMediaItems
                         )
-                    }
 
-                    IconButton(
-                        onClick = { webViewInstance?.goForward() },
-                        enabled = canGoForward,
-                        modifier = Modifier.size(34.dp).testTag("browser_forward_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Forward",
-                            tint = if (canGoForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
+                        // Run WebView in background and capture all media from page
+                        pocketRepo.startDeepScan(bookmark.id, context)
 
-                    // Interactive, Editable URL and Search Bar
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(38.dp)
-                            .testTag("browser_address_bar")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
-                            Icon(
-                                imageVector = if (isSecure) Icons.Default.Lock else if (currentUrl.isNotBlank()) Icons.Default.Language else Icons.Default.Search,
-                                contentDescription = null,
-                                tint = if (isSecure) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
-
-                            Spacer(Modifier.width(6.dp))
-
-                            Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                if (addressInput.isEmpty()) {
-                                    Text(
-                                        text = "Search or type URL",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        fontSize = 13.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                BasicTextField(
-                                    value = addressInput,
-                                    onValueChange = { addressInput = it },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Uri,
-                                        imeAction = ImeAction.Go
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onGo = {
-                                            navigateToUrl(addressInput)
-                                        }
-                                    ),
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 13.sp
-                                    ),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("browser_address_input")
-                                )
-                            }
-
-                            if (addressInput.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { addressInput = "" },
-                                    modifier = Modifier.size(22.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = { navigateToUrl(addressInput) },
-                                modifier = Modifier.size(24.dp).testTag("browser_go_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "Go",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
+                        val initialCount = alreadyFetchedMediaItems.size
+                        val message = if (initialCount > 0) {
+                            "Saved to Pocket ($initialCount media) • Capturing all media..."
+                        } else {
+                            "Saved to Pocket • Capturing all media in background..."
                         }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                     }
-
-                    // Reload / Stop button
-                    IconButton(
-                        onClick = {
-                            if (isLoading) {
-                                webViewInstance?.stopLoading()
-                            } else {
-                                webViewInstance?.reload()
-                            }
-                        },
-                        modifier = Modifier.size(34.dp).testTag("browser_refresh_btn")
-                    ) {
-                        Icon(
-                            imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
-                            contentDescription = if (isLoading) "Stop" else "Reload",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Home button
-                    IconButton(
-                        onClick = {
-                            currentUrl = ""
-                            addressInput = ""
-                            pageTitle = ""
-                            onUrlChange?.invoke("")
-                            webViewInstance?.loadUrl("about:blank")
-                        },
-                        modifier = Modifier.size(34.dp).testTag("browser_home_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = "Home",
-                            tint = if (currentUrl.isBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Discovered Media count badge or Scan button
-                    if (discoveredCount > 0) {
-                        Surface(
-                            onClick = onSwitchToMediaTab,
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.height(32.dp).testTag("browser_media_badge_top")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PermMedia,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "$discoveredCount",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
+                },
+                onShareClick = {
+                    if (currentUrl.isNotBlank()) {
+                        val sendIntent = Intent().apply {
+                            action = Intent.ACTION_SEND
+                            putExtra(Intent.EXTRA_TEXT, currentUrl)
+                            type = "text/plain"
                         }
-                    } else if (currentUrl.isNotBlank()) {
-                        IconButton(
-                            onClick = { scanCurrentPageDOM(webViewInstance) },
-                            modifier = Modifier.size(34.dp).testTag("browser_scan_page_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.TravelExplore,
-                                contentDescription = "Scan media",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "Share link"))
                     }
-                }
-            }
+                },
+                onDesktopToggle = { desktop ->
+                    isDesktopMode = desktop
+                    webViewInstance?.settings?.apply {
+                        userAgentString = if (desktop) {
+                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        } else {
+                            BotDetectionMitigator.STEALTH_USER_AGENT
+                        }
+                        useWideViewPort = desktop
+                        loadWithOverviewMode = desktop
+                    }
+                    webViewInstance?.reload()
+                },
+                isDesktopMode = isDesktopMode,
+                onClearHistoryClick = {
+                    coroutineScope.launch {
+                        historyManager.clearHistory()
+                    }
+                },
+                onSettingsClick = {
+                    showSettingsSheet = true
+                },
+                isWebPage = currentUrl.isNotBlank(),
+                onHomeClick = {
+                    handleBrowserBackNavigation()
+                },
+                onCloseBrowser = onClose,
+                tabCount = tabsList.size,
+                onOpenDownloads = {
+                    onOpenDownloads?.invoke() ?: onSwitchToMediaTab()
+                },
+                onOpenHistory = {
+                    showHistorySheet = true
+                },
+                onOpenTabs = {
+                    showTabsSheet = true
+                },
+                isDark = isDark,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            )
 
             // Loading Progress Bar
             if (isLoading) {
@@ -381,49 +651,143 @@ fun DirectBrowserView(
                     progress = { loadingProgress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        .height(2.5.dp),
+                    color = BrowserThemeColors.textPrimary(isDark),
+                    trackColor = BrowserThemeColors.divider(isDark)
                 )
             }
 
-            // 2. Interactive WebView and Home Page Container
-            Box(
+            }
+
+            val isChallengeActive = remember(pageTitle, currentUrl) {
+                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
+            }
+            AnimatedVisibility(
+                visible = isChallengeActive,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            webViewInstance = this
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("browser_bot_challenge_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFF92400E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF92400E),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+
+            // The browser viewport uses the remaining height beneath the toolbar.
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                // Interactive WebView (always instantiated for high-speed responsiveness)
+                key(webViewRecreateEpoch) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                webViewInstance = this
+                                BrowserSession.activeWebView = this
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
 
+                            setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                                scrollHandler.onScroll(scrollY, oldScrollY)
+                                if (RamGovernor.isHeapLimitExceeded()) {
+                                    RamGovernor.enforceLimit(context, this)
+                                }
+                            }
+
+                            setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+                            }
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                databaseEnabled = true
+                                javaScriptCanOpenWindowsAutomatically = true
+                                setSupportMultipleWindows(false)
+                                cacheMode = WebSettings.LOAD_DEFAULT
                                 builtInZoomControls = true
                                 displayZoomControls = false
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
-                                mediaPlaybackRequiresUserGesture = false
+                                mediaPlaybackRequiresUserGesture = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                userAgentString = BotDetectionMitigator.STEALTH_USER_AGENT
+                            }
+
+                            setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
+                                if (!url.isNullOrBlank()) {
+                                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                                    val isVideo = mimetype?.startsWith("video/", ignoreCase = true) == true ||
+                                        fileName.endsWith(".mp4", ignoreCase = true) || fileName.endsWith(".webm", ignoreCase = true) ||
+                                        fileName.endsWith(".mkv", ignoreCase = true) || fileName.endsWith(".mov", ignoreCase = true)
+                                    val isAudio = mimetype?.startsWith("audio/", ignoreCase = true) == true
+                                    val item = ScrapedMediaItem(
+                                        id = "direct_dl_${System.currentTimeMillis()}_${url.hashCode()}",
+                                        url = url,
+                                        title = fileName,
+                                        isVideo = isVideo,
+                                        isAudio = isAudio,
+                                        category = if (isVideo) MediaCategory.VIDEOS else if (isAudio) MediaCategory.AUDIO else MediaCategory.IMAGES,
+                                        format = mimetype ?: (if (isVideo) "VIDEO" else "MEDIA"),
+                                        sizeBytes = if (contentLength > 0L) contentLength else null,
+                                        provenance = MediaProvenance(
+                                            extractorEngine = "InteractiveBrowser",
+                                            pageUrl = currentUrl
+                                        ),
+                                        downloadHeaders = mapOf(
+                                            "User-Agent" to (userAgent ?: BotDetectionMitigator.STEALTH_USER_AGENT),
+                                            "Referer" to currentUrl
+                                        )
+                                    )
+                                    DownloadQueueManager.enqueueDownload(
+                                        context = context,
+                                        item = item,
+                                        referer = currentUrl,
+                                        sourceUrl = currentUrl
+                                    )
+                                    Toast.makeText(context, "Downloading $fileName", Toast.LENGTH_SHORT).show()
+                                }
                             }
 
                             addJavascriptInterface(
-                                BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
+                                BrowserSession.EmreMediaBridge { rawUrl ->
                                     val item = MediaCaptureEngine.buildMediaItem(
                                         rawUrl = rawUrl,
                                         source = ExtractionSource.DOM_SCRAPE,
                                         baseUrl = currentUrl
                                     )
                                     if (item != null) {
-                                        onMediaExtracted(item)
-                                        DownloaderSession.addDiscoveredItem(item)
+                                        tabSession.registerMedia(item)
                                     }
                                 },
                                 "EmreBridge"
@@ -438,15 +802,16 @@ fun DirectBrowserView(
                                 override fun onReceivedTitle(view: WebView?, title: String?) {
                                     pageTitle = title.orEmpty()
                                     onPageTitleChanged?.invoke(pageTitle)
+                                    tabSession.updateNavigation(currentUrl, pageTitle)
+                                    if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
+                                        syncCurrentTabWithPage(currentUrl, pageTitle)
+                                    }
                                 }
                             }
 
                             webViewClient = object : WebViewClient() {
                                 private fun handleExternalNavigation(view: WebView?, urlString: String): Boolean {
-                                    if (urlString.isBlank()) return false
                                     val lower = urlString.trim().lowercase()
-
-                                    // Internal browser schemes should load within Chromium WebView
                                     if (lower.startsWith("http://") || lower.startsWith("https://") ||
                                         lower.startsWith("about:") || lower.startsWith("data:") ||
                                         lower.startsWith("javascript:") || lower.startsWith("blob:") ||
@@ -457,7 +822,6 @@ fun DirectBrowserView(
 
                                     val context = view?.context ?: return false
 
-                                    // 1. Handle intent:// URI scheme (e.g. intent://...#Intent;scheme=...;package=...;end)
                                     if (lower.startsWith("intent://") || lower.startsWith("intent:")) {
                                         try {
                                             val intent = Intent.parseUri(urlString, Intent.URI_INTENT_SCHEME)
@@ -470,7 +834,6 @@ fun DirectBrowserView(
                                                     return true
                                                 }
 
-                                                // If target app is not installed, check for browser_fallback_url
                                                 val fallbackUrl = intent.getStringExtra("browser_fallback_url")
                                                 if (!fallbackUrl.isNullOrBlank() &&
                                                     (fallbackUrl.startsWith("http://", ignoreCase = true) || fallbackUrl.startsWith("https://", ignoreCase = true))
@@ -479,7 +842,6 @@ fun DirectBrowserView(
                                                     return true
                                                 }
 
-                                                // If intent specifies target package, route to Google Play Store
                                                 val packageName = intent.`package`
                                                 if (!packageName.isNullOrBlank()) {
                                                     val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")).apply {
@@ -497,10 +859,9 @@ fun DirectBrowserView(
                                         } catch (e: Exception) {
                                             Log.w("DirectBrowserView", "Failed to resolve intent scheme: $urlString", e)
                                         }
-                                        return true // Prevent Chromium from displaying net::ERR_UNKNOWN_URL_SCHEME
+                                        return true
                                     }
 
-                                    // 2. Handle specific app/system schemes: market://, tel:, mailto:, sms:, geo:, whatsapp:, tg:, etc.
                                     try {
                                         val uri = Uri.parse(urlString)
                                         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
@@ -528,10 +889,7 @@ fun DirectBrowserView(
                                     return true
                                 }
 
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView?,
-                                    request: WebResourceRequest?
-                                ): Boolean {
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val reqUrl = request?.url?.toString() ?: return false
                                     return handleExternalNavigation(view, reqUrl)
                                 }
@@ -541,43 +899,69 @@ fun DirectBrowserView(
                                     if (url.isNullOrBlank()) return false
                                     return handleExternalNavigation(view, url)
                                 }
+
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    isLoading = true
-                                    url?.let {
-                                        if (it == "about:blank" || it.isBlank()) {
-                                            currentUrl = ""
-                                            addressInput = ""
-                                            pageTitle = ""
-                                            onUrlChange?.invoke("")
-                                        } else {
-                                            currentUrl = it
-                                            addressInput = it
-                                            onUrlChange?.invoke(it)
-                                        }
+                                    scrollHandler.show()
+                                    if (url.isNullOrBlank() || url == "about:blank") {
+                                        tabSession.clearMedia()
+                                        tabSession.updateNavigation("")
+                                        DownloaderSession.clear()
+                                        isLoading = false
+                                        canGoBack = false
+                                        canGoForward = false
+                                        syncCurrentTabWithPage("", "Home")
+                                        return
                                     }
+                                    tabSession.clearMedia()
+                                    DownloaderSession.clear()
+                                    isLoading = true
+                                    BotDetectionMitigator.injectStealth(view)
+                                    currentUrl = url
+                                    addressInput = url
+                                    onUrlChange?.invoke(url)
+                                    tabSession.updateNavigation(url, pageTitle)
+                                    DownloaderSession.updateBrowserPage(url)
+                                    syncCurrentTabWithPage(url, pageTitle)
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     isLoading = false
-                                    url?.let {
-                                        if (it == "about:blank" || it.isBlank()) {
-                                            currentUrl = ""
-                                            addressInput = ""
-                                            pageTitle = ""
-                                            onUrlChange?.invoke("")
-                                        } else {
-                                            currentUrl = it
-                                            addressInput = it
-                                            onUrlChange?.invoke(it)
-                                            coroutineScope.launch {
-                                                historyManager.recordVisit(it, view?.title)
-                                            }
-                                            // Setup live MutationObserver and scan page DOM
-                                            view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
-                                            scanCurrentPageDOM(view)
-                                        }
+                                    if (url.isNullOrBlank() || url == "about:blank") {
+                                        tabSession.updateNavigation("")
+                                        canGoBack = false
+                                        canGoForward = false
+                                        syncCurrentTabWithPage("", "Home")
+                                        return
+                                    }
+                                    BotDetectionMitigator.injectStealth(view)
+                                    BotDetectionMitigator.syncCookiesFromWebView(url)
+                                    currentUrl = url
+                                    addressInput = url
+                                    onUrlChange?.invoke(url)
+                                    val finalTitle = view?.title.orEmpty().ifBlank { pageTitle }
+                                    pageTitle = finalTitle
+                                    tabSession.updateNavigation(url, finalTitle)
+                                    syncCurrentTabWithPage(url, finalTitle)
+                                    coroutineScope.launch {
+                                        historyManager.recordVisit(url, view?.title)
+                                    }
+                                    if (BrowserSession.pendingScrollRestore && BrowserSession.savedBrowserSite.isNotBlank() &&
+                                        url?.equals(BrowserSession.savedBrowserSite, ignoreCase = true) == true) {
+                                        val targetX = BrowserSession.savedScrollX
+                                        val targetY = BrowserSession.savedScrollY
+                                        view?.postDelayed({
+                                            view.scrollTo(targetX, targetY)
+                                            view.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
+                                        }, 150)
+                                        view?.postDelayed({
+                                            view.scrollTo(targetX, targetY)
+                                            view.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
+                                        }, 500)
+                                        BrowserSession.pendingScrollRestore = false
+                                        isDeepScanning = false
+                                        hasInitiatedScanInStage = false
                                     }
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
@@ -590,31 +974,58 @@ fun DirectBrowserView(
                                     val reqUrl = request?.url?.toString() ?: return null
                                     if (reqUrl.startsWith("about:")) return null
 
-                                    return MediaCaptureEngine.shouldInterceptRequest(
-                                        request = request,
-                                        baseUrl = currentUrl
-                                    ) { item ->
-                                        DownloaderSession.addDiscoveredItem(item)
-                                        onMediaExtracted(item)
+                                    // Ad & tracker blocking for lightweight, high-performance browsing
+                                    if (AdBlockEngine.isAdOrTracker(reqUrl)) {
+                                        return AdBlockEngine.createEmptyResponse()
                                     }
+
+                                    return null
+                                }
+
+                                override fun onRenderProcessGone(
+                                    view: WebView?,
+                                    detail: RenderProcessGoneDetail?
+                                ): Boolean {
+                                    val didCrash = detail?.didCrash() ?: false
+                                    Log.w("DirectBrowserView", "Chromium renderer process gone (didCrash=$didCrash). Cleanly recovering...")
+                                    try {
+                                        view?.let { wv ->
+                                            (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+                                            wv.destroy()
+                                        }
+                                    } catch (_: Throwable) {}
+                                    if (webViewInstance === view) {
+                                        webViewInstance = null
+                                    }
+                                    RamGovernor.enforceLimit(context, null)
+                                    webViewRecreateEpoch++
+                                    return true
                                 }
                             }
 
-                            if (startUrl.isNotBlank()) {
-                                loadUrl(startUrl)
-                            } else {
-                                loadUrl("about:blank")
+                            val initialToLoad = currentUrl.ifBlank { startUrl }
+                            if (initialToLoad.isNotBlank() && initialToLoad != "about:blank") {
+                                loadUrl(initialToLoad)
                             }
                         }
                     },
                     update = { wv ->
                         webViewInstance = wv
+                        BrowserSession.activeWebView = wv
+                        wv.setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            wv.settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+                        }
                     },
                     onRelease = { wv ->
                         wv.stopLoading()
+                        wv.loadUrl("about:blank")
+                        wv.onPause()
                         wv.webViewClient = WebViewClient()
                         wv.webChromeClient = WebChromeClient()
-                        wv.destroy()
+                        wv.post {
+                            try { wv.destroy() } catch (_: Throwable) {}
+                        }
                         if (webViewInstance === wv) {
                             webViewInstance = null
                         }
@@ -623,258 +1034,207 @@ fun DirectBrowserView(
                         .fillMaxSize()
                         .testTag("browser_webview_canvas")
                 )
+            }
 
+                // 2. Minimalist Monochrome Mobile Browser Home Layout (blank when empty)
                 if (currentUrl.isBlank()) {
-                    BrowserEmptyHomePage(
-                        onNavigate = { target ->
-                            navigateToUrl(target)
-                        },
+                    BrowserHomeContent(
+                        shortcuts = shortcutsList,
+                        recentSites = allHistorySites,
+                        onNavigate = { navigateToUrl(it) },
+                        onAddShortcutClick = { showAddShortcutDialog = true },
+                        onEditShortcutClick = { selectedShortcutForEdit = it },
+                        onSeeAllHistoryClick = { showHistorySheet = true },
+                        isDark = isDark,
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surface)
                             .testTag("browser_empty_home_page")
                     )
                 }
             }
         }
+
+        // Fullscreen Discovered Media Overlay (keeps underlying WebView alive for instant return & deep scanning)
+        if (showDiscoveredMediaOverlay) {
+            DiscoveredMediaPage(
+                onBack = {
+                    showDiscoveredMediaOverlay = false
+                    stopBrowserDeepScan()
+                    hasInitiatedScanInStage = false
+                },
+                onDeepScanClick = {
+                    if (isDeepScanning) {
+                        stopBrowserDeepScan()
+                    } else {
+                        startBrowserDeepScan()
+                    }
+                },
+                isDeepScanning = isDeepScanning,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(100f)
+            )
+        }
     }
 }
 
-/**
- * Clean empty home page displayed when the browser is opened without a URL.
- * Offers a clean interface and quick shortcuts without loading 3rd-party search pages.
- */
-@Composable
-fun BrowserEmptyHomePage(
-    onNavigate: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val historyManager = remember { BrowserHistoryManager(context) }
-    val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
-
-    val topVisitedSites = remember(allHistorySites) {
-        if (allHistorySites.isNotEmpty()) {
-            allHistorySites.sortedByDescending { it.visitCount }.take(5)
-        } else {
-            historyManager.defaultTopSites
-        }
+    // Modal Dialogs & Sheets
+    if (showAddShortcutDialog) {
+        AddShortcutDialog(
+            onDismiss = { showAddShortcutDialog = false },
+            onAdd = { title, url ->
+                coroutineScope.launch {
+                    historyManager.addShortcut(title, url)
+                }
+            },
+            isDark = isDark
+        )
     }
 
-    val recentSites = remember(allHistorySites) {
-        if (allHistorySites.isNotEmpty()) {
-            allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(5)
-        } else {
-            historyManager.defaultTopSites.take(5)
-        }
+    selectedShortcutForEdit?.let { sc ->
+        EditShortcutDialog(
+            shortcut = sc,
+            onDismiss = { selectedShortcutForEdit = null },
+            onUpdate = { title, url ->
+                coroutineScope.launch {
+                    historyManager.updateShortcut(sc.id, title, url)
+                }
+            },
+            onDelete = {
+                coroutineScope.launch {
+                    historyManager.removeShortcut(sc.id)
+                }
+            },
+            isDark = isDark
+        )
     }
 
-    var homeSearchInput by remember { mutableStateOf("") }
+    if (showHistorySheet) {
+        BrowserHistoryBottomSheet(
+            history = allHistorySites,
+            onNavigate = { navigateToUrl(it) },
+            onDeleteSite = { url ->
+                coroutineScope.launch {
+                    historyManager.deleteSite(url)
+                }
+            },
+            onClearAll = {
+                coroutineScope.launch {
+                    historyManager.clearHistory()
+                }
+            },
+            onDismiss = { showHistorySheet = false },
+            isDark = isDark
+        )
+    }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 440.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            // 1. Prominent Search / URL Input Bar
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 4.dp,
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("home_page_search_bar")
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-
-                    Spacer(Modifier.width(10.dp))
-
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (homeSearchInput.isEmpty()) {
-                            Text(
-                                text = "Search or type URL",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                fontSize = 14.sp
-                            )
-                        }
-                        BasicTextField(
-                            value = homeSearchInput,
-                            onValueChange = { homeSearchInput = it },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Go
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onGo = {
-                                    if (homeSearchInput.isNotBlank()) {
-                                        onNavigate(homeSearchInput)
-                                    }
-                                }
-                            ),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 14.sp
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("home_page_search_input")
-                        )
+    if (showTabsSheet) {
+        BrowserTabsBottomSheet(
+            tabs = tabsList,
+            currentUrl = currentUrl,
+            activeTabId = activeTabId,
+            onSelectTab = { tab ->
+                activeTabId = tab.id
+                currentUrl = tab.url
+                addressInput = tab.url
+                pageTitle = tab.title
+                onUrlChange?.invoke(tab.url)
+                tabSession.clearMedia()
+                tabSession.updateNavigation(tab.url, tab.title)
+                DownloaderSession.clear()
+                scrollHandler.show()
+                if (tab.url.isNotBlank()) {
+                    webViewInstance?.loadUrl(tab.url)
+                } else {
+                    webViewInstance?.loadUrl("about:blank")
+                }
+            },
+            onCloseTab = { tabId ->
+                val remaining = tabsList.filter { it.id != tabId }
+                if (remaining.isEmpty()) {
+                    val freshId = "tab_${System.currentTimeMillis()}"
+                    val freshTab = BrowserTabItem(id = freshId, title = "New Tab", url = "")
+                    activeTabId = freshId
+                    currentUrl = ""
+                    addressInput = ""
+                    pageTitle = ""
+                    onUrlChange?.invoke("")
+                    tabSession.clearMedia()
+                    tabSession.updateNavigation("")
+                    DownloaderSession.clear()
+                    scrollHandler.show()
+                    webViewInstance?.loadUrl("about:blank")
+                    coroutineScope.launch {
+                        historyManager.saveTabs(listOf(freshTab))
                     }
-
-                    if (homeSearchInput.isNotEmpty()) {
-                        IconButton(
-                            onClick = { homeSearchInput = "" },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
+                } else {
+                    if (activeTabId == tabId) {
+                        val nextTab = remaining.last()
+                        activeTabId = nextTab.id
+                        currentUrl = nextTab.url
+                        addressInput = nextTab.url
+                        pageTitle = nextTab.title
+                        onUrlChange?.invoke(nextTab.url)
+                        tabSession.clearMedia()
+                        tabSession.updateNavigation(nextTab.url, nextTab.title)
+                        DownloaderSession.clear()
+                        scrollHandler.show()
+                        if (nextTab.url.isNotBlank()) {
+                            webViewInstance?.loadUrl(nextTab.url)
+                        } else {
+                            webViewInstance?.loadUrl("about:blank")
                         }
                     }
-
-                    Surface(
-                        onClick = {
-                            if (homeSearchInput.isNotBlank()) {
-                                onNavigate(homeSearchInput)
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.height(34.dp).testTag("home_page_search_btn")
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Go",
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    coroutineScope.launch {
+                        historyManager.saveTabs(remaining)
                     }
                 }
-            }
-
-            Spacer(Modifier.height(32.dp))
-
-            // 2. Top 5 Visited Sites
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                topVisitedSites.take(5).forEachIndexed { idx, site ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .width(62.dp)
-                            .clickable { onNavigate(site.url) }
-                            .testTag("top_site_$idx")
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                            shadowElevation = 2.dp,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                val initial = site.title.ifBlank { site.domain }.firstOrNull()?.uppercaseChar()?.toString() ?: "W"
-                                Text(
-                                    text = initial,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = site.title.ifBlank { site.domain },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+            },
+            onNewTab = {
+                val newId = "tab_${System.currentTimeMillis()}"
+                val newTab = BrowserTabItem(id = newId, title = "New Tab", url = "")
+                activeTabId = newId
+                currentUrl = ""
+                addressInput = ""
+                pageTitle = ""
+                onUrlChange?.invoke("")
+                tabSession.clearMedia()
+                tabSession.updateNavigation("")
+                DownloaderSession.clear()
+                scrollHandler.show()
+                webViewInstance?.loadUrl("about:blank")
+                coroutineScope.launch {
+                    historyManager.saveTabs(tabsList + newTab)
                 }
-            }
+            },
+            onDismiss = { showTabsSheet = false },
+            isDark = isDark
+        )
+    }
 
-            Spacer(Modifier.height(20.dp))
-
-            // 3. Recent 5 Sites in Recommendation
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                recentSites.take(5).forEachIndexed { idx, site ->
-                    Surface(
-                        onClick = { onNavigate(site.url) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .height(32.dp)
-                            .testTag("recent_site_$idx")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = site.title.ifBlank { site.domain },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+    if (showSettingsSheet) {
+        BrowserSettingsBottomSheet(
+            isDesktopMode = isDesktopMode,
+            onDesktopModeChange = { desktop ->
+                isDesktopMode = desktop
+                webViewInstance?.settings?.apply {
+                    userAgentString = if (desktop) {
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    } else {
+                        BotDetectionMitigator.STEALTH_USER_AGENT
                     }
+                    useWideViewPort = desktop
+                    loadWithOverviewMode = desktop
                 }
-            }
-        }
+                webViewInstance?.reload()
+            },
+            onClearCacheClick = {
+                webViewInstance?.clearCache(true)
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+            },
+            onDismiss = { showSettingsSheet = false },
+            isDark = isDark
+        )
     }
 }

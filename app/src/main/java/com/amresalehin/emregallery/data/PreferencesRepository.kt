@@ -4,9 +4,6 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
-import com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode
-import com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality
 import com.amresalehin.emregallery.data.preferences.MediaCollectionsPreferencesManager
 import com.amresalehin.emregallery.data.preferences.OcrPreferencesManager
 import com.amresalehin.emregallery.data.preferences.UiPreferencesManager
@@ -28,7 +25,6 @@ class PreferencesRepository(context: Context) {
     private val vaultPrefs = VaultPreferencesManager(context)
     private val ocrPrefs = OcrPreferencesManager(context)
     private val mediaPrefs = MediaCollectionsPreferencesManager(context)
-    val downloaderPrefs = DownloaderPreferencesManager(context)
 
     // --- Onboarding & UI Navigation ---
     fun isWelcomeCompletedSync(): Boolean = uiPrefs.isWelcomeCompletedSync()
@@ -39,6 +35,7 @@ class PreferencesRepository(context: Context) {
     suspend fun saveHomeScrollPosition(index: Int, offset: Int) = uiPrefs.saveHomeScrollPosition(index, offset)
     suspend fun clearHomeScrollPosition() = uiPrefs.clearHomeScrollPosition()
 
+    fun getThemeSync(): String = uiPrefs.getThemeSync()
     val theme: Flow<String> get() = uiPrefs.theme
     suspend fun setTheme(value: String) = uiPrefs.setTheme(value)
 
@@ -101,34 +98,7 @@ class PreferencesRepository(context: Context) {
     suspend fun addRecentSearch(query: String) = mediaPrefs.addRecentSearch(query)
     suspend fun clearRecentSearches() = mediaPrefs.clearRecentSearches()
     suspend fun addTagForMedia(uri: String, tag: String) = mediaPrefs.addTagForMedia(uri, tag)
+    suspend fun addTagsForMedia(uri: String, tags: Collection<String>) = mediaPrefs.addTagsForMedia(uri, tags)
+    suspend fun removeTagForMedia(uri: String, tag: String) = mediaPrefs.removeTagForMedia(uri, tag)
     suspend fun addPersonForMedia(uri: String, person: String) = mediaPrefs.addPersonForMedia(uri, person)
-
-    // --- Media Downloader Customizability ---
-    val videoQualityCap: Flow<DownloaderVideoQuality> get() = downloaderPrefs.videoQualityCap
-    val audioOnlyMode: Flow<Boolean> get() = downloaderPrefs.audioOnlyMode
-    val preferredAudioFormat: Flow<String> get() = downloaderPrefs.preferredAudioFormat
-    val minKbFilter: Flow<Int> get() = downloaderPrefs.minKbFilter
-    val minWidthFilter: Flow<Int> get() = downloaderPrefs.minWidthFilter
-    val minHeightFilter: Flow<Int> get() = downloaderPrefs.minHeightFilter
-    val showSvg: Flow<Boolean> get() = downloaderPrefs.showSvg
-    val subfolderMode: Flow<DownloaderSubfolderMode> get() = downloaderPrefs.subfolderMode
-    val filenameTemplate: Flow<String> get() = downloaderPrefs.filenameTemplate
-    val wifiOnlyDownloads: Flow<Boolean> get() = downloaderPrefs.wifiOnlyDownloads
-    val maxConcurrentDownloads: Flow<Int> get() = downloaderPrefs.maxConcurrentDownloads
-    val enabledProviders: Flow<Set<String>> get() = downloaderPrefs.enabledProviders
-    val searchEngine: Flow<BrowserSearchEngine> get() = downloaderPrefs.searchEngine
-
-    suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) = downloaderPrefs.setVideoQualityCap(quality)
-    suspend fun setAudioOnlyMode(enabled: Boolean) = downloaderPrefs.setAudioOnlyMode(enabled)
-    suspend fun setPreferredAudioFormat(format: String) = downloaderPrefs.setPreferredAudioFormat(format)
-    suspend fun setMinKbFilter(minKb: Int) = downloaderPrefs.setMinKbFilter(minKb)
-    suspend fun setMinWidthFilter(minWidth: Int) = downloaderPrefs.setMinWidthFilter(minWidth)
-    suspend fun setMinHeightFilter(minHeight: Int) = downloaderPrefs.setMinHeightFilter(minHeight)
-    suspend fun setShowSvg(show: Boolean) = downloaderPrefs.setShowSvg(show)
-    suspend fun setSubfolderMode(mode: DownloaderSubfolderMode) = downloaderPrefs.setSubfolderMode(mode)
-    suspend fun setFilenameTemplate(template: String) = downloaderPrefs.setFilenameTemplate(template)
-    suspend fun setWifiOnlyDownloads(wifiOnly: Boolean) = downloaderPrefs.setWifiOnlyDownloads(wifiOnly)
-    suspend fun setMaxConcurrentDownloads(maxConcurrent: Int) = downloaderPrefs.setMaxConcurrentDownloads(maxConcurrent)
-    suspend fun setEnabledProviders(providers: Set<String>) = downloaderPrefs.setEnabledProviders(providers)
-    suspend fun setSearchEngine(engine: BrowserSearchEngine) = downloaderPrefs.setSearchEngine(engine)
 }

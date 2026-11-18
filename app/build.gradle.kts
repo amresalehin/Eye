@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.amresalehin.emregallery"
+        applicationId = "com.aistudio.emregallery.xytkpq"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -18,11 +18,11 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+        resourceConfigurations += listOf("en")
     }
 
     buildTypes {
         debug {
-            // Debug build configuration
         }
         release {
             isMinifyEnabled = true
@@ -34,6 +34,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += listOf("**/libc++_shared.so")
         }
         resources {
             excludes += listOf(
@@ -43,7 +44,10 @@ android {
                 "/META-INF/DEPENDENCIES",
                 "/META-INF/LICENSE*",
                 "/META-INF/NOTICE*",
-                "/META-INF/*.version"
+                "/META-INF/*.version",
+                "/META-INF/*.md",
+                "/META-INF/*.txt",
+                "/*.properties"
             )
         }
     }
@@ -76,7 +80,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
@@ -95,10 +98,13 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Native FFmpeg and FFprobe multimedia processing kit
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
@@ -112,6 +118,7 @@ chaquopy {
         pip {
             install("gallery-dl")
             install("yt-dlp")
+            install("instaloader")
         }
     }
 }

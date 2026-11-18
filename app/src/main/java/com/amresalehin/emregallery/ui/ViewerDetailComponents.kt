@@ -51,6 +51,8 @@ import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
+import com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -734,21 +736,25 @@ fun OverviewTabContent(
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     onSelectEngine: (String) -> Unit = {},
+    onRemoveTag: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var metadataExpanded by remember { mutableStateOf(true) }
 
+    val cachedLocation = remember(item.uri) {
+        com.amresalehin.emregallery.data.PhotoMapLocationCache(context).getLocation(item.uri)
+    }
     val hasTags = customTags.isNotEmpty()
     val hasPeople = detectedFaces.isNotEmpty()
-    val hasLocation = metadata["location"]?.isNotBlank() == true || metadata.containsKey("latitude")
+    val hasLocation = metadata["location"]?.isNotBlank() == true || metadata.containsKey("latitude") || cachedLocation != null
     val assignedAlbums = remember(item.uri, customAlbums) {
         customAlbums.filter { item.uri in it.mediaUris }
     }
 
     // Readable place split into primary and secondary
     val rawLocation = metadata["location"].orEmpty()
-    val (primaryLocation, secondaryLocation) = remember(rawLocation, metadata["latitude"], metadata["longitude"]) {
+    val (primaryLocation, secondaryLocation) = remember(rawLocation, metadata["latitude"], metadata["longitude"], cachedLocation) {
         if (rawLocation.isNotBlank()) {
             val parts = rawLocation.split(",").map { it.trim() }.filter { it.isNotEmpty() }
             when {
@@ -760,6 +766,8 @@ fun OverviewTabContent(
             val lat = metadata["latitude"]?.toDoubleOrNull() ?: 0.0
             val lon = metadata["longitude"]?.toDoubleOrNull() ?: 0.0
             "%.4f°, %.4f°".format(lat, lon) to "GPS coordinates"
+        } else if (cachedLocation?.point != null) {
+            "%.4f°, %.4f°".format(java.util.Locale.US, cachedLocation.point.latitude, cachedLocation.point.longitude) to "In-app map location"
         } else {
             "" to ""
         }
@@ -874,16 +882,19 @@ fun OverviewTabContent(
                     )
                     IconButton(
                         onClick = onAddTag,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("add_tag_manual_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = "Add tag",
+                            contentDescription = "Add tag manually",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
+
                 if (hasTags) {
                     Row(
                         modifier = Modifier
@@ -898,13 +909,34 @@ fun OverviewTabContent(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                             ) {
-                                Text(
-                                    text = tag,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Row(
+                                    modifier = Modifier.padding(
+                                        start = 12.dp,
+                                        end = if (onRemoveTag != null) 6.dp else 12.dp,
+                                        top = 6.dp,
+                                        bottom = 6.dp
+                                    ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = tag,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (onRemoveTag != null) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove $tag",
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .clickable { onRemoveTag(tag) }
+                                                .padding(2.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -913,15 +945,17 @@ fun OverviewTabContent(
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                        modifier = Modifier.clickable { onAddTag() }
+                        modifier = Modifier
+                            .clickable { onAddTag() }
+                            .testTag("empty_manual_add_tag_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(6.dp))
-                            Text("Add tag", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+                            Text("Add tag", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -1054,42 +1088,86 @@ fun OverviewTabContent(
                 }
                 if (hasLocation) {
                     DetailCard(onClick = onOpenMap) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                contentAlignment = Alignment.Center
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    Icons.Default.LocationOn,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = primaryLocation,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (secondaryLocation.isNotBlank()) {
-                                    Spacer(Modifier.height(2.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = secondaryLocation,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        text = primaryLocation,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (secondaryLocation.isNotBlank()) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = secondaryLocation,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            val prov = cachedLocation?.provenance
+                            if (prov != null) {
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                Spacer(Modifier.height(8.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    LocationProvenanceRow(
+                                        label = "Location Source",
+                                        value = when {
+                                            prov.source?.contains("exif", ignoreCase = true) == true -> "EXIF Metadata"
+                                            else -> prov.source ?: "Unknown source"
+                                        }
+                                    )
+                                    LocationProvenanceRow(
+                                        label = "Match Method",
+                                        value = when (prov.matchMethod?.lowercase()) {
+                                            "interpolated" -> "Interpolated path"
+                                            "staypoint" -> "Staypoint visit"
+                                            "nearest" -> "Nearest sample"
+                                            "existing_exif" -> "Existing EXIF"
+                                            else -> prov.matchMethod ?: "Matched"
+                                        }
+                                    )
+                                    if (prov.sampleGapMinutes != null && prov.sampleGapMinutes > 0.0) {
+                                        LocationProvenanceRow(
+                                            label = "Sample Gap",
+                                            value = "%.1f min".format(java.util.Locale.US, prov.sampleGapMinutes)
+                                        )
+                                    }
+                                    if (!prov.timestampSource.isNullOrBlank()) {
+                                        LocationProvenanceRow(
+                                            label = "Timestamp Source",
+                                            value = prov.timestampSource
+                                        )
+                                    }
+                                    LocationProvenanceRow(
+                                        label = "EXIF Status",
+                                        value = if (prov.exifWritten) "Saved to file EXIF" else "In-app map only (File untouched)"
                                     )
                                 }
                             }
@@ -1320,7 +1398,7 @@ fun OverviewFacePortrait(
  * Stylized cartoon avatar portrait matching reference screenshot.
  */
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ActionsTabContent(
     item: MediaItem,
@@ -1334,6 +1412,7 @@ fun ActionsTabContent(
     onAddTagClick: (() -> Unit)? = null,
     onRescanPhoto: (() -> Unit)? = null,
     onAddPersonClick: (() -> Unit)? = null,
+    onRemoveTag: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
@@ -1401,8 +1480,122 @@ fun ActionsTabContent(
             }
         }
 
-        // 3. OCR Section
-        item(key = "actions_ocr") {
+        // 2. Photo Tags Card (Images only)
+        if (!item.isVideo) {
+            item(key = "actions_tags") {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Label,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    Text(
+                                        text = "Photo Tags",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Organize photos with custom labels",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        // Existing tags if any
+                        if (customTags.isNotEmpty()) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                customTags.forEach { tag ->
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(start = 10.dp, end = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = tag,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (onRemoveTag != null) {
+                                                Spacer(Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = { onRemoveTag(tag) },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Remove tag $tag",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (onAddTagClick != null) {
+                            Button(
+                                onClick = onAddTagClick,
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 44.dp)
+                                    .testTag("action_add_tag_manual_button")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Add Tag")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. OCR Section (Images only)
+        if (!item.isVideo) {
+            item(key = "actions_ocr") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Plain Extract text heading without leading icon
                 Text(
@@ -1684,6 +1877,17 @@ fun ActionsTabContent(
             }
         }
     }
+
+    // 4. FFmpeg Video Tools (Videos only)
+        if (item.isVideo) {
+            item(key = "actions_video_ffmpeg") {
+                FfmpegVideoToolsSection(
+                    item = item,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -1840,3 +2044,335 @@ private fun buildMetadataRows(item: MediaItem, metadata: Map<String, String>): L
         value?.trim()?.takeIf { it.isNotEmpty() && it != "Not available" }?.let { label to it }
     }
 }
+
+/**
+ * FFmpeg Multimedia Tools section for videos in Viewer details actions tab.
+ */
+@Composable
+fun FfmpegVideoToolsSection(
+    item: MediaItem,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var isProbing by remember { mutableStateOf(false) }
+    var mediaInfo by remember { mutableStateOf<FfprobeMediaInfo?>(null) }
+    var probeAttempted by remember { mutableStateOf(false) }
+
+    var isExtractingAudio by remember { mutableStateOf(false) }
+    var audioSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var isCompressing by remember { mutableStateOf(false) }
+    var compressSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var isExtractingFrame by remember { mutableStateOf(false) }
+    var frameSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    // Auto-probe media info once on mount
+    LaunchedEffect(item.uri) {
+        if (!probeAttempted) {
+            probeAttempted = true
+            isProbing = true
+            coroutineScope.launch {
+                val probed = FfmpegKitEngine.probeMedia(item.uri, context)
+                mediaInfo = probed
+                isProbing = false
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Section Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MovieFilter,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "FFmpeg Video Tools",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            ) {
+                Text(
+                    text = "FFmpegKit",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // FFprobe Media Stream Inspector Card
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Stream Details (FFprobe)",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isProbing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                if (mediaInfo != null) {
+                    val info = mediaInfo!!
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Container Format", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(info.format.take(24), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        }
+                        info.videoCodec?.let { codec ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Video Codec", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(codec + (info.resolution?.let { " ($it)" } ?: ""), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        info.audioCodec?.let { codec ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Audio Codec", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val channelsStr = if (info.audioChannels != null) " · ${info.audioChannels}ch" else ""
+                                val rateStr = if (info.sampleRateHz != null) " · ${info.sampleRateHz}Hz" else ""
+                                Text("$codec$channelsStr$rateStr", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (info.bitrateKbps > 0) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Bitrate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${info.bitrateKbps} kbps", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                } else if (!isProbing) {
+                    Text(
+                        text = "Native FFmpeg probe ready. Tap actions below to process.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Action Buttons Row
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 1. Extract Audio
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isExtractingAudio = true
+                    audioSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val res = FfmpegKitEngine.extractAudio(file, outputFormat = "mp3", context = context)
+                            if (res.isSuccess && res.outputFile != null) {
+                                audioSuccessMsg = "Saved: ${res.outputFile.name}"
+                            } else {
+                                errorMsg = "Audio extraction failed (Code ${res.returnCode})"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isExtractingAudio = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isExtractingAudio) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extracting MP3 Audio...")
+                } else {
+                    Icon(Icons.Default.Audiotrack, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extract Audio Track (MP3)")
+                }
+            }
+
+            // 2. Compress Video
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isCompressing = true
+                    compressSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val res = FfmpegKitEngine.compressVideo(file, targetHeight = 720, crf = 26, context = context)
+                            if (res.isSuccess && res.outputFile != null) {
+                                compressSuccessMsg = "Saved: ${res.outputFile.name} (${res.outputFile.length() / 1024} KB)"
+                            } else {
+                                errorMsg = "Video compression failed (Code ${res.returnCode})"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isCompressing = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isCompressing) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compressing (720p H.264)...")
+                } else {
+                    Icon(Icons.Default.VideoSettings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compress Video (720p H.264)")
+                }
+            }
+
+            // 3. Save Poster Frame
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isExtractingFrame = true
+                    frameSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val thumb = FfmpegKitEngine.extractThumbnail(file, positionSec = 1.0, context = context)
+                            if (thumb != null && thumb.exists()) {
+                                frameSuccessMsg = "Saved poster: ${thumb.name}"
+                            } else {
+                                errorMsg = "Frame extraction failed"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isExtractingFrame = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isExtractingFrame) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extracting Poster Frame...")
+                } else {
+                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save Video Poster Frame (JPEG)")
+                }
+            }
+        }
+
+        // Status messages
+        audioSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        compressSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        frameSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        errorMsg?.let { err ->
+            Text(
+                text = "✕ $err",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocationProvenanceRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+

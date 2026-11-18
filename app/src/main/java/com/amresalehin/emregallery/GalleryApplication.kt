@@ -2,17 +2,15 @@ package com.amresalehin.emregallery
 
 import android.app.Application
 import android.content.Context
-import android.os.Build
 import coil.Coil
 import coil.ImageLoader
-import coil.decode.GifDecoder
-import coil.decode.ImageDecoderDecoder
 import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 class GalleryApplication : Application() {
@@ -22,13 +20,11 @@ class GalleryApplication : Application() {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRam = activityManager?.isLowRamDevice ?: false
 
-        // Unconstrained memory caching: Allocate up to 45% (30% on low-RAM) of JVM heap to Coil.
-        // With largeHeap enabled, this unlocks hundreds of megabytes for raw pre-decoded bitmaps,
-        // avoiding recurring decompression bottlenecks during 120Hz continuous scrolling.
-        val cachePercent = if (isLowRam) 0.30 else 0.45
+        // Balanced memory caching: Allocate up to 20% (15% on low-RAM) of JVM heap to Coil,
+        // allowing the WebView process and native Chromium buffers ample memory headroom.
+        val cachePercent = if (isLowRam) 0.15 else 0.20
 
-        // Unconstrained concurrency: Utilize full Dispatchers without artificial core-capping
-        // so that multi-core processors decode thumbnails at maximum throughput.
+        // Utilize background dispatchers for decoding
         val imageIoDispatcher = Dispatchers.IO
         val imageComputeDispatcher = Dispatchers.Default
 
@@ -39,7 +35,7 @@ class GalleryApplication : Application() {
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(cachePercent)
-                    .strongReferencesEnabled(true)
+                    .strongReferencesEnabled(false) // Allows garbage collector to reclaim cache during high RAM pressure
                     .build()
             }
             .diskCache {
@@ -50,11 +46,6 @@ class GalleryApplication : Application() {
             }
             .components {
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
-                if (Build.VERSION.SDK_INT >= 28) {
-                    add(ImageDecoderDecoder.Factory())
-                } else {
-                    add(GifDecoder.Factory())
-                }
                 add(VideoFrameDecoder.Factory())
             }
             .bitmapConfig(if (isLowRam) android.graphics.Bitmap.Config.RGB_565 else android.graphics.Bitmap.Config.ARGB_8888)
@@ -70,33 +61,53 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
+        com.amresalehin.emregallery.data.DiscoveryFilterManager.init(this)
 
-        // Initialize Chaquopy Python SDK and gallery-dl media engine
-        com.amresalehin.emregallery.data.GalleryDlEngine.init(this)
+        // Initialize Chaquopy Python SDK and gallery-dl media engine asynchronously in the background.
+        // Running this off the UI thread eliminates the 2-4s main thread blockage on cold start,
+        // allowing activities to launch instantly.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            com.amresalehin.emregallery.data.GalleryDlEngine.init(this@GalleryApplication)
+        }
 
-        // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
-        com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
+        // Initialize DownloadActivityManager in background to avoid synchronous disk I/O on UI thread
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
+        }
 
-        // Pre-warm Chromium WebView engine on cold start so automatic scraping
-        // never stalls waiting for cold browser initialization
+        // Defer chromium cookie initialization so it never stalls cold start
         warmupChromium(this)
     }
 
     companion object {
+        @Volatile
+        private var isChromiumWarmedUp = false
+
         fun warmupChromium(context: Context) {
+            if (isChromiumWarmedUp) return
             runCatching {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    try {
-                        val cm = android.webkit.CookieManager.getInstance()
-                        cm.setAcceptCookie(true)
-                        val warmupWv = android.webkit.WebView(context)
-                        cm.setAcceptThirdPartyCookies(warmupWv, true)
-                        warmupWv.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                handler.post {
+                    if (isChromiumWarmedUp) return@post
+                    val doWarmup = {
+                        if (!isChromiumWarmedUp) {
+                            try {
+                                val cm = android.webkit.CookieManager.getInstance()
+                                cm.setAcceptCookie(true)
+                                cm.flush()
+                                isChromiumWarmedUp = true
+                            } catch (_: Throwable) {}
                         }
-                        warmupWv.destroy()
-                    } catch (_: Throwable) {}
+                    }
+                    runCatching {
+                        android.os.Looper.myQueue().addIdleHandler {
+                            doWarmup()
+                            false
+                        }
+                    }
+                    handler.postDelayed({
+                        doWarmup()
+                    }, 1200L)
                 }
             }
         }
@@ -112,11 +123,12 @@ class GalleryApplication : Application() {
         runCatching {
             val coilCache = Coil.imageLoader(this).memoryCache
             when {
-                level >= TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_COMPLETE -> {
+                level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_COMPLETE || com.amresalehin.emregallery.data.RamGovernor.isHeapLimitExceeded() -> {
                     coilCache?.clear()
                     com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
+                    System.gc()
                 }
-                level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_BACKGROUND -> {
+                level >= TRIM_MEMORY_RUNNING_MODERATE || level >= TRIM_MEMORY_BACKGROUND -> {
                     coilCache?.trimMemory(level)
                     com.amresalehin.emregallery.face.FaceThumbnailHelper.trimMemory(level)
                 }
@@ -132,3 +144,4 @@ class GalleryApplication : Application() {
         }
     }
 }
+

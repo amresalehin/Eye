@@ -13,15 +13,19 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.media.MediaScannerConnection
+import android.net.Uri
 import org.json.JSONObject
 import java.io.File
+import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
+import com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo
 import kotlin.math.abs
 
 /**
  * Persistent background downloader worker powered by Android Jetpack WorkManager.
  * Runs as a foreground service with a unique notification ID to ensure uninterrupted downloading.
  * Incorporates byte-level progress reporting, HTTP Range resumable downloading, headers/cookies propagation,
- * and social video remuxing with yt-dlp and AndroidMediaMuxer.
+ * and social video remuxing with yt-dlp.
  */
 class MediaDownloadWorker(
     appContext: Context,
@@ -104,13 +108,7 @@ class MediaDownloadWorker(
         }.getOrDefault(emptyMap())
 
         val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
-            ?: OkHttpDownloader.sharedCookieJar.getCookieString(sourceUrl).takeIf { it.isNotBlank() }
             ?: downloadHeaders["Cookie"]
-        val resolvedSubfolder = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
-            context = applicationContext,
-            sourceDomain = sourceDomain,
-            stackTitle = stackTitle
-        )
 
         try {
             setForeground(getForegroundInfo())
@@ -120,119 +118,120 @@ class MediaDownloadWorker(
 
         setProgress(workDataOf(KEY_PROGRESS to 0.05f, KEY_STATUS to "Initializing download for $title..."))
 
-        fun reportLiveProgress(bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) {
-            val pct = if (totalBytes > 0) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0.05f, 0.99f) else 0.5f
-            DownloadActivityManager.updateProgress(itemId, pct, bytesRead, totalBytes, speedBytesPerSec)
-            setProgressAsync(
-                workDataOf(
-                    KEY_PROGRESS to pct,
-                    KEY_BYTES_READ to bytesRead,
-                    KEY_TOTAL_BYTES to totalBytes,
-                    KEY_STATUS to "Downloading $title (${bytesRead / 1024} KB)"
-                )
-            )
-        }
-
         try {
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            val socialHosts = listOf(
-                "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am", "vimeo.com",
-                "twitter.com", "x.com", "reddit.com", "redd.it", "v.redd.it", "facebook.com", "fb.watch",
-                "pinterest.com", "pin.it", "v1.pinimg.com"
-            )
-            val isSocialUrl = socialHosts.any { host ->
-                mediaUrl.contains(host, ignoreCase = true) ||
-                    (isVideo && sourceUrl.contains(host, ignoreCase = true))
-            }
-            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine.contains("yt-dlp", ignoreCase = true) || isSocialUrl || isStreamingMedia
+            setProgress(workDataOf(KEY_PROGRESS to 0.15f, KEY_STATUS to "Downloading $title..."))
+            DownloadActivityManager.updateProgress(itemId, 0.15f, 0L, 0L, 0L)
 
-            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp + AndroidMediaMuxer)
-            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.1f, KEY_STATUS to "Downloading stream/video: $title..."))
-                downloadedFile = GalleryDlEngine.downloadMedia(
+            val isDirectHttpAsset = isVideo.not() && isStream.not() && (
+                    mediaUrl.startsWith("http://", ignoreCase = true) ||
+                    mediaUrl.startsWith("https://", ignoreCase = true) ||
+                    mediaUrl.startsWith("data:image/", ignoreCase = true)
+            ) && (
+                sourceEngine.contains("HTML", ignoreCase = true) ||
+                sourceEngine.contains("DOM", ignoreCase = true) ||
+                sourceEngine.contains("Network", ignoreCase = true) ||
+                sourceEngine.contains("Srcset", ignoreCase = true) ||
+                sourceEngine.contains("Direct", ignoreCase = true) ||
+                mediaUrl.contains(".jpg", ignoreCase = true) ||
+                mediaUrl.contains(".png", ignoreCase = true) ||
+                mediaUrl.contains(".webp", ignoreCase = true) ||
+                mediaUrl.contains(".gif", ignoreCase = true) ||
+                mediaUrl.contains(".svg", ignoreCase = true) ||
+                mediaUrl.contains(".mp3", ignoreCase = true) ||
+                mediaUrl.contains(".m4a", ignoreCase = true) ||
+                mediaUrl.contains(".wav", ignoreCase = true) ||
+                mediaUrl.contains(".flac", ignoreCase = true) ||
+                (mediaUrl.contains(".mp4", ignoreCase = true) && !sourceUrl.contains("youtube.com", ignoreCase = true) && !sourceUrl.contains("youtu.be", ignoreCase = true))
+            )
+
+            val isYouTubeSource = sourceUrl.contains("youtube.com", ignoreCase = true) ||
+                sourceUrl.contains("youtu.be", ignoreCase = true)
+            val isRedditSource = sourceUrl.contains("reddit.com", ignoreCase = true) ||
+                sourceUrl.contains("redd.it", ignoreCase = true) ||
+                mediaUrl.contains("v.redd.it", ignoreCase = true)
+            val targetUrl = if (isYouTubeSource || shouldUseOriginPageForVideo(
+                    mediaUrl = mediaUrl,
+                    sourceUrl = sourceUrl,
+                    isVideo = isVideo,
+                    isStream = isStream
+                )
+            ) sourceUrl else mediaUrl
+
+            val mediaMode = resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
+            // Reddit/YouTube often expose separate audio and video representations.
+            val requireAudioTrack = isVideo && (isYouTubeSource || isRedditSource)
+
+            val effectiveDomain = sourceDomain.takeIf { it.isNotBlank() }
+                ?: OkHttpDownloader.extractDomain(sourceUrl.ifBlank { mediaUrl })
+
+            // Strategy 1: Direct HTTP media via OkHttp (fast path, byte-level ranges, resumable)
+            if (isDirectHttpAsset) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.25f, KEY_STATUS to "Downloading via OkHttp: $title..."))
+                val okResult = OkHttpDownloader.downloadMediaFileDetailed(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
                     referer = referer ?: sourceUrl,
                     downloadId = itemId,
                     headers = downloadHeaders,
-                    cookies = cookieString,
-                    subfolder = resolvedSubfolder,
-                    onProgress = { bytesRead, totalBytes, speed ->
-                        reportLiveProgress(bytesRead, totalBytes, speed)
+                    domain = effectiveDomain,
+                    onProgress = { bytesRead, totalBytes ->
+                        val ratio = if (totalBytes > 0L) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0.1f, 0.95f) else 0.5f
+                        DownloadActivityManager.updateProgress(itemId, ratio, bytesRead, totalBytes, 0L)
                     }
                 )
+                if (okResult.isSuccessful && okResult.file != null && okResult.file.exists() && okResult.file.length() > 0L) {
+                    downloadedFile = okResult.file
+                }
             }
 
-            // 2. Standard or fallback download via OkHttp with HTTP Range resumability
-            var okHttpResult: OkHttpDownloader.DownloadResult? = null
-            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
-                var lastProgressUpdate = System.currentTimeMillis()
-                var lastBytes = 0L
-                val result = OkHttpDownloader.downloadMediaFileDetailed(
+            // Strategy 2: Originating extractor (yt-dlp or gallery-dl) when required or as fallback
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && GalleryDlEngine.isAvailable()) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.35f, KEY_STATUS to "Downloading via extractor engine: $title..."))
+                downloadedFile = GalleryDlEngine.downloadMedia(
+                    context = applicationContext,
+                    mediaUrl = targetUrl,
+                    fileName = fileName,
+                    referer = referer ?: sourceUrl,
+                    headers = downloadHeaders,
+                    cookies = cookieString,
+                    domain = effectiveDomain,
+                    mediaMode = mediaMode
+                )
+                // If targetUrl != mediaUrl and extractor returned null, retry with mediaUrl directly
+                if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && targetUrl != mediaUrl) {
+                    downloadedFile = GalleryDlEngine.downloadMedia(
+                        context = applicationContext,
+                        mediaUrl = mediaUrl,
+                        fileName = fileName,
+                        referer = referer ?: sourceUrl,
+                        headers = downloadHeaders,
+                        cookies = cookieString,
+                        domain = effectiveDomain,
+                        mediaMode = mediaMode
+                    )
+                }
+            }
+
+            // Strategy 3: Final fallback to OkHttp for any URL that specialized extractors couldn't capture
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && !isDirectHttpAsset) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.5f, KEY_STATUS to "Trying direct download fallback: $title..."))
+                val fallbackResult = OkHttpDownloader.downloadMediaFileDetailed(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
-                    referer = referer,
+                    referer = referer ?: sourceUrl,
                     downloadId = itemId,
                     headers = downloadHeaders,
-                    subfolder = resolvedSubfolder,
-                    onProgress = { bytesRead, totalBytes ->
-                        val now = System.currentTimeMillis()
-                        if (now - lastProgressUpdate > 250) {
-                            val dt = (now - lastProgressUpdate) / 1000.0
-                            val db = bytesRead - lastBytes
-                            val speed = if (dt > 0) (db / dt).toLong() else 0L
-                            lastBytes = bytesRead
-                            lastProgressUpdate = now
-                            reportLiveProgress(bytesRead, totalBytes, speed)
-                        }
-                    }
+                    domain = effectiveDomain
                 )
-                okHttpResult = result
-
-                if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
-                    downloadedFile = if (isVideo || mediaUrl.contains("v.redd.it/", ignoreCase = true)) {
-                        GalleryDlEngine.ensureRedditAudioMuxed(
-                            context = applicationContext,
-                            videoFile = result.file,
-                            mediaUrl = mediaUrl,
-                            referer = referer ?: sourceUrl,
-                            headers = downloadHeaders
-                        )
-                    } else {
-                        result.file
-                    }
-                } else {
-                    errorDiagnostic = result.errorMessage
-                    val isRateLimited = result.statusCode == 429
-                    val isInvalidContent = result.errorMessage?.let { msg ->
-                        msg.contains("webpage", ignoreCase = true) ||
-                        msg.contains("HTML", ignoreCase = true) ||
-                        msg.contains("JSON error", ignoreCase = true) ||
-                        msg.contains("corrupt or invalid raster", ignoreCase = true)
-                    } ?: false
-
-                    // 3. Fallback to Python runner only if OkHttp download failed and NOT 429 rate limit and NOT an invalid non-media response
-                    if (!isRateLimited && !isInvalidContent && GalleryDlEngine.isAvailable()) {
-                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
-                        downloadedFile = GalleryDlEngine.downloadMedia(
-                            context = applicationContext,
-                            mediaUrl = mediaUrl,
-                            fileName = fileName,
-                            referer = referer ?: sourceUrl,
-                            downloadId = itemId,
-                            headers = downloadHeaders,
-                            cookies = cookieString,
-                            subfolder = resolvedSubfolder,
-                            onProgress = { bytesRead, totalBytes, speed ->
-                                reportLiveProgress(bytesRead, totalBytes, speed)
-                            }
-                        )
-                    }
+                if (fallbackResult.isSuccessful && fallbackResult.file != null && fallbackResult.file.exists() && fallbackResult.file.length() > 0L) {
+                    downloadedFile = fallbackResult.file
+                } else if (errorDiagnostic == null) {
+                    errorDiagnostic = fallbackResult.errorMessage
                 }
             }
 
@@ -241,40 +240,55 @@ class MediaDownloadWorker(
                 return@withContext Result.failure()
             }
 
+            // A non-empty file is not necessarily playable media. Probe every video/audio
+            // output and reject missing tracks before it can be marked FINISHED.
+            val candidateFile = downloadedFile
+            if (candidateFile != null && candidateFile.exists() && candidateFile.length() > 0L &&
+                (isVideo || isAudio || isStream)
+            ) {
+                val mediaInfo = FfmpegKitEngine.probeMedia(candidateFile.absolutePath, context = applicationContext)
+                val validationError = validateMediaStreams(
+                    isVideo = isVideo,
+                    isAudio = isAudio,
+                    isStream = isStream,
+                    requireAudioWithVideo = requireAudioTrack,
+                    mediaInfo = mediaInfo
+                )
+                if (validationError != null) {
+                    errorDiagnostic = validationError
+                    runCatching { candidateFile.delete() }
+                    downloadedFile = null
+                }
+            }
+
             if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
                 setProgress(workDataOf(KEY_PROGRESS to 1.0f, KEY_STATUS to "Saved successfully"))
 
-                val localClass = MediaClassifier.resolveLocalMediaMimeType(downloadedFile.name)
-                val finalIsAudio = isAudio || localClass.isAudio
-                val finalIsVideo = !finalIsAudio && (isVideo || localClass.isVideo)
-                val finalFormat = if (finalIsAudio) localClass.format else format.ifBlank { localClass.format }
-
-                val inboxItem = MediaInboxItem(
-                    id = itemId,
-                    title = title,
-                    localUri = downloadedFile.absolutePath,
-                    sourceUrl = mediaUrl,
-                    isVideo = finalIsVideo,
-                    isAudio = finalIsAudio,
-                    isStream = isStream,
-                    format = finalFormat,
-                    sizeBytes = downloadedFile.length(),
-                    dateAddedMillis = System.currentTimeMillis()
-                )
-
-                MediaInboxRepository.getInstance(applicationContext).addItemToStack(
-                    stackId = stackId,
-                    item = inboxItem,
-                    stackTitle = stackTitle,
-                    sourceDomain = sourceDomain,
-                    sourceUrl = sourceUrl
-                )
+                val fileUri = Uri.fromFile(downloadedFile).toString()
+                runCatching {
+                    MediaScannerConnection.scanFile(
+                        applicationContext,
+                        arrayOf(downloadedFile.absolutePath),
+                        arrayOf(if (isVideo) "video/*" else if (isAudio) "audio/*" else "image/*"),
+                        null
+                    )
+                }
 
                 DownloadActivityManager.markFinished(
                     itemId = itemId,
-                    localUri = downloadedFile.absolutePath,
+                    localUri = fileUri,
                     sizeBytes = downloadedFile.length()
                 )
+
+                // One canonical downloaded asset may be referenced by multiple Pocket bookmarks.
+                runCatching {
+                    PocketRepository.getInstance(applicationContext).updateDownloadedMedia(
+                        mediaUrl = mediaUrl,
+                        itemId = itemId,
+                        localUri = fileUri,
+                        sizeBytes = downloadedFile.length()
+                    )
+                }
 
                 Result.success(
                     workDataOf(
@@ -284,10 +298,7 @@ class MediaDownloadWorker(
                     )
                 )
             } else {
-                val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
-                val statusCode = okHttpResult?.statusCode ?: -1
-                val retryAfter = okHttpResult?.retryAfterSeconds
-
+                val finalError = errorDiagnostic ?: "Download failed via yt-dlp and gallery-dl for $mediaUrl"
                 val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
                 val isPausedOrCancelled = isStopped ||
                     currentItem?.status == DownloadActivityStatus.PAUSED ||
@@ -297,9 +308,9 @@ class MediaDownloadWorker(
                     DownloadActivityManager.handleDownloadFailure(
                         context = applicationContext,
                         itemId = itemId,
-                        statusCode = statusCode,
+                        statusCode = -1,
                         errorMessage = finalError,
-                        retryAfterSeconds = retryAfter
+                        retryAfterSeconds = null
                     )
                 }
                 Result.failure(workDataOf(KEY_ERROR to finalError))
@@ -324,11 +335,64 @@ class MediaDownloadWorker(
             }
             Result.failure(workDataOf(KEY_ERROR to err))
         } finally {
-            DownloadQueueManager.markDownloadCompleted(itemId)
+            DownloadQueueManager.markDownloadCompleted(itemId = itemId, workId = id)
         }
     }
 
     companion object {
+        internal fun shouldUseOriginPageForVideo(
+            mediaUrl: String,
+            sourceUrl: String,
+            isVideo: Boolean,
+            isStream: Boolean
+        ): Boolean {
+            val origin = sourceUrl.trim()
+            return (isVideo || isStream) &&
+                origin.isNotBlank() &&
+                !origin.equals(mediaUrl.trim(), ignoreCase = true) &&
+                (origin.startsWith("http://", ignoreCase = true) ||
+                    origin.startsWith("https://", ignoreCase = true))
+        }
+
+        internal fun resolveMediaMode(isVideo: Boolean, isAudio: Boolean, isStream: Boolean): String {
+            return when {
+                isAudio && !isVideo -> "audio"
+                isStream -> "best"
+                isVideo -> "video"
+                else -> "best"
+            }
+        }
+
+        internal fun validateMediaStreams(
+            isVideo: Boolean,
+            isAudio: Boolean,
+            isStream: Boolean,
+            requireAudioWithVideo: Boolean,
+            mediaInfo: FfprobeMediaInfo?
+        ): String? {
+            if (!isVideo && !isAudio && !isStream) return null
+            val info = mediaInfo ?: return "Downloaded media could not be inspected by FFprobe"
+            val hasVideo = !info.videoCodec.isNullOrBlank()
+            val hasAudio = !info.audioCodec.isNullOrBlank()
+
+            // HLS/DASH is a container/transport category, not proof that the stream
+            // contains video. An audio-only playlist is still a valid stream download.
+            if (isVideo && !isStream && !hasVideo) {
+                return "Downloaded file does not contain a valid video track"
+            }
+            if (isAudio && !hasAudio) return "Downloaded file does not contain a valid audio track"
+            if (isVideo && isAudio && (!hasVideo || !hasAudio)) {
+                return "Downloaded file is missing the requested audio or video track"
+            }
+            if (isVideo && requireAudioWithVideo && !hasAudio) {
+                return "Video download is missing its expected audio track"
+            }
+            if (isStream && !hasVideo && !hasAudio) {
+                return "Downloaded stream contains neither a valid video nor audio track"
+            }
+            return null
+        }
+
         const val TAG = "MediaDownloadWorker"
         const val WORK_TAG_DOWNLOAD = "media_download"
 

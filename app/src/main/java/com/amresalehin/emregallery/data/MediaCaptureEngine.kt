@@ -63,7 +63,8 @@ object MediaCaptureEngine {
                     var img = images[i];
                     if (isChromeElement(img)) continue;
 
-                    var candidateUrls = [];
+                    var w = img.naturalWidth || img.width || 0;
+                    var h = img.naturalHeight || img.height || 0;
 
                     // Extract srcset highest resolution candidates
                     var srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
@@ -78,7 +79,7 @@ object MediaCaptureEngine {
                                 if (u && u.indexOf('data:') !== 0) {
                                     var absSrcset = resolveAbs(u);
                                     if (absSrcset) {
-                                        list.push({u: absSrcset, s: 'SRCSET', r: descriptor});
+                                        list.push({u: absSrcset, s: 'SRCSET', r: descriptor, w: w, h: h});
                                     }
                                 }
                             }
@@ -93,11 +94,11 @@ object MediaCaptureEngine {
 
                     if (dataSrc && dataSrc.indexOf('data:') !== 0) {
                         var absData = resolveAbs(dataSrc);
-                        if (absData) candidateUrls.push({u: absData, s: 'DATA_SRC'});
+                        if (absData) candidateUrls.push({u: absData, s: 'DATA_SRC', w: w, h: h});
                     }
                     if (rawSrc && rawSrc.indexOf('data:') !== 0) {
                         var absRaw = resolveAbs(rawSrc);
-                        if (absRaw) candidateUrls.push({u: absRaw, s: 'DOM'});
+                        if (absRaw) candidateUrls.push({u: absRaw, s: 'DOM', w: w, h: h});
                     }
 
                     for (var c = 0; c < candidateUrls.length; c++) {
@@ -105,13 +106,13 @@ object MediaCaptureEngine {
                     }
                 }
 
-                // 2. Video Elements, Reddit shreddit-player & Sources
-                var ogImgMeta = document.querySelector('meta[property="og:image"], meta[name="twitter:image"]');
-                var ogFallbackPoster = ogImgMeta ? resolveAbs(ogImgMeta.getAttribute('content')) : null;
+                // 2. Video Elements & Sources
                 var videos = document.querySelectorAll('video');
                 for (var v = 0; v < videos.length; v++) {
                     var vid = videos[v];
-                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster) || ogFallbackPoster;
+                    var vw = vid.videoWidth || vid.clientWidth || 0;
+                    var vh = vid.videoHeight || vid.clientHeight || 0;
+                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster);
                     var chosenVideo = null;
                     if (vid.src && !vid.src.startsWith('blob:') && !vid.src.startsWith('data:')) {
                         chosenVideo = resolveAbs(vid.src);
@@ -126,28 +127,9 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenVideo) {
-                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video'});
+                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video', w: vw, h: vh});
                     } else if (poster) {
                         list.push({u: poster, s: 'POSTER', r: 'poster'});
-                    }
-                }
-
-                var shredditPlayers = document.querySelectorAll('shreddit-player, [packaged-media-json]');
-                for (var sp = 0; sp < shredditPlayers.length; sp++) {
-                    var playerEl = shredditPlayers[sp];
-                    var spPoster = resolveAbs(playerEl.getAttribute('preview') || playerEl.getAttribute('poster')) || ogFallbackPoster;
-                    var spSrc = playerEl.getAttribute('src');
-                    if (spSrc && !spSrc.startsWith('blob:')) {
-                        var absSp = resolveAbs(spSrc);
-                        if (absSp) list.push({u: absSp, s: 'DOM', p: spPoster, r: 'video'});
-                    }
-                    var pkg = playerEl.getAttribute('packaged-media-json');
-                    if (pkg) {
-                        var mp4Regex = /https:\/\/[^"'\s\\]+\.mp4(?:\?[^"'\s\\]*)?/g;
-                        var m;
-                        while ((m = mp4Regex.exec(pkg)) !== null) {
-                            list.push({u: m[0].replace(/&amp;/g, '&'), s: 'DOM', p: spPoster, r: 'video'});
-                        }
                     }
                 }
 
@@ -237,11 +219,18 @@ object MediaCaptureEngine {
             (function() {
                 if (window.__emreObserverInstalled) return;
                 window.__emreObserverInstalled = true;
+                var reportedUrls = new Set();
+                var pendingNodes = [];
+                var scheduleTimeout = null;
 
                 function report(u) {
                     if (!u || u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return;
+                    if (reportedUrls.has(u)) return;
+                    reportedUrls.add(u);
                     try {
                         var abs = new URL(u, document.baseURI || window.location.href).href;
+                        if (reportedUrls.has(abs)) return;
+                        reportedUrls.add(abs);
                         if (window.EmreBridge && window.EmreBridge.reportMedia) {
                             window.EmreBridge.reportMedia(abs);
                         }
@@ -309,16 +298,35 @@ object MediaCaptureEngine {
                     }
                 }
 
+                function processBatch() {
+                    scheduleTimeout = null;
+                    if (pendingNodes.length === 0) return;
+                    var batch = pendingNodes.splice(0, 20);
+                    if (pendingNodes.length > 50) {
+                        pendingNodes.length = 0;
+                    }
+                    for (var i = 0; i < batch.length; i++) {
+                        checkNode(batch[i]);
+                    }
+                }
+
                 var observer = new MutationObserver(function(mutations) {
                     for (var m = 0; m < mutations.length; m++) {
                         var mut = mutations[m];
                         if (mut.type === 'childList') {
                             for (var i = 0; i < mut.addedNodes.length; i++) {
-                                checkNode(mut.addedNodes[i]);
+                                if (pendingNodes.length < 50) {
+                                    pendingNodes.push(mut.addedNodes[i]);
+                                }
                             }
                         } else if (mut.type === 'attributes') {
-                            checkNode(mut.target);
+                            if (pendingNodes.length < 50) {
+                                pendingNodes.push(mut.target);
+                            }
                         }
+                    }
+                    if (!scheduleTimeout) {
+                        scheduleTimeout = setTimeout(processBatch, 600);
                     }
                 });
 
@@ -333,8 +341,7 @@ object MediaCaptureEngine {
     }
 
     /**
-     * Shared JavaScript adaptive scrolling script using `behavior: 'instant'` to avoid
-     * 500ms smooth-scroll animation overhead during automated background scraping.
+     * Shared JavaScript adaptive scrolling script.
      */
     fun getAdaptiveScrollScript(): String {
         return """
@@ -345,8 +352,24 @@ object MediaCaptureEngine {
                 var scrollHeight = doc.scrollHeight || 0;
                 var remaining = scrollHeight - (scrollY + innerHeight);
 
+                // Prune heavy media buffers in off-screen elements to prevent Chromium renderer OOM
+                var mediaEls = document.querySelectorAll('video, audio');
+                for (var i = 0; i < mediaEls.length; i++) {
+                    var m = mediaEls[i];
+                    if (!m.paused) { m.pause(); }
+                    m.preload = 'none';
+                    var rect = m.getBoundingClientRect();
+                    if (rect.bottom < -1500) {
+                        if (m.src && !m.dataset.prunedSrc) {
+                            m.dataset.prunedSrc = m.src;
+                            m.removeAttribute('src');
+                            m.load();
+                        }
+                    }
+                }
+
                 var scrollDelta = Math.max(innerHeight * 0.85, 400);
-                window.scrollBy({ top: scrollDelta, behavior: 'instant' });
+                window.scrollBy({ top: scrollDelta, behavior: 'smooth' });
                 window.dispatchEvent(new Event('scroll'));
 
                 return JSON.stringify({
@@ -357,6 +380,16 @@ object MediaCaptureEngine {
             })();
         """.trimIndent()
     }
+
+    private val seenInterceptUrls = java.util.Collections.synchronizedSet(
+        java.util.Collections.newSetFromMap(
+            object : java.util.LinkedHashMap<String, Boolean>(256, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                    return size > 500
+                }
+            }
+        )
+    )
 
     /**
      * Builds and validates a ScrapedMediaItem with provenance, clean titles,
@@ -369,9 +402,15 @@ object MediaCaptureEngine {
         poster: String? = null,
         resolutionHint: String? = null,
         mimeHint: String? = null,
-        indexHint: Int = 0
+        indexHint: Int = 0,
+        titleHint: String? = null,
+        domSelector: String? = null,
+        declaredWidth: Int? = null,
+        declaredHeight: Int? = null,
+        customId: String? = null,
+        customCookie: String? = null
     ): ScrapedMediaItem? {
-        val trimmed = MediaClassifier.cleanMediaUrl(rawUrl.trim())
+        val trimmed = rawUrl.trim()
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
         if (trimmed.startsWith("data:", ignoreCase = true) && !MediaClassifier.isSubstantialDataUri(trimmed)) return null
         if (MediaClassifier.isMediaFragment(trimmed)) return null
@@ -387,11 +426,15 @@ object MediaCaptureEngine {
 
         val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
         val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
-        val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
+        val title = resolvedInfo.cleanTitle
+            ?: titleHint?.takeIf { it.isNotBlank() }
+            ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
 
         if (ContentAwareMediaFilter.isUiChromeUrl(
                 url = cleanedUrl,
                 title = title,
+                width = declaredWidth,
+                height = declaredHeight,
                 isVideoOrAudioOrStream = isVidAudStream
             )
         ) {
@@ -403,7 +446,9 @@ object MediaCaptureEngine {
         val headers = mutableMapOf<String, String>()
         headers["Referer"] = baseUrl
         headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
-        val cookieStr = OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
+        val cookieStr = customCookie ?: if (source != ExtractionSource.NETWORK_INTERCEPT) {
+            OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
+        } else ""
         if (cookieStr.isNotBlank()) {
             headers["Cookie"] = cookieStr
         }
@@ -413,8 +458,20 @@ object MediaCaptureEngine {
         mimeHint?.let { metadataMap["mime_hint"] = it }
         metadataMap["source_url"] = baseUrl
 
+        val engineLabel = when (source) {
+            ExtractionSource.STATIC_HTML -> "Static HTML"
+            ExtractionSource.NETWORK_INTERCEPT -> "Browser Chromium (Network Intercept)"
+            ExtractionSource.DOM_SCRAPE -> "Static HTML (DOM Scrape)"
+            ExtractionSource.SRCSET -> "Static HTML (Srcset)"
+            ExtractionSource.CSS_BACKGROUND -> "Static HTML (CSS Background)"
+            ExtractionSource.IFRAME -> "Static HTML (iFrame)"
+            ExtractionSource.GALLERY_DL -> "gallery-dl"
+        }
+
+        val itemId = customId ?: "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}"
+
         return ScrapedMediaItem(
-            id = "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}",
+            id = itemId,
             url = cleanedUrl,
             title = title,
             isVideo = classification.isVideo,
@@ -427,13 +484,45 @@ object MediaCaptureEngine {
             mimeType = classification.mimeType,
             resolutionHint = resolutionHint,
             provenance = MediaProvenance(
-                extractorEngine = "MediaCaptureEngine (${source.label})",
+                extractorEngine = engineLabel,
                 pageUrl = baseUrl,
-                domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
+                domSelector = domSelector ?: if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
             ),
             metadata = metadataMap,
-            downloadHeaders = headers
+            downloadHeaders = headers,
+            width = declaredWidth ?: extractDimension(resolutionHint, "", true),
+            height = declaredHeight ?: extractDimension(resolutionHint, "", false)
         )
+    }
+
+    /**
+     * Extracts width or height from resolution hints or URL dimension patterns.
+     */
+    fun extractDimension(resolutionHint: String?, url: String, isWidth: Boolean): Int? {
+        if (!resolutionHint.isNullOrBlank()) {
+            val dimMatch = "(\\d{2,5})\\s*[xX×]\\s*(\\d{2,5})".toRegex().find(resolutionHint)
+            if (dimMatch != null) {
+                return if (isWidth) dimMatch.groupValues[1].toIntOrNull() else dimMatch.groupValues[2].toIntOrNull()
+            }
+            if (isWidth) {
+                val wMatch = "(\\d{2,5})\\s*w".toRegex().find(resolutionHint)
+                if (wMatch != null) return wMatch.groupValues[1].toIntOrNull()
+            } else {
+                val hMatch = "(\\d{2,5})\\s*h".toRegex().find(resolutionHint)
+                if (hMatch != null) return hMatch.groupValues[1].toIntOrNull()
+                val pMatch = "(\\d{3,4})\\s*p".toRegex(RegexOption.IGNORE_CASE).find(resolutionHint)
+                if (pMatch != null) return pMatch.groupValues[1].toIntOrNull()
+            }
+        }
+        val urlMatch = "[_\\-=/](\\d{3,5})\\s*[xX×_]\\s*(\\d{3,5})[._\\-=/]".toRegex().find(url)
+        if (urlMatch != null) {
+            val w = urlMatch.groupValues[1].toIntOrNull()
+            val h = urlMatch.groupValues[2].toIntOrNull()
+            if (w != null && h != null && w in 40..10000 && h in 40..10000) {
+                return if (isWidth) w else h
+            }
+        }
+        return null
     }
 
     /**
@@ -452,13 +541,12 @@ object MediaCaptureEngine {
             return AdBlockEngine.createEmptyResponse()
         }
 
-        // 2. Clean byte-range params first, then reject true streaming slice fragments (.ts slices, dash segments)
-        val cleanedReqCandidate = MediaClassifier.cleanMediaUrl(reqUrl)
-        if (MediaClassifier.isMediaFragment(cleanedReqCandidate)) {
+        // 2. Reject streaming slice fragments (.ts slices, dash segments)
+        if (MediaClassifier.isMediaFragment(reqUrl)) {
             return null
         }
 
-        val reqLower = cleanedReqCandidate.lowercase()
+        val reqLower = reqUrl.lowercase()
         val cleanReqPath = reqLower.substringBefore("?").substringBefore("#")
         val headers = request.requestHeaders ?: emptyMap()
         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
@@ -466,7 +554,7 @@ object MediaCaptureEngine {
         // Reject non-media API, logging, telemetry endpoints
         val isNonMediaEndpoint = cleanReqPath.contains("/api/") || cleanReqPath.contains("/apis/") ||
                 cleanReqPath.contains("/youtubei/") || cleanReqPath.contains("/stats/") ||
-                cleanReqPath.contains("/log/") || cleanReqPath.endsWith("/log") || cleanReqPath.contains("/logging") ||
+                cleanReqPath.contains("/log") || cleanReqPath.contains("/logging") ||
                 cleanReqPath.contains("/ptracking") || cleanReqPath.contains("/beacon") ||
                 cleanReqPath.contains("/telemetry") || cleanReqPath.contains("/metrics") ||
                 cleanReqPath.contains("generate_204") || cleanReqPath.contains("/recaptcha") ||
@@ -489,6 +577,7 @@ object MediaCaptureEngine {
 
         val isVideo = isStream || cleanReqPath.endsWith(".mp4") || cleanReqPath.endsWith(".webm") ||
                 cleanReqPath.endsWith(".mov") || cleanReqPath.endsWith(".mkv") ||
+                cleanReqPath.contains("/videoplayback") || cleanReqPath.contains("googlevideo.com") ||
                 acceptHeader.contains("video/")
 
         val isAudio = cleanReqPath.endsWith(".mp3") || cleanReqPath.endsWith(".m4a") ||
@@ -496,22 +585,41 @@ object MediaCaptureEngine {
                 cleanReqPath.endsWith(".ogg") || cleanReqPath.endsWith(".flac") ||
                 cleanReqPath.endsWith(".opus") || acceptHeader.contains("audio/")
 
-        val hasImageExt = cleanReqPath.endsWith(".jpg") || cleanReqPath.endsWith(".jpeg") ||
+        val isUiIconOrFavicon = cleanReqPath.endsWith(".svg") || cleanReqPath.endsWith(".ico") ||
+                cleanReqPath.contains("/favicon") || cleanReqPath.contains("avatar") ||
+                cleanReqPath.contains("pixel") || cleanReqPath.contains("spacer") ||
+                cleanReqPath.contains("1x1") || cleanReqPath.contains("sprite")
+
+        val hasImageExt = !isUiIconOrFavicon && (cleanReqPath.endsWith(".jpg") || cleanReqPath.endsWith(".jpeg") ||
                 cleanReqPath.endsWith(".png") || cleanReqPath.endsWith(".webp") ||
                 cleanReqPath.endsWith(".gif") || cleanReqPath.endsWith(".avif") ||
-                cleanReqPath.endsWith(".svg") || cleanReqPath.endsWith(".bmp") ||
-                cleanReqPath.contains("/vi/") || cleanReqPath.contains("/vi_webp/") ||
-                Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""").containsMatchIn(reqLower)
+                cleanReqPath.endsWith(".bmp") || cleanReqPath.contains("/vi/") || cleanReqPath.contains("/vi_webp/") ||
+                Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""").containsMatchIn(reqLower))
 
         val isImage = hasImageExt && !acceptHeader.contains("text/html")
 
         if (isVideo || isAudio || isImage) {
             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
+            val alreadyCaptured = synchronized(seenInterceptUrls) {
+                !seenInterceptUrls.add(cleanReqUrl)
+            }
+            if (alreadyCaptured) {
+                return null
+            }
+
+            val ytPoster = if (isVideo) {
+                MediaClassifier.extractYouTubeVideoId(baseUrl)?.let { ytId ->
+                    "https://i.ytimg.com/vi/$ytId/maxresdefault.jpg"
+                }
+            } else null
+            val cookieHeader = headers["Cookie"] ?: headers["cookie"]
             val item = buildMediaItem(
                 rawUrl = cleanReqUrl,
                 source = ExtractionSource.NETWORK_INTERCEPT,
                 baseUrl = baseUrl,
-                mimeHint = null
+                poster = ytPoster,
+                mimeHint = if (cleanReqPath.contains("/videoplayback")) "video/mp4" else null,
+                customCookie = cookieHeader
             )
             if (item != null) {
                 onMediaDiscovered(item)
@@ -552,13 +660,17 @@ object MediaCaptureEngine {
                     }
                     val poster = obj.optString("p", "").ifBlank { null }
                     val res = obj.optString("r", "").ifBlank { null }
+                    val dw = obj.optInt("w", 0).takeIf { it > 0 }
+                    val dh = obj.optInt("h", 0).takeIf { it > 0 }
                     val item = buildMediaItem(
                         rawUrl = rawUrl,
                         source = source,
                         baseUrl = baseUrl,
                         poster = poster,
                         resolutionHint = res,
-                        indexHint = i
+                        indexHint = i,
+                        declaredWidth = dw,
+                        declaredHeight = dh
                     )
                     if (item != null) {
                         results.add(item)

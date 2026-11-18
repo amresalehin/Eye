@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import android.view.LayoutInflater
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,13 +34,16 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -61,8 +65,6 @@ class ViewerVideoState(
     var durationMs by mutableLongStateOf(0L)
     var isMuted by mutableStateOf(false)
     var isFullscreen by mutableStateOf(false)
-    var videoWidth by mutableIntStateOf(0)
-    var videoHeight by mutableIntStateOf(0)
 
     fun togglePlayPause() {
         val targetPlay = !isPlaying
@@ -124,14 +126,9 @@ fun rememberViewerVideoState(
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
                 .setDataSourceFactory(upstreamDataSourceFactory)
 
-            val parsedUri = when {
-                uri.startsWith("/") -> Uri.fromFile(java.io.File(uri))
-                uri.startsWith("file://", ignoreCase = true) -> Uri.fromFile(java.io.File(uri.removePrefix("file://")))
-                else -> Uri.parse(uri)
-            }
-            val cleanUriPath = uri.substringBefore('?').substringBefore('#')
-            val isHls = cleanUriPath.endsWith(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
-            val isDash = cleanUriPath.endsWith(".mpd", ignoreCase = true)
+            val parsedUri = Uri.parse(uri)
+            val isHls = uri.contains(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
+            val isDash = uri.contains(".mpd", ignoreCase = true) || uri.contains("dash", ignoreCase = true)
 
             val mediaItem = ExoMediaItem.Builder()
                 .setUri(parsedUri)
@@ -144,7 +141,10 @@ fun rememberViewerVideoState(
                 }
                 .build()
 
-            ExoPlayer.Builder(context)
+            val renderersFactory = DefaultRenderersFactory(context)
+                .setEnableDecoderFallback(true)
+
+            ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(loadControl)
                 .build().apply {
@@ -176,14 +176,6 @@ fun rememberViewerVideoState(
                 state.isFirstFrameRendered = true
             }
 
-            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                if (videoSize.width > 0 && videoSize.height > 0) {
-                    state.videoWidth = videoSize.width
-                    state.videoHeight = videoSize.height
-                    state.isFirstFrameRendered = true
-                }
-            }
-
             override fun onIsPlayingChanged(playing: Boolean) {
                 state.isPlaying = playing
             }
@@ -191,28 +183,37 @@ fun rememberViewerVideoState(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     state.durationMs = player?.duration?.takeIf { it > 0L } ?: 0L
-                    val vSize = player?.videoSize
-                    if (vSize != null && vSize.width > 0 && vSize.height > 0) {
-                        state.videoWidth = vSize.width
-                        state.videoHeight = vSize.height
-                    }
-                    state.isFirstFrameRendered = true
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                android.util.Log.w("ViewerVideoPlayer", "Playback error encountered: ${error.message} (${error.errorCodeName})")
+                val cause = error.cause
+                if (cause is androidx.media3.exoplayer.video.MediaCodecVideoDecoderException ||
+                    cause is IllegalStateException) {
+                    player?.clearVideoSurface()
+                } else {
+                    player?.prepare()
                 }
             }
         }
         player?.addListener(listener)
         onDispose {
             player?.removeListener(listener)
+            player?.clearVideoSurface()
             player?.stop()
             player?.release()
         }
     }
 
-    // Pause player when activity/lifecycle moves to background
+    // Release/pause player when activity/lifecycle moves to background
     DisposableEffect(lifecycleOwner, player) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                player?.pause()
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> player?.pause()
+                Lifecycle.Event.ON_STOP -> player?.stop()
+                Lifecycle.Event.ON_RESUME -> if (sessionPlayIntent) player?.play()
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -221,8 +222,9 @@ fun rememberViewerVideoState(
         }
     }
 
-    // Poll current playback position for controls and Story Mode progress
-    LaunchedEffect(player, uri) {
+    // Poll current playback position while controls are visible
+    LaunchedEffect(player, uri, showControls) {
+        if (!showControls) return@LaunchedEffect
         while (player != null && isActive) {
             state.positionMs = player.currentPosition.coerceAtLeast(0L)
             val d = player.duration
@@ -238,6 +240,7 @@ fun rememberViewerVideoState(
 
 /**
  * AndroidView host for ExoPlayer rendering within the HorizontalPager.
+ * Uses TextureView under the hood to ensure seamless Compose alpha animation and avoid SurfaceView release crashes.
  */
 @Composable
 fun VideoPlayerSurface(
@@ -247,7 +250,6 @@ fun VideoPlayerSurface(
     if (!videoState.isVideo || videoState.player == null) return
 
     // Keep the cached poster underneath and fade the first rendered video frame in over it.
-    // SurfaceView alpha is supported on API 26+, which is this app's minimum Android version.
     val surfaceAlpha by animateFloatAsState(
         targetValue = if (videoState.isFirstFrameRendered) 1f else 0f,
         animationSpec = tween(durationMillis = 180),
@@ -256,7 +258,9 @@ fun VideoPlayerSurface(
 
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
+            val pv = LayoutInflater.from(ctx)
+                .inflate(R.layout.item_viewer_player, null, false) as PlayerView
+            pv.apply {
                 player = videoState.player
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
@@ -276,6 +280,12 @@ fun VideoPlayerSurface(
             pv.useController = false
             pv.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+        },
+        onRelease = { pv ->
+            pv.player = null
+        },
+        onReset = { pv ->
+            pv.player = null
         }
     )
 }

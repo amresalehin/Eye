@@ -49,6 +49,8 @@ data class LocationIndexingState(
     val itemsPerMinute: Int = 0
 )
 
+
+
 data class ModelDownloadState(
     val isDownloading: Boolean = false,
     val isPaused: Boolean = false,

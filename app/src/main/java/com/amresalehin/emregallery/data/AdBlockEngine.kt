@@ -147,6 +147,14 @@ object AdBlockEngine {
         "tr.snapchat.com"
     )
 
+    private val adCheckCache = java.util.Collections.synchronizedMap(
+        object : java.util.LinkedHashMap<String, Boolean>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                return size > 1000
+            }
+        }
+    )
+
     /**
      * Checks if a target hostname belongs to an ad network or tracker.
      */
@@ -168,10 +176,14 @@ object AdBlockEngine {
     fun isAdOrTracker(url: String): Boolean {
         if (url.isBlank()) return false
         val lowerUrl = url.lowercase(Locale.ROOT)
+        adCheckCache[lowerUrl]?.let { return it }
 
         // 1. Path pattern check
         for (pattern in AD_PATH_PATTERNS) {
-            if (lowerUrl.contains(pattern)) return true
+            if (lowerUrl.contains(pattern)) {
+                adCheckCache[lowerUrl] = true
+                return true
+            }
         }
 
         // 2. Extract and check hostname
@@ -181,14 +193,15 @@ object AdBlockEngine {
             } else {
                 lowerUrl
             }
-            URI(candidate).host
+            java.net.URL(candidate).host
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: runCatching {
+            val withoutScheme = lowerUrl.substringAfter("://")
+            withoutScheme.substringBefore("/").substringBefore("?").substringBefore(":")
         }.getOrNull()
 
-        if (!host.isNullOrBlank() && isAdHost(host)) {
-            return true
-        }
-
-        return false
+        val isBlocked = !host.isNullOrBlank() && isAdHost(host)
+        adCheckCache[lowerUrl] = isBlocked
+        return isBlocked
     }
 
     /**

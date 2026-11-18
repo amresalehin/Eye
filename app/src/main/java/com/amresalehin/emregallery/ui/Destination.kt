@@ -3,6 +3,8 @@ package com.amresalehin.emregallery.ui
 enum class Destination {
     HOME,
     ALBUMS,
+    POCKET,
+    BOOKMARK_DETAIL,
     FAVOURITES,
     BIN,
     VIDEOS,
@@ -15,12 +17,12 @@ enum class Destination {
     ALBUM_CATALOG,
     SETTINGS,
     LIBRARY_OVERVIEW,
-    INDEXING_STATUS,
     OCR_SETTINGS,
     ABOUT,
     SEARCH,
     VIEWER,
-    MEDIA_INBOX
+    MEDIA_INBOX,
+    BROWSER
 }
 
 enum class SearchStage {

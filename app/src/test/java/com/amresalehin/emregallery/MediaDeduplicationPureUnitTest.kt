@@ -1,15 +1,87 @@
 package com.amresalehin.emregallery
 
+import com.amresalehin.emregallery.data.BrowserTabSession
 import com.amresalehin.emregallery.data.MediaCategory
+import com.amresalehin.emregallery.data.MediaInboxItem
+import com.amresalehin.emregallery.data.MediaNormalizer
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaDeduplicationPureUnitTest {
+
+    @Test
+    fun deduplicationKeepsDownloadedLocalCopyWhenHigherQualityRemoteVariantWins() {
+        val localCopy = MediaInboxItem(
+            id = "saved-copy",
+            title = "Photo",
+            localUri = "/storage/emulated/0/Download/photo.jpg",
+            sourceUrl = "https://cdn.example.com/photo.jpg?utm_source=bookmark",
+            isVideo = false,
+            format = "JPEG",
+            sizeBytes = 400_000L,
+            width = 600,
+            height = 400
+        )
+        val bestRemote = MediaInboxItem(
+            id = "best-source",
+            title = "Photo",
+            localUri = "",
+            sourceUrl = "https://cdn.example.com/photo.jpg?utm_medium=feed",
+            isVideo = false,
+            format = "JPEG",
+            sizeBytes = 900_000L,
+            width = 1600,
+            height = 1000
+        )
+
+        val result = MediaNormalizer.deduplicateMediaInboxItems(listOf(localCopy, bestRemote))
+        assertEquals(1, result.size)
+        assertEquals("best-source", result.single().id)
+        assertEquals(bestRemote.sourceUrl, result.single().sourceUrl)
+        assertEquals(localCopy.localUri, result.single().localUri)
+        assertEquals(900_000L, result.single().sizeBytes)
+    }
+
+    @Test
+    fun browserTabMediaCountResetsWhenNavigatingToAnotherPage() {
+        val session = BrowserTabSession(
+            tabId = "browser_navigation_test",
+            initialUrl = "https://example.com/first"
+        )
+        session.registerMedia(
+            ScrapedMediaItem(
+                id = "first-page-image",
+                url = "https://cdn.example.com/first.jpg",
+                title = "First page image"
+            )
+        )
+        assertEquals(1, session.detectedCount.value)
+
+        // A different path on the same domain is still a different page.
+        session.updateNavigation("https://example.com/second")
+        assertEquals(0, session.detectedCount.value)
+        assertTrue(session.detectedItems.value.isEmpty())
+
+        session.registerMedia(
+            ScrapedMediaItem(
+                id = "second-page-image",
+                url = "https://cdn.example.com/second.jpg",
+                title = "Second page image"
+            )
+        )
+        assertEquals(1, session.detectedCount.value)
+
+        // Returning to the browser's home/blank page clears the page badge too.
+        session.updateNavigation("")
+        assertEquals(0, session.detectedCount.value)
+    }
 
     @Test
     fun testPinterestResolutionAndFormatVariantDeduplication() {
@@ -374,5 +446,385 @@ class MediaDeduplicationPureUnitTest {
             )
         }
     }
+
+    @Test
+    fun testBrowserTabSessionMaintainsMediaRegistryWithoutRescan() {
+        val tabSession = com.amresalehin.emregallery.data.BrowserTabSession(tabId = "test_tab_1")
+        assertEquals(0, tabSession.detectedCount.value)
+        assertTrue(tabSession.detectedItems.value.isEmpty())
+
+        val item1 = ScrapedMediaItem(
+            id = "item_1",
+            url = "https://example.com/video.mp4",
+            title = "Video 1",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            thumbnailUrl = "https://example.com/video_thumb_low.jpg"
+        )
+        val posterItem = ScrapedMediaItem(
+            id = "item_poster",
+            url = "https://example.com/video_thumb_low.jpg",
+            title = "Video Poster",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "1280x720"
+        )
+
+        tabSession.registerMedia(item1)
+        assertEquals(1, tabSession.detectedCount.value)
+        assertEquals(1, tabSession.getDetectedMedia().size)
+
+        // Registering poster image of the same video should fold into the video without increasing count
+        tabSession.registerMedia(posterItem)
+        assertEquals(1, tabSession.detectedCount.value)
+        val detected = tabSession.getDetectedMedia()[0]
+        assertEquals("item_1", detected.id)
+        assertEquals("https://example.com/video_thumb_low.jpg", detected.thumbnailUrl)
+
+        // Clearing tab media resets registry cleanly
+        tabSession.clearMedia()
+        assertEquals(0, tabSession.detectedCount.value)
+        assertTrue(tabSession.getDetectedMedia().isEmpty())
+    }
+
+    @Test
+    fun testMediaNormalizerDeduplicatesAndFoldsPosters() {
+        val masterVideo = ScrapedMediaItem(
+            id = "vid_1080",
+            url = "https://cdn.example.com/media/clip_1080p.mp4",
+            title = "Clip 1080p",
+            isVideo = true,
+            resolutionHint = "1920x1080"
+        )
+        val lowResVideo = ScrapedMediaItem(
+            id = "vid_720",
+            url = "https://cdn.example.com/media/clip_720p.mp4",
+            title = "Clip 720p",
+            isVideo = true,
+            resolutionHint = "1280x720"
+        )
+        val folded = com.amresalehin.emregallery.data.MediaNormalizer.deduplicate(listOf(lowResVideo, masterVideo))
+        assertEquals(1, folded.size)
+        assertEquals("1920x1080", folded[0].resolutionHint)
+    }
+
+    @Test
+    fun testExtractionPhaseAndExtractionSourceCompatibility() {
+        assertEquals("gallery-dl", com.amresalehin.emregallery.data.ExtractionSource.GALLERY_DL.label)
+        assertEquals("GALLERY_DL", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.GALLERY_DL.name)
+        assertEquals("DIRECT_MEDIA", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.DIRECT_MEDIA.name)
+        assertEquals("STATIC_SCRAPING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.STATIC_SCRAPING.name)
+        assertEquals("BROWSER_INTERCEPTING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.BROWSER_INTERCEPTING.name)
+    }
+
+    @Test
+    fun testAdBlockEngineIdentifiesAdHostsAndTrackers() {
+        // Exact and subdomain matching
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://securepubads.g.doubleclick.net/gampad/ads?iu=123"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://ad.doubleclick.net/ddm/track/123"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://static.criteo.net/js/ld/ld.js"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://script.hotjar.com/modules.js"))
+
+        // Path patterns
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://example.com/pagead/banner.png"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://example.com/track/pixel?id=456"))
+
+        // Legitimate media URLs should NOT be blocked
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://images.unsplash.com/photo-12345?w=1080"))
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://cdn.example.com/videos/nature_documentary.mp4"))
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://upload.wikimedia.org/wikipedia/commons/1/10/Sample.jpg"))
+    }
+
+    @Test
+    fun testYouTubeDecipheredStreamIsRecognizedAndClassifiedAsVideo() {
+        val streamUrl = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4&sparams=expire,id,ip,itag&sig=abc"
+        
+        // 1. Must not be rejected as a fragment
+        assertFalse(MediaClassifier.isMediaFragment(streamUrl))
+        
+        // 2. Must be considered valid media
+        assertTrue(MediaClassifier.isValidMedia(streamUrl))
+        
+        // 3. Must be classified as VIDEOS
+        val classification = MediaClassifier.classify(streamUrl)
+        assertEquals(MediaCategory.VIDEOS, classification.category)
+        assertTrue(classification.isVideo)
+        assertFalse(classification.isAudio)
+    }
+
+    @Test
+    fun testYouTubeVideoPlaybackDeduplicationKeyMapsAcrossSlices() {
+        val base = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4"
+        val slice1 = "$base&sq=0&range=0-1048576"
+        val slice2 = "$base&sq=1&range=1048577-2097152"
+        
+        val key1 = MediaClassifier.deduplicationKey(slice1)
+        val key2 = MediaClassifier.deduplicationKey(slice2)
+        
+        assertEquals(key1, key2)
+        assertEquals("googlevideo:e6nigwabc4s_itag_22", key1)
+    }
+
+    @Test
+    fun testYouTubePosterFoldsIntoDirectVideoItem() {
+        val videoUrl = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4"
+        val posterUrl = "https://i.ytimg.com/vi/e6nigwabc4s/hqdefault.jpg"
+        
+        val posterItem = ScrapedMediaItem(
+            id = "yt_img_1",
+            url = posterUrl,
+            title = "youtube_e6nigwabc4s_hqdefault.jpg",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "480x360"
+        )
+        
+        val videoItem = ScrapedMediaItem(
+            id = "ytdlp_1",
+            url = videoUrl,
+            title = "BEHIND THE SCENES FILMING THE JUTSU.mp4",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            resolutionHint = "720x1280",
+            metadata = mapOf("source_url" to "https://www.youtube.com/shorts/e6nigwabc4s")
+        )
+        
+        val map = LinkedHashMap<String, ScrapedMediaItem>()
+        // Merge poster first (as static scraper might)
+        com.amresalehin.emregallery.data.MediaNormalizer.mergeCandidates(map, listOf(posterItem))
+        assertEquals(1, map.size)
+        
+        // Merge video second (from yt-dlp)
+        com.amresalehin.emregallery.data.MediaNormalizer.mergeCandidates(map, listOf(videoItem))
+        // Poster image must fold into the video, leaving exactly 1 video item
+        assertEquals(1, map.size)
+        val mergedVideo = map.values.first()
+        assertTrue(mergedVideo.isVideo)
+        assertEquals(MediaCategory.VIDEOS, mergedVideo.category)
+        assertNotNull(mergedVideo.thumbnailUrl)
+        assertTrue(mergedVideo.thumbnailUrl!!.contains("e6nigwabc4s"))
+    }
+
+    @Test
+    fun testTargetMediaExpectationAndSufficiencyCriteria() {
+        val posterOnly = listOf(
+            ScrapedMediaItem(
+                id = "thumb_1",
+                url = "https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg",
+                title = "Thumbnail",
+                isVideo = false,
+                isAudio = false,
+                isStream = false,
+                category = MediaCategory.IMAGES
+            )
+        )
+
+        val videoFound = listOf(
+            ScrapedMediaItem(
+                id = "vid_1",
+                url = "https://rr---sn.googlevideo.com/videoplayback?id=123",
+                title = "Video.mp4",
+                isVideo = true,
+                isAudio = false,
+                isStream = false,
+                category = MediaCategory.VIDEOS
+            )
+        )
+
+        // 1. URL Expectation Classification
+        val ytExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://www.youtube.com/shorts/E6nigwAbc4s")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM, ytExpectation)
+
+        val redditExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://www.reddit.com/r/pics/comments/123/art")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.GALLERY_OR_ALBUM, redditExpectation)
+
+        val genericExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://example.com/blog/article")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.GENERIC_ANY, genericExpectation)
+
+        // 2. For VIDEO_OR_STREAM: a static thumbnail alone MUST NOT be treated as sufficient success
+        assertFalse(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM,
+                posterOnly
+            )
+        )
+
+        // 3. For VIDEO_OR_STREAM: a real playable video stream is sufficient success
+        assertTrue(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM,
+                videoFound
+            )
+        )
+
+        // 4. For GENERIC_ANY: images or any media are sufficient
+        assertTrue(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.GENERIC_ANY,
+                posterOnly
+            )
+        )
+    }
+
+    @Test
+    fun testYtDlpIsPrimaryAndGalleryDlIsSecondary() {
+        // ExtractionPhase includes both engines
+        assertEquals("YT_DLP", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.YT_DLP.name)
+        assertEquals("GALLERY_DL", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.GALLERY_DL.name)
+
+        // SupportInfo defaults to yt-dlp primary
+        val infoYt = com.amresalehin.emregallery.data.GalleryDlSupportInfo(
+            isSupported = true,
+            category = "video",
+            subcategory = "stream",
+            extractorName = "Youtube",
+            displayName = "YouTube",
+            extractorEngine = "yt-dlp"
+        )
+        assertEquals("yt-dlp", infoYt.extractorEngine)
+
+        // Gallery-dl fallback
+        val infoGdl = com.amresalehin.emregallery.data.GalleryDlSupportInfo(
+            isSupported = true,
+            category = "reddit",
+            subcategory = "gallery",
+            extractorName = "RedditExtractor",
+            displayName = "Reddit",
+            extractorEngine = "gallery-dl"
+        )
+        assertEquals("gallery-dl", infoGdl.extractorEngine)
+
+        // In absence of Python runtime, popular sites fallback check identifies gallery sites correctly
+        val redditCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://www.reddit.com/r/pics/comments/123/mountains")
+        assertTrue(redditCheck.isSupported)
+        assertEquals("gallery-dl", redditCheck.extractorEngine)
+
+        val imgurCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://imgur.com/a/abcde")
+        assertTrue(imgurCheck.isSupported)
+        assertEquals("gallery-dl", imgurCheck.extractorEngine)
+    }
+
+    @Test
+    fun testBrowserSessionFallbackOnlyForUnsupportedSites() {
+        // Supported site is detected as supported -> routes to engine
+        val supportedCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://reddit.com/r/pics")
+        assertTrue(supportedCheck.isSupported)
+
+        // Unsupported site is not supported by gallery-dl -> triggers browser session fallback
+        val unsupportedCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://unknown-random-news-blog.org/article")
+        assertFalse(unsupportedCheck.isSupported)
+
+        // Phase enum maintains BROWSER_INTERCEPTING for this fallback
+        assertEquals("BROWSER_INTERCEPTING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.BROWSER_INTERCEPTING.name)
+    }
+
+    @Test
+    fun testBotDetectionChallengeIdentification() {
+        // Cloudflare / Turnstile challenges correctly identified
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Just a moment...", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Attention Required! | Cloudflare", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Security Check", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Checking your browser before accessing...", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Welcome", "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile"))
+
+        // Standard pages are not flagged as challenges
+        assertFalse(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Google Photos", "https://photos.google.com"))
+        assertFalse(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Reddit - Dive into anything", "https://reddit.com/r/pics"))
+    }
+
+    @Test
+    fun testStealthUserAgentAndHeadersFormat() {
+        val ua = com.amresalehin.emregallery.data.BotDetectionMitigator.STEALTH_USER_AGENT
+        assertTrue(ua.contains("Chrome/"))
+        assertTrue(ua.contains("Mobile Safari"))
+        assertTrue(ua.contains("Android"))
+
+        val headers = com.amresalehin.emregallery.data.BotDetectionMitigator.STEALTH_HEADERS
+        assertTrue(headers.containsKey("Sec-Ch-Ua"))
+        assertTrue(headers.containsKey("Sec-Ch-Ua-Mobile"))
+        assertTrue(headers.containsKey("Sec-Ch-Ua-Platform"))
+        assertEquals("?1", headers["Sec-Ch-Ua-Mobile"])
+        assertEquals("\"Android\"", headers["Sec-Ch-Ua-Platform"])
+    }
+
+    @Test
+    fun bookmarkDeduplicationIgnoresKnownTrackingParametersAndQueryOrder() {
+        val first = "https://EXAMPLE.com:443/articles/./economics?id=42&lang=en&utm_source=newsletter&fbclid=tracking"
+        val second = "https://example.com/articles/economics?lang=en&id=42"
+
+        assertEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(second)
+        )
+    }
+
+    @Test
+    fun bookmarkDeduplicationPreservesMeaningfulQueryParameters() {
+        val first = "https://example.com/watch?v=video-one&id=10"
+        val second = "https://example.com/watch?v=video-one&id=11"
+        val firstRef = "https://example.com/article?ref=campaign-a"
+        val secondRef = "https://example.com/article?ref=campaign-b"
+
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(second)
+        )
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(firstRef),
+            MediaClassifier.bookmarkDeduplicationKey(secondRef)
+        )
+    }
+
+    @Test
+    fun bookmarkDeduplicationPreservesFragmentsForClientSideRoutes() {
+        val first = "https://example.com/app#/article/one"
+        val second = "https://example.com/app#/article/two"
+
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(second)
+        )
+    }
+
+    @Test
+    fun bookmarkDeduplicationPreservesSignedQueryStrings() {
+        val first = "https://cdn.example.com/file?X-Amz-Signature=abc&utm_source=one"
+        val second = "https://cdn.example.com/file?X-Amz-Signature=abc&utm_source=two"
+        val expired = "https://cdn.example.com/file?X-Amz-Signature=def&utm_source=one"
+
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(second)
+        )
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(expired)
+        )
+    }
+
+    @Test
+    fun bookmarkDeduplicationPreservesOrderingOfRepeatedParameters() {
+        val first = "https://example.com/search?tag=medicine&tag=research"
+        val second = "https://example.com/search?tag=research&tag=medicine"
+
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(first),
+            MediaClassifier.bookmarkDeduplicationKey(second)
+        )
+    }
+
+    @Test
+    fun bookmarkDeduplicationDoesNotCollapseHttpAndHttps() {
+        val httpUrl = "http://example.com/article?id=42&utm_source=mail"
+        val httpsUrl = "https://example.com/article?id=42"
+
+        assertNotEquals(
+            MediaClassifier.bookmarkDeduplicationKey(httpUrl),
+            MediaClassifier.bookmarkDeduplicationKey(httpsUrl)
+        )
+    }
 }
+
+
 

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -23,9 +24,10 @@ except Exception:
 
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
+    {"name": "Instagram", "domains": ["instagram.com", "instagr.am"], "icon": "camera"},
     {"name": "Imgur", "domains": ["imgur.com", "i.imgur.com"], "icon": "image"},
     {"name": "Twitter / X", "domains": ["twitter.com", "x.com", "pbs.twimg.com"], "icon": "tag"},
-    {"name": "Pinterest", "domains": ["pinterest.com", "i.pinimg.com"], "icon": "pin"},
+    {"name": "Pinterest", "domains": ["pinterest.com", "pin.it", "i.pinimg.com", "v1.pinimg.com"], "icon": "pin"},
     {"name": "ArtStation", "domains": ["artstation.com"], "icon": "brush"},
     {"name": "DeviantArt", "domains": ["deviantart.com"], "icon": "palette"},
     {"name": "Flickr", "domains": ["flickr.com"], "icon": "camera"}
@@ -34,8 +36,45 @@ POPULAR_EXTRACTORS = [
 SOCIAL_VIDEO_HOSTS = [
     "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
     "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "fb.watch",
-    "instagram.com", "reddit.com", "redd.it", "v.redd.it", "twitter.com", "x.com"
+    "instagram.com", "instagr.am", "reddit.com", "redd.it", "v.redd.it",
+    "twitter.com", "x.com", "pinterest.com", "pin.it", "pinimg.com", "v1.pinimg.com",
+    "imgur.com", "i.imgur.com"
 ]
+
+def _parse_cookie_dict(cookies):
+    """Converts a raw HTTP Cookie header string ('k1=v1; k2=v2') into a dict for gallery-dl."""
+    if not cookies:
+        return None
+    if isinstance(cookies, dict):
+        return cookies
+    if isinstance(cookies, str):
+        cookie_map = {}
+        for part in cookies.split(";"):
+            trimmed = part.strip()
+            if "=" in trimmed:
+                k, v = trimmed.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if k:
+                    cookie_map[k] = v
+        return cookie_map if cookie_map else None
+    return None
+
+def _normalize_reddit_probe_url(media_url, referer=None):
+    """
+    Normalizes raw v.redd.it/ID/DASH_*.mp4 URLs to either the Reddit post referer URL
+    or the canonical https://v.redd.it/ID base URL so yt-dlp's RedditVideoIE extracts
+    both video and audio DASH/HLS tracks.
+    """
+    lower_media = (media_url or "").lower()
+    lower_ref = (referer or "").lower()
+    if "v.redd.it/" in lower_media:
+        if referer and ("reddit.com" in lower_ref or "redd.it" in lower_ref) and "dash_" not in lower_ref:
+            return referer
+        m = re.match(r"^(https?://v\.redd\.it/[^/?#&]+)", media_url.strip(), re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return media_url
 
 def _notify_progress(callback, bytes_read, total_bytes, speed=0):
     if callback is None:
@@ -104,47 +143,140 @@ def get_engine_status():
 
 def check_support(url):
     """
-    Checks if a URL is handled by gallery-dl or yt-dlp extractors.
+    Checks if gallery-dl or yt-dlp supports the given URL.
+    Returns JSON: {"supported": bool, "category": str, "subcategory": str, "description": str}
     """
-    if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": ""})
+    try:
+        import gallery_dl.extractor as gdl_extractor
+        extr = gdl_extractor.find(url)
+        if extr is not None and extr.category != "generic":
+            return json.dumps({
+                "supported": True,
+                "category": getattr(extr, "category", "") or "",
+                "subcategory": getattr(extr, "subcategory", "") or "",
+                "description": getattr(extr, "__doc__", "") or f"{extr.category}:{extr.subcategory}"
+            })
+    except Exception:
+        pass
 
-    clean_url = url.strip()
-
-    # 1. Check gallery-dl
-    if GALLERY_DL_AVAILABLE:
-        try:
-            ext = gdl_extractor.find(clean_url)
-            if ext is not None:
-                cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
-                subcat = getattr(ext, "subcategory", "") or ""
-                name = ext.__class__.__name__
+    lower_url = (url or "").lower()
+    for entry in POPULAR_EXTRACTORS:
+        for dom in entry["domains"]:
+            if dom in lower_url:
                 return json.dumps({
                     "supported": True,
-                    "category": cat,
-                    "subcategory": subcat,
-                    "extractor": name,
-                    "engine": "gallery-dl"
+                    "category": entry.get("name", "").lower(),
+                    "subcategory": "domain_match",
+                    "description": entry["name"]
                 })
-        except Exception:
-            pass
 
-    # 2. Check yt-dlp
-    if YTDLP_AVAILABLE:
-        try:
-            lower = clean_url.lower()
-            if any(vh in lower for vh in SOCIAL_VIDEO_HOSTS):
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
-        except Exception:
-            pass
+    return json.dumps({
+        "supported": False,
+        "category": "",
+        "subcategory": "",
+        "description": ""
+    })
 
-    return json.dumps({"supported": False, "category": "", "extractor": ""})
+
+def _parse_cookie_dict(cookies):
+    """Converts a raw HTTP Cookie header string ('k1=v1; k2=v2') into a dict for gallery-dl."""
+    if not cookies:
+        return None
+    if isinstance(cookies, dict):
+        return cookies
+    if isinstance(cookies, str):
+        cookie_map = {}
+        for part in cookies.split(";"):
+            trimmed = part.strip()
+            if "=" in trimmed:
+                k, v = trimmed.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if k:
+                    cookie_map[k] = v
+        return cookie_map if cookie_map else None
+    return None
+
+def _normalize_reddit_probe_url(media_url, referer=None):
+    """
+    Normalizes raw v.redd.it/ID/DASH_*.mp4 URLs to either the Reddit post referer URL
+    or the canonical https://v.redd.it/ID base URL so yt-dlp's RedditVideoIE extracts
+    both video and audio DASH/HLS tracks.
+    """
+    lower_media = (media_url or "").lower()
+    lower_ref = (referer or "").lower()
+    if "v.redd.it/" in lower_media:
+        if referer and ("reddit.com" in lower_ref or "redd.it" in lower_ref) and "dash_" not in lower_ref:
+            return referer
+        m = re.match(r"^(https?://v\.redd\.it/[^/?#&]+)", media_url.strip(), re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return media_url
+
+def _notify_progress(callback, bytes_read, total_bytes, speed=0):
+    if callback is None:
+        return
+    try:
+        b_read = int(bytes_read or 0)
+        t_bytes = int(total_bytes if total_bytes is not None else -1)
+        spd = int(speed or 0)
+        if hasattr(callback, "onProgress"):
+            callback.onProgress(b_read, t_bytes, spd)
+        elif callable(callback):
+            callback(b_read, t_bytes, spd)
+    except Exception:
+        pass
+
+def _make_ydl_progress_hook(progress_callback, weight_offset=0.0, weight_span=1.0):
+    last_emit = [0.0]
+    def _hook(d):
+        if progress_callback is None:
+            return
+        status = d.get("status")
+        if status == "downloading":
+            now = time.time()
+            if now - last_emit[0] < 0.25:
+                return
+            last_emit[0] = now
+            downloaded = int(d.get("downloaded_bytes") or 0)
+            total = int(d.get("total_bytes") or d.get("total_bytes_estimate") or -1)
+            speed = int(d.get("speed") or 0)
+            if total > 0 and (weight_offset > 0.0 or weight_span < 1.0):
+                virtual_total = int(total / weight_span) if weight_span > 0 else total
+                virtual_read = int(weight_offset * virtual_total + downloaded)
+                _notify_progress(progress_callback, virtual_read, virtual_total, speed)
+            else:
+                _notify_progress(progress_callback, downloaded, total, speed)
+    return _hook
+
+def _mux_with_android_media_muxer(video_path, audio_path, target_path):
+    """Invokes AndroidMediaMuxer via Chaquopy if running on Android."""
+    try:
+        from java import jclass
+        muxer_cls = jclass("com.amresalehin.emregallery.data.AndroidMediaMuxer")
+        return bool(muxer_cls.muxVideoAndAudioPaths(video_path, audio_path, target_path))
+    except Exception:
+        return False
+
+def get_engine_status():
+    """Returns runtime status and version information synchronized with GalleryDlEngine."""
+    gdl_ver = getattr(gallery_dl, "__version__", "1.32.19") if GALLERY_DL_AVAILABLE else "N/A"
+    ytdlp_ver = getattr(yt_dlp, "__version__", "2026.10.21") if YTDLP_AVAILABLE else "N/A"
+    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE
+    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver}" if available else "Python Engine Unavailable"
+
+    return json.dumps({
+        "available": available,
+        "version": gdl_ver,
+        "engine": engine_name,
+        "gallery_dl_available": GALLERY_DL_AVAILABLE,
+        "gallery_dl_version": gdl_ver,
+        "yt_dlp_available": YTDLP_AVAILABLE,
+        "yt_dlp_version": ytdlp_ver,
+        "python_version": sys.version.split()[0],
+        "supported_categories_count": 287 if GALLERY_DL_AVAILABLE else 0,
+        "popular_extractors": POPULAR_EXTRACTORS
+    })
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -161,6 +293,7 @@ def extract_gallery_dl(url, options_json="{}"):
 
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     cookies = opts.get("cookies")
+    cookie_dict = _parse_cookie_dict(cookies)
 
     items = []
     page_title = ""
@@ -168,9 +301,10 @@ def extract_gallery_dl(url, options_json="{}"):
 
     try:
         with _gdl_lock:
+            gdl_config.clear()
             gdl_config.set(("extractor",), "user-agent", user_agent)
-            if cookies:
-                gdl_config.set(("extractor",), "cookies", cookies)
+            if cookie_dict:
+                gdl_config.set(("extractor",), "cookies", cookie_dict)
 
             ext = gdl_extractor.find(clean_url)
             if ext:
@@ -179,9 +313,9 @@ def extract_gallery_dl(url, options_json="{}"):
 
                 for post in getattr(data_job, "data_post", []):
                     if isinstance(post, dict):
-                        candidate_title = post.get("title") or post.get("gallery_title") or post.get("album_title") or post.get("post_title") or post.get("name")
+                        candidate_title = post.get("title") or post.get("gallery_title") or post.get("album_title") or post.get("post_title") or post.get("description") or post.get("name")
                         if candidate_title and not page_title:
-                            page_title = str(candidate_title)
+                            page_title = str(candidate_title)[:120]
 
                 for entry in getattr(data_job, "data", []):
                     if not isinstance(entry, (list, tuple)) or len(entry) < 2:
@@ -196,29 +330,45 @@ def extract_gallery_dl(url, options_json="{}"):
                             kwdict = entry[2]
                     elif isinstance(entry[1], dict):
                         kwdict = entry[1]
-                        item_url = kwdict.get("url") or kwdict.get("file_url")
+                        item_url = kwdict.get("url") or kwdict.get("file_url") or kwdict.get("video_url")
 
-                    if not item_url or item_url in seen_urls:
+                    if not item_url:
+                        continue
+
+                    # Upgrade Imgur .gifv pseudo-GIFs to real .mp4 video streams
+                    if item_url.lower().endswith(".gifv"):
+                        item_url = item_url[:-5] + ".mp4"
+                        kwdict["extension"] = "mp4"
+
+                    if item_url in seen_urls:
                         continue
 
                     seen_urls.add(item_url)
 
-                    fn = kwdict.get("filename") or kwdict.get("name") or kwdict.get("title") or ""
+                    fn = kwdict.get("filename") or kwdict.get("name") or kwdict.get("title") or kwdict.get("id") or ""
                     ext_suffix = kwdict.get("extension") or ""
-                    if fn and ext_suffix and not fn.endswith("." + ext_suffix):
+                    if fn and ext_suffix and not str(fn).endswith("." + str(ext_suffix)):
                         item_title = f"{fn}.{ext_suffix}"
                     elif fn:
-                        item_title = fn
+                        item_title = str(fn)
                     else:
                         clean_path = item_url.split("?")[0].split("#")[0]
                         item_title = os.path.basename(clean_path) or f"media_{len(items) + 1}.bin"
 
                     if not page_title:
-                        page_title = kwdict.get("gallery_title") or kwdict.get("album_title") or kwdict.get("title") or kwdict.get("author") or ""
+                        page_title = kwdict.get("gallery_title") or kwdict.get("album_title") or kwdict.get("title") or kwdict.get("description") or kwdict.get("author") or ""
 
                     lower_url = item_url.lower()
-                    lower_ext = ext_suffix.lower() if ext_suffix else ""
-                    is_video = lower_ext in ["mp4", "webm", "mkv", "mov", "avi"] or lower_url.endswith(".mp4") or lower_url.endswith(".webm") or ".mp4?" in lower_url or "v.redd.it/" in lower_url
+                    lower_ext = str(ext_suffix).lower() if ext_suffix else ""
+                    is_video = (
+                        lower_ext in ["mp4", "webm", "mkv", "mov", "avi", "gifv"]
+                        or lower_url.endswith(".mp4")
+                        or lower_url.endswith(".webm")
+                        or ".mp4?" in lower_url
+                        or "v.redd.it/" in lower_url
+                        or "v1.pinimg.com/videos/" in lower_url
+                        or "format=mp4" in lower_url
+                    )
                     is_stream = lower_ext in ["m3u8", "mpd"] or lower_url.endswith(".m3u8") or ".m3u8?" in lower_url or lower_url.endswith(".mpd")
                     is_audio = lower_ext in ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"] or lower_url.endswith(".mp3") or lower_url.endswith(".m4a")
 
@@ -228,15 +378,15 @@ def extract_gallery_dl(url, options_json="{}"):
                         mime_type = "application/x-mpegURL"
                     elif is_video:
                         category = "VIDEOS"
-                        format_label = ext_suffix.upper() if ext_suffix else "MP4"
-                        mime_type = f"video/{lower_ext}" if lower_ext else "video/mp4"
+                        format_label = lower_ext.upper() if lower_ext in ["mp4", "webm", "mkv", "mov", "avi"] else "MP4"
+                        mime_type = f"video/{lower_ext}" if lower_ext in ["mp4", "webm", "mkv", "mov"] else "video/mp4"
                     elif is_audio:
                         category = "AUDIO"
-                        format_label = ext_suffix.upper() if ext_suffix else "MP3"
+                        format_label = lower_ext.upper() if lower_ext else "MP3"
                         mime_type = f"audio/{lower_ext}" if lower_ext else "audio/mpeg"
                     else:
                         category = "IMAGES"
-                        format_label = ext_suffix.upper() if ext_suffix else "IMAGE"
+                        format_label = lower_ext.upper() if lower_ext else "IMAGE"
                         mime_type = f"image/{lower_ext}" if lower_ext in ["png", "jpeg", "jpg", "webp", "gif", "avif"] else "image/jpeg"
 
                     width = kwdict.get("width")
@@ -248,10 +398,17 @@ def extract_gallery_dl(url, options_json="{}"):
                     except Exception:
                         size_bytes = None
 
-                    thumb = kwdict.get("thumbnail") or kwdict.get("thumb") or (item_url if category == "IMAGES" else None)
+                    thumb = (
+                        kwdict.get("thumbnail")
+                        or kwdict.get("thumb")
+                        or kwdict.get("display_url")
+                        or kwdict.get("preview_url")
+                        or kwdict.get("poster")
+                        or (item_url if category == "IMAGES" else None)
+                    )
 
-                    # Route Reddit DASH videos extracted by gallery-dl through yt-dlp so audio is muxed
-                    item_source = "yt-dlp" if ("v.redd.it/" in lower_url and is_video) else "gallery-dl"
+                    # Route Reddit DASH videos and HLS streams extracted by gallery-dl through yt-dlp so audio is muxed
+                    item_source = "yt-dlp" if (("v.redd.it/" in lower_url and is_video) or is_stream) else "gallery-dl"
 
                     url_hash = hashlib.sha256(item_url.encode('utf-8')).hexdigest()[:12]
                     items.append({
@@ -295,21 +452,18 @@ def _get_android_sdk_int():
 def _is_webm_pair(video_fmt, audio_fmt=None):
     v_ext = ((video_fmt or {}).get("ext") or "").lower()
     v_codec = ((video_fmt or {}).get("vcodec") or "").lower()
-    a_codec = ((audio_fmt or {}).get("acodec") or "").lower()
-    return (
-        v_ext == "webm"
-        or v_codec.startswith(("vp9", "vp09", "vp8"))
-        or a_codec.startswith(("opus", "vorbis"))
-    )
+    if v_codec.startswith(("avc", "h264", "hev", "hvc", "mp4v", "av01")):
+        return False
+    return v_ext == "webm" or v_codec.startswith(("vp9", "vp09", "vp8"))
 
 def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
     """
     Analyzes yt-dlp formats list across all resolutions (up to 2K/4K/8K) and selects either:
     - ('muxed', muxed_fmt, None) when a pre-muxed stream matches the highest available resolution, or
-    - ('split', video_fmt, audio_fmt) pairing either:
+    - ('split', video_fmt, audio_fmt) pairing strictly container-compatible tracks:
         * MP4 container family: H.264/HEVC (and AV1 on Android 14+ / API 34+) video + M4A/AAC audio, or
         * WebM container family: VP9/VP8 2K/4K/8K video + Opus/Vorbis audio (supported via MUXER_OUTPUT_WEBM on API 26+).
-    Never selects a silent video-only format when audio tracks exist.
+    Never selects a silent video-only format when audio tracks exist, and never mixes H.264 video with WebM-only audio.
     """
     if not formats:
         return ("default", None, None)
@@ -322,6 +476,10 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
         if max_height and int(max_height) > 0 and h and int(h) > int(max_height):
             return False
         return True
+
+    def _is_direct_http_protocol(f):
+        proto = (f.get("protocol") or "").lower()
+        return proto in ("https", "http", "")
 
     muxed = [
         f for f in formats
@@ -347,6 +505,9 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
     def _is_mp4_compatible_video(f):
         ext = (f.get("ext") or "").lower()
         vc = (f.get("vcodec") or "").lower()
+        proto = (f.get("protocol") or "").lower()
+        if "m3u8" in proto:
+            return False
         if vc.startswith(("vp9", "vp09", "vp8")):
             return False
         if vc.startswith("av01"):
@@ -356,6 +517,9 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
     def _is_mp4_compatible_audio(f):
         ext = (f.get("ext") or "").lower()
         ac = (f.get("acodec") or "").lower()
+        proto = (f.get("protocol") or "").lower()
+        if "m3u8" in proto:
+            return False
         if ac.startswith(("opus", "vorbis")):
             return False
         return ext in ("m4a", "mp4", "aac") or ac.startswith(("mp4a", "aac"))
@@ -364,11 +528,17 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
     def _is_webm_compatible_video(f):
         ext = (f.get("ext") or "").lower()
         vc = (f.get("vcodec") or "").lower()
+        proto = (f.get("protocol") or "").lower()
+        if "m3u8" in proto:
+            return False
         return vc.startswith(("vp9", "vp09", "vp8")) or (ext == "webm" and not vc.startswith("av01"))
 
     def _is_webm_compatible_audio(f):
         ext = (f.get("ext") or "").lower()
         ac = (f.get("acodec") or "").lower()
+        proto = (f.get("protocol") or "").lower()
+        if "m3u8" in proto:
+            return False
         return ac.startswith(("opus", "vorbis")) or ext in ("webm", "ogg")
 
     mp4_videos = [f for f in video_only if _is_mp4_compatible_video(f)]
@@ -380,6 +550,7 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
         return (
             int(f.get("height") or 0),
             int(f.get("width") or 0),
+            1 if _is_direct_http_protocol(f) else 0,
             float(f.get("fps") or 0.0),
             float(f.get("tbr") or f.get("vbr") or 0.0),
             int(f.get("filesize") or f.get("filesize_approx") or 0)
@@ -387,6 +558,7 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
 
     def _audio_score(f):
         return (
+            1 if _is_direct_http_protocol(f) else 0,
             float(f.get("abr") or f.get("tbr") or 0.0),
             int(f.get("asr") or 0),
             int(f.get("filesize") or f.get("filesize_approx") or 0)
@@ -405,9 +577,6 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
         split_candidates.append((_video_score(best_mp4_video) + (1,), best_mp4_video, best_mp4_audio))
     if best_webm_video and best_webm_audio:
         split_candidates.append((_video_score(best_webm_video) + (0,), best_webm_video, best_webm_audio))
-    if not split_candidates and best_mp4_video and audio_only:
-        fallback_audio = max(audio_only, key=_audio_score)
-        split_candidates.append((_video_score(best_mp4_video) + (0,), best_mp4_video, fallback_audio))
 
     best_split_pair = max(split_candidates, key=lambda c: c[0]) if split_candidates else None
 
@@ -432,10 +601,25 @@ def _select_best_ytdlp_formats(formats, max_height=None, sdk_int=None):
 
     return ("default", None, None)
 
+def _extract_best_thumbnail(entry):
+    if not isinstance(entry, dict):
+        return None
+    thumb = entry.get("thumbnail")
+    if thumb and isinstance(thumb, str) and thumb.startswith(("http://", "https://")):
+        return thumb
+    thumbs = entry.get("thumbnails")
+    if isinstance(thumbs, list) and thumbs:
+        valid = [t for t in thumbs if isinstance(t, dict) and isinstance(t.get("url"), str) and t["url"].startswith(("http://", "https://"))]
+        if valid:
+            best_t = max(valid, key=lambda t: (int(t.get("height") or 0), int(t.get("width") or 0), int(t.get("preference") or 0)))
+            return best_t.get("url")
+    return None
+
 def extract_yt_dlp(url, options_json="{}"):
     """
     Extracts media items using yt-dlp exclusively.
-    Inspects both pre-muxed and split DASH formats so full resolution and audio availability are preserved.
+    Inspects both pre-muxed and split DASH formats so full resolution, multi-item carousels,
+    and audio availability are preserved.
     """
     clean_url = url.strip() if url else ""
     if not clean_url or not YTDLP_AVAILABLE:
@@ -449,16 +633,18 @@ def extract_yt_dlp(url, options_json="{}"):
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     cookies = opts.get("cookies")
     max_height = opts.get("max_height")
+    audio_only = bool(opts.get("audio_only", False))
 
     items = []
     page_title = ""
-    seen_urls = set()
+    seen_entry_keys = set()
 
     try:
         http_headers = {"User-Agent": user_agent}
         if cookies:
             http_headers["Cookie"] = cookies
 
+        probe_target = _normalize_reddit_probe_url(clean_url)
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -468,43 +654,60 @@ def extract_yt_dlp(url, options_json="{}"):
             "http_headers": http_headers
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
+            info = ydl.extract_info(probe_target, download=False)
             if info:
-                entries = info.get("entries") or [info]
-                for entry in entries:
+                top_title = info.get("title")
+                if top_title and not page_title:
+                    page_title = str(top_title)
+
+                raw_entries = info.get("entries")
+                entries = list(raw_entries) if raw_entries is not None else [info]
+                total_entries = len(entries)
+
+                for idx, entry in enumerate(entries):
                     if not entry or not isinstance(entry, dict):
                         continue
-
-                    # Preserve webpage URL so yt-dlp downloads and muxes non-expired video+audio streams at save time
-                    page_url = entry.get("webpage_url") or clean_url
-                    direct_url = page_url
-
-                    if not direct_url or direct_url in seen_urls:
-                        continue
-
-                    seen_urls.add(direct_url)
 
                     formats = entry.get("formats") or []
                     mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats, max_height=max_height)
 
+                    entry_id = str(entry.get("id") or f"idx_{idx}")
+                    page_url = entry.get("webpage_url") or clean_url
+
+                    # For multi-video carousels (e.g. Instagram / X / Reddit multi-clip posts),
+                    # if entries share the same parent webpage_url and mode is muxed with a direct stream URL,
+                    # use the direct stream URL so each slide has its own distinct downloadable URL.
+                    direct_fmt_url = (primary_fmt or {}).get("url") or entry.get("url")
+                    if total_entries > 1 and page_url == clean_url and mode == "muxed" and direct_fmt_url and direct_fmt_url.startswith(("http://", "https://")):
+                        direct_url = direct_fmt_url
+                    else:
+                        direct_url = page_url
+
+                    dedup_entry_key = f"{direct_url}#{entry_id}"
+                    if dedup_entry_key in seen_entry_keys:
+                        continue
+                    seen_entry_keys.add(dedup_entry_key)
+
                     v_title = entry.get("title") or entry.get("id") or f"media_{len(items) + 1}"
-                    if mode == "split":
+                    if audio_only:
+                        v_ext = "m4a"
+                    elif mode == "split":
                         v_ext = "webm" if _is_webm_pair(primary_fmt, secondary_fmt) else "mp4"
                     else:
                         v_ext = (primary_fmt or entry).get("ext") or "mp4"
-                    if v_ext in ("m3u8", "mpd", "unknown_video"):
+                    if v_ext in ("m3u8", "mpd", "unknown_video", "gifv"):
                         v_ext = "mp4"
-                    item_title = f"{v_title}.{v_ext}" if not v_title.endswith(f".{v_ext}") else v_title
+                    item_title = f"{v_title}.{v_ext}" if not str(v_title).endswith(f".{v_ext}") else str(v_title)
 
                     if not page_title:
-                        page_title = v_title
+                        page_title = str(v_title)
 
                     width = (primary_fmt or {}).get("width") or entry.get("width")
                     height = (primary_fmt or {}).get("height") or entry.get("height")
-                    resolution_hint = f"{width}x{height}" if width and height else None
-                    thumb = entry.get("thumbnail")
+                    resolution_hint = f"{width}x{height}" if (width and height and not audio_only) else None
+                    thumb = _extract_best_thumbnail(entry)
 
-                    if mode == "split" and primary_fmt and secondary_fmt:
+                    if mode == "split" and primary_fmt and secondary_fmt and not audio_only:
                         v_size = primary_fmt.get("filesize") or primary_fmt.get("filesize_approx") or 0
                         a_size = secondary_fmt.get("filesize") or secondary_fmt.get("filesize_approx") or 0
                         filesize = (v_size + a_size) if (v_size and a_size) else (entry.get("filesize") or entry.get("filesize_approx"))
@@ -513,18 +716,18 @@ def extract_yt_dlp(url, options_json="{}"):
                     else:
                         filesize = entry.get("filesize") or entry.get("filesize_approx")
 
-                    is_audio_only = (entry.get("vcodec") == "none" and mode != "split") or v_ext in ["mp3", "m4a", "opus", "aac"]
+                    is_audio_only = audio_only or (entry.get("vcodec") == "none" and mode != "split") or v_ext in ["mp3", "m4a", "opus", "aac"]
                     is_stream = (".m3u8" in clean_url) or (".mpd" in clean_url)
                     category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
 
-                    url_hash = hashlib.sha256(direct_url.encode('utf-8')).hexdigest()[:12]
+                    url_hash = hashlib.sha256(dedup_entry_key.encode('utf-8')).hexdigest()[:12]
                     items.append({
                         "id": f"ytdlp_{len(items)}_{url_hash}",
                         "url": direct_url,
                         "title": item_title,
                         "category": category,
                         "format": v_ext.upper(),
-                        "mimeType": f"audio/{v_ext}" if is_audio_only else ("application/x-mpegURL" if is_stream else f"video/{v_ext}"),
+                        "mimeType": f"audio/{'mp4' if v_ext == 'm4a' else v_ext}" if is_audio_only else ("application/x-mpegURL" if is_stream else f"video/{v_ext}"),
                         "isVideo": not is_audio_only,
                         "isAudio": is_audio_only,
                         "isStream": is_stream,
@@ -551,7 +754,7 @@ def extract_yt_dlp(url, options_json="{}"):
 def extract_media(url, options_json="{}"):
     """
     Extracts all media items using gallery-dl AND yt-dlp progressively.
-    Does not allow partial gallery-dl results to prevent yt-dlp from running.
+    Merges duplicate video entries when both gallery-dl and yt-dlp extract the same post video.
     """
     clean_url = url.strip() if url else ""
     if not clean_url:
@@ -585,11 +788,26 @@ def extract_media(url, options_json="{}"):
         ytdlp_res = json.loads(ytdlp_res_str)
         if not page_title and ytdlp_res.get("pageTitle"):
             page_title = ytdlp_res["pageTitle"]
-        for itm in ytdlp_res.get("items", []):
+        ytdlp_items = ytdlp_res.get("items", [])
+        gdl_video_indices = [i for i, x in enumerate(all_items) if x.get("isVideo")]
+
+        for itm in ytdlp_items:
             u = itm.get("url")
-            if u and u not in seen_urls:
+            if not u or u in seen_urls:
+                continue
+            # If gallery-dl already extracted a single video from this exact post without a thumbnail,
+            # upgrade it with yt-dlp's rich metadata & thumbnail instead of creating a duplicate card.
+            if len(ytdlp_items) == 1 and len(gdl_video_indices) == 1 and itm.get("isVideo"):
+                gdl_idx = gdl_video_indices[0]
+                existing_vid = all_items[gdl_idx]
+                merged_vid = dict(itm)
+                if not merged_vid.get("thumbnailUrl") and existing_vid.get("thumbnailUrl"):
+                    merged_vid["thumbnailUrl"] = existing_vid["thumbnailUrl"]
+                all_items[gdl_idx] = merged_vid
                 seen_urls.add(u)
-                all_items.append(itm)
+                continue
+            seen_urls.add(u)
+            all_items.append(itm)
     except Exception:
         pass
 
@@ -604,14 +822,13 @@ def extract_media(url, options_json="{}"):
 def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=None, progress_callback=None, max_height=0, audio_only=False):
     """
     Downloads a video/stream with yt-dlp, ensuring audio is always preserved:
-    1. Probes available formats for media_url (or referer if media_url is a raw v.redd.it DASH video).
-    2. If split DASH video + audio tracks are needed, downloads video_part.mp4 and audio_part.m4a
-       and muxes them with AndroidMediaMuxer (or leaves the parts for GalleryDlEngine to mux).
-    3. Otherwise downloads a verified pre-muxed format (vcodec!=none and acodec!=none), never falling back
-       to a silent video-only stream when audio tracks exist.
+    1. Probes available formats for media_url (or normalized Reddit URL if media_url is a raw v.redd.it DASH video).
+    2. Reuses extracted format info to avoid 3x-5x redundant GraphQL/API requests that trigger HTTP 429 on Instagram/Reddit.
+    3. If split DASH video + audio tracks are needed, downloads video_part and audio_part and muxes them with AndroidMediaMuxer.
+    4. Otherwise downloads a verified pre-muxed format (vcodec!=none and acodec!=none).
     """
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    probe_url = referer if ("v.redd.it/" in media_url.lower() and referer and ("reddit.com" in referer.lower() or "redd.it" in referer.lower())) else media_url
+    probe_url = _normalize_reddit_probe_url(media_url, referer=referer)
 
     probe_opts = {
         "quiet": True,
@@ -646,6 +863,7 @@ def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=N
         with yt_dlp.YoutubeDL(a_opts) as ydl_a:
             ydl_a.download([probe_url])
         return os.path.exists(target_path) and os.path.getsize(target_path) > 0
+
     if max_height and max_height > 0:
         capped = [f for f in formats if not f.get("height") or int(f.get("height") or 0) <= max_height]
         if capped:
@@ -759,9 +977,10 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
     ua = user_agent or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     lower_url = media_url.lower()
     is_stream = (".m3u8" in lower_url) or (".mpd" in lower_url)
-    is_social_or_video = any(h in lower_url for h in SOCIAL_VIDEO_HOSTS)
+    is_direct_raster_image = any(lower_url.split("?")[0].endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".svg"]) and "format=mp4" not in lower_url
+    is_social_or_video = (not is_direct_raster_image) and any(h in lower_url for h in SOCIAL_VIDEO_HOSTS)
 
-    # 1. For streams or social pages, prioritize yt-dlp with DASH audio+video mux support
+    # 1. For streams or social video pages, prioritize yt-dlp with DASH audio+video mux support
     if (is_stream or is_social_or_video) and YTDLP_AVAILABLE:
         try:
             http_headers = {"User-Agent": ua}
@@ -863,7 +1082,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
         pass
 
     # 3. Fallback to yt-dlp if direct request failed and target is a video/stream
-    if YTDLP_AVAILABLE and (is_stream or any(ext in lower_url for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd"] + SOCIAL_VIDEO_HOSTS)):
+    if YTDLP_AVAILABLE and not is_direct_raster_image and (is_stream or any(ext in lower_url for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd"] + SOCIAL_VIDEO_HOSTS)):
         try:
             http_headers = {"User-Agent": ua}
             if referer:

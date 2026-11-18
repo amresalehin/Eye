@@ -97,7 +97,7 @@ class DirectMediaProvider : ExtractionProvider {
     }
 }
 
-class GalleryDlProvider : ExtractionProvider {
+class GalleryDlProvider(private val appContext: Context? = null) : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
         return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
     }
@@ -109,9 +109,15 @@ class GalleryDlProvider : ExtractionProvider {
     ): MediaExtractionResult {
         onStatusUpdate("Extracting with gallery-dl...")
         val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(context.url).takeIf { it.isNotBlank() }
+        val maxHeight = appContext?.let {
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(it).maxHeight
+        } ?: 0
+        val audioOnly = appContext?.let {
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(it)
+        } ?: false
         val res = GalleryDlEngine.extractGalleryDl(
             context.url,
-            GalleryDlOptions(cookies = cookies)
+            GalleryDlOptions(cookies = cookies, maxHeight = maxHeight, audioOnly = audioOnly)
         )
         if (res.success) {
             for (item in res.items) {
@@ -123,17 +129,18 @@ class GalleryDlProvider : ExtractionProvider {
     }
 }
 
-class YtDlpProvider : ExtractionProvider {
+class YtDlpProvider(private val appContext: Context? = null) : ExtractionProvider {
     companion object {
         val VIDEO_HOSTS = listOf(
             "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
             "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "fb.watch",
-            "instagram.com", "reddit.com", "redd.it", "v.redd.it", "twitter.com", "x.com"
+            "instagram.com", "instagr.am", "pinterest.com", "pin.it", "pinimg.com", "v1.pinimg.com",
+            "reddit.com", "redd.it", "v.redd.it", "twitter.com", "x.com", "imgur.com"
         )
 
         fun matchesSupportedHost(url: String): Boolean {
             val lower = url.lowercase()
-            return VIDEO_HOSTS.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
+            return VIDEO_HOSTS.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd") || lower.endsWith(".gifv")
         }
     }
 
@@ -149,9 +156,15 @@ class YtDlpProvider : ExtractionProvider {
     ): MediaExtractionResult {
         onStatusUpdate("Extracting with yt-dlp...")
         val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(context.url).takeIf { it.isNotBlank() }
+        val maxHeight = appContext?.let {
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(it).maxHeight
+        } ?: 0
+        val audioOnly = appContext?.let {
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(it)
+        } ?: false
         val res = GalleryDlEngine.extractYtDlp(
             context.url,
-            GalleryDlOptions(cookies = cookies)
+            GalleryDlOptions(cookies = cookies, maxHeight = maxHeight, audioOnly = audioOnly)
         )
         if (res.success) {
             for (item in res.items) {
@@ -341,6 +354,9 @@ class DualMediaExtractor(private val context: Context) {
                         item.thumbnailUrl?.let { videoPosterKeys.add(MediaClassifier.deduplicationKey(it)) }
                         if (ytId != null) videoPosterKeys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
 
+                        if (key.startsWith("pinimg_video:")) {
+                            videoPosterKeys.add("pinimg:" + key.removePrefix("pinimg_video:"))
+                        }
                         var bestThumb = item.thumbnailUrl
                         for (pKey in videoPosterKeys) {
                             val existingImg = itemsMap[pKey]
@@ -350,6 +366,15 @@ class DualMediaExtractor(private val context: Context) {
                                 }
                                 itemsMap.remove(pKey)
                                 modified = true
+                            }
+                        }
+                        if (bestThumb == null) {
+                            val fallbackImg = itemsMap.values.firstOrNull {
+                                !it.isVideo && !it.isAudio &&
+                                    (it.resolutionHint == "OpenGraph" || it.resolutionHint == "Poster" || it.provenance.pageUrl == item.provenance.pageUrl)
+                            }
+                            if (fallbackImg != null) {
+                                bestThumb = fallbackImg.thumbnailUrl ?: fallbackImg.url
                             }
                         }
                         val candidateVideo = if (bestThumb != item.thumbnailUrl) item.copy(thumbnailUrl = bestThumb) else item
@@ -491,8 +516,8 @@ class DualMediaExtractor(private val context: Context) {
                     return@launch
                 }
 
-                val galleryDlProvider = GalleryDlProvider()
-                val ytDlpProvider = YtDlpProvider()
+                val galleryDlProvider = GalleryDlProvider(context)
+                val ytDlpProvider = YtDlpProvider(context)
                 val staticHtmlProvider = StaticHtmlProvider()
                 val isStructuredApplicable = galleryDlProvider.isApplicable(requestContext) || ytDlpProvider.isApplicable(requestContext)
 

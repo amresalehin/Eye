@@ -1056,8 +1056,10 @@ private fun ZoomableMediaItem(
                 },
             contentAlignment = Alignment.Center
         ) {
-            val imgW = intrinsicWidth.toFloat()
-            val imgH = intrinsicHeight.toFloat()
+            val effectiveWidth = if (intrinsicWidth > 0) intrinsicWidth else (videoState?.videoWidth ?: 0)
+            val effectiveHeight = if (intrinsicHeight > 0) intrinsicHeight else (videoState?.videoHeight ?: 0)
+            val imgW = effectiveWidth.toFloat()
+            val imgH = effectiveHeight.toFloat()
             val imageAspect = if (imgW > 0f && imgH > 0f) {
                 imgW / imgH
             } else if (targetBounds != null && targetBounds.width > 0f && targetBounds.height > 0f) {
@@ -1285,11 +1287,16 @@ private fun Context.findActivity(): Activity? {
 
 private fun shareMediaItem(context: Context, item: MediaItem) {
     runCatching {
+        val shareUri = if (item.uri.startsWith("/")) {
+            Uri.fromFile(java.io.File(item.uri))
+        } else {
+            Uri.parse(item.uri)
+        }
         context.startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).apply {
                     type = item.mimeType ?: com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(item.name.ifBlank { item.uri }).mimeType
-                    putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                    putExtra(Intent.EXTRA_STREAM, shareUri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 },
                 "Share media"

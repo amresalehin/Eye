@@ -1988,4 +1988,73 @@ class MediaDownloaderTest {
         prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
         prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST)
     }
+
+    @Test
+    fun testInstagramPinterestRedditAndGifRenderingFixes() {
+        // 1. Instagram post/reel webpage URLs are rejected as raw media, while Instagram CDN media is accepted
+        assertFalse(MediaClassifier.isValidMedia("https://www.instagram.com/p/C9abc123/"))
+        assertFalse(MediaClassifier.isValidMedia("https://www.instagram.com/reel/C9xyz789/?igsh=abc"))
+        assertTrue(MediaClassifier.checkSupportForInstagramAndPinterest("https://www.instagram.com/reel/C9xyz789/"))
+
+        // 2. Pinterest video streams (v1.pinimg.com) are preserved and not corrupted to i.pinimg.com/originals/
+        val pinVideoUrl = "https://v1.pinimg.com/videos/mc/720p/12/34/56/1234567890abcdef1234567890abcdef.mp4"
+        val pinThumbUrl = "https://i.pinimg.com/736x/12/34/56/1234567890abcdef1234567890abcdef.jpg"
+        val resolvedPinVideo = MediaClassifier.resolveOriginalMedia(pinVideoUrl)
+        assertEquals(pinVideoUrl, resolvedPinVideo.mediaUrl)
+
+        val resolvedPinImage = MediaClassifier.resolveOriginalMedia(pinThumbUrl)
+        assertEquals("https://i.pinimg.com/originals/12/34/56/1234567890abcdef1234567890abcdef.jpg", resolvedPinImage.mediaUrl)
+
+        // Deduplicating Pinterest video + static thumbnail keeps the video and folds the thumbnail into thumbnailUrl
+        val pinVideoItem = ScrapedMediaItem(
+            id = "pin_v",
+            url = pinVideoUrl,
+            title = "pin_video.mp4",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4"
+        )
+        val pinThumbItem = ScrapedMediaItem(
+            id = "pin_i",
+            url = pinThumbUrl,
+            title = "pin_thumb.jpg",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            mimeType = "image/jpeg"
+        )
+        val dedupedPin = MediaClassifier.deduplicateScrapedItems(listOf(pinThumbItem, pinVideoItem))
+        assertEquals(1, dedupedPin.size)
+        assertTrue(dedupedPin.first().isVideo)
+        assertEquals(pinVideoUrl, dedupedPin.first().url)
+        assertNotNull(dedupedPin.first().thumbnailUrl)
+
+        // 3. Reddit preview.redd.it slugged images and mp4 GIFs resolve properly
+        val redditSlugPreview = "https://preview.redd.it/cool-art-v0-abcdef1234567.png?width=1080&format=png&auto=webp&s=deadbeef"
+        val resolvedRedditImg = MediaClassifier.resolveOriginalMedia(redditSlugPreview)
+        assertEquals("https://i.redd.it/abcdef1234567.png", resolvedRedditImg.mediaUrl)
+
+        val redditMp4Gif = "https://preview.redd.it/funny_cat.gif?format=mp4&s=1234567890abcdef"
+        val resolvedRedditGif = MediaClassifier.resolveOriginalMedia(redditMp4Gif)
+        assertEquals(redditMp4Gif, resolvedRedditGif.mediaUrl)
+        assertTrue(MediaClassifier.classify(redditMp4Gif).isVideo)
+
+        val redditExternalPreview = "https://external-preview.redd.it/some_external_thumb.jpg?auto=webp&s=12345"
+        assertEquals(redditExternalPreview, MediaClassifier.resolveOriginalMedia(redditExternalPreview).mediaUrl)
+
+        // 4. Imgur .gifv resolves to .mp4 video stream
+        val imgurGifv = "https://i.imgur.com/abcdefg.gifv"
+        val resolvedImgur = MediaClassifier.resolveOriginalMedia(imgurGifv)
+        assertEquals("https://i.imgur.com/abcdefg.mp4", resolvedImgur.mediaUrl)
+
+        // 5. AndroidMediaMuxer rejects incompatible H.264 + Opus muxing and routes H.264 to MPEG_4
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/avc", "audio/opus")
+        )
+        assertFalse(com.amresalehin.emregallery.data.AndroidMediaMuxer.areTracksMuxable("video/avc", "audio/opus"))
+        assertTrue(com.amresalehin.emregallery.data.AndroidMediaMuxer.areTracksMuxable("video/avc", "audio/mp4a-latm"))
+        assertTrue(com.amresalehin.emregallery.data.AndroidMediaMuxer.areTracksMuxable("video/x-vnd.on2.vp9", "audio/opus"))
+    }
 }

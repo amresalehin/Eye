@@ -240,9 +240,22 @@ class StaticMediaScraper {
         }
 
         // 1. OpenGraph, Twitter & schema.org meta tags (Explicit publisher content)
+        var ogImageFallback: String? = null
+        for (ogMeta in doc.select("meta[property=og:image], meta[property=og:image:secure_url], meta[name=twitter:image], meta[itemprop=image]")) {
+            val c = ogMeta.attr("content").ifBlank { ogMeta.attr("value") }
+            if (c.isNotBlank()) {
+                val resolvedOg = MediaClassifier.resolveUrl(c, baseUrl)
+                if (resolvedOg != null && MediaClassifier.isValidMedia(resolvedOg)) {
+                    ogImageFallback = resolvedOg
+                    break
+                }
+            }
+        }
+
         val metaSelectors = listOf(
+            "meta[property=og:video:secure_url]", "meta[property=og:video:url]",
             "meta[property=og:video]", "meta[content][property=og:video]",
-            "meta[property=og:image]", "meta[content][property=og:image]",
+            "meta[property=og:image:secure_url]", "meta[property=og:image]", "meta[content][property=og:image]",
             "meta[name=twitter:image]", "meta[name=twitter:player:stream]",
             "meta[itemprop=image]", "meta[itemprop=video]"
         )
@@ -250,14 +263,47 @@ class StaticMediaScraper {
             for (meta in doc.select(sel)) {
                 val content = meta.attr("content").ifBlank { meta.attr("value") }
                 if (content.isNotBlank()) {
-                    addCandidate(content, ExtractionSource.STATIC_HTML, "OpenGraph", domSelector = sel)
+                    addCandidate(
+                        rawUrl = content,
+                        source = ExtractionSource.STATIC_HTML,
+                        resolution = "OpenGraph",
+                        posterUrl = ogImageFallback,
+                        domSelector = sel
+                    )
                 }
             }
         }
 
-        // 2. Video elements & posters (deduplicated per video element)
+        // 2. Video elements, shreddit-player & posters (deduplicated per video element)
+        for (shreddit in doc.select("shreddit-player, [packaged-media-json]")) {
+            val preview = shreddit.attr("preview").ifBlank { shreddit.attr("poster") }.ifBlank { ogImageFallback }
+            val src = shreddit.attr("src").ifBlank { shreddit.attr("data-mp4-url") }
+            if (src.isNotBlank() && !src.startsWith("blob:", true)) {
+                addCandidate(src, ExtractionSource.DOM_SCRAPE, posterUrl = preview, domSelector = "shreddit-player")
+            }
+                        val pkgJson = shreddit.attr("packaged-media-json")
+            if (pkgJson.isNotBlank()) {
+                val mp4Matches = Regex("""https://[^"'\s\\]+\.mp4(?:\?[^"'\s\\]*)?""").findAll(pkgJson)
+                for (m in mp4Matches) {
+                    addCandidate(m.value.replace("&amp;", "&"), ExtractionSource.DOM_SCRAPE, posterUrl = preview, domSelector = "shreddit-player[packaged-media-json]")
+                }
+            }
+        }
+
+        // 2b. Embedded JSON scripts for Pinterest video streams (v1.pinimg.com/videos/...mp4) and Reddit/Instagram mp4s
+        for (script in doc.select("script#__PWS_DATA__, script[type=application/json], script[type=application/ld+json]")) {
+            val data = script.data().ifBlank { script.html() }
+            if (data.contains("pinimg.com/videos/") || data.contains("v.redd.it/") || data.contains("cdninstagram.com/")) {
+                val videoRegex = Regex("""https:(?:\\/|/){2}(?:v1?\.pinimg\.com/videos/[^"'\s\\]+\.mp4|v\.redd\.it/[A-Za-z0-9]+/DASH_\d+\.mp4)[^"'\s\\]*""")
+                for (match in videoRegex.findAll(data)) {
+                    val cleanVideoUrl = match.value.replace("\\/", "/").replace("\\u0026", "&")
+                    addCandidate(cleanVideoUrl, ExtractionSource.DOM_SCRAPE, posterUrl = ogImageFallback, domSelector = "script[json]")
+                }
+            }
+        }
+
         for (video in doc.select("video")) {
-            val poster = video.attr("poster").ifBlank { null }
+            val poster = video.attr("poster").ifBlank { ogImageFallback }
             val vw = video.attr("width").toIntOrNull()
             val vh = video.attr("height").toIntOrNull()
             val vRes = if (vw != null && vh != null) "${vw}x${vh}" else null

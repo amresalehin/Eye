@@ -18,6 +18,8 @@ import kotlinx.coroutines.withContext
  * Coil adapter for Android's MediaStore thumbnail API, backed by the app's prepared-thumbnail
  * disk cache. The first miss loads MediaStore on IO; subsequent visits decode the compact WebP
  * file and don't need to ask MediaStore to generate the same thumbnail again.
+ * Animated GIFs bypass this static WebP thumbnail cache so Coil's ImageDecoderDecoder / GifDecoder
+ * can render full frame animation.
  */
 class MediaStoreThumbnailFetcher(
     private val context: Context,
@@ -26,6 +28,11 @@ class MediaStoreThumbnailFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? = withContext(Dispatchers.IO) {
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        if (mime != null && mime.equals("image/gif", ignoreCase = true)) {
+            return@withContext null
+        }
+
         val widthDim = options.size.width
         val heightDim = options.size.height
         if (widthDim !is Dimension.Pixels || heightDim !is Dimension.Pixels) {
@@ -48,6 +55,10 @@ class MediaStoreThumbnailFetcher(
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
+            val uriStr = data.toString()
+            if (uriStr.endsWith(".gif", ignoreCase = true)) {
+                return null
+            }
             if (data.scheme == "content" &&
                 (data.authority == "media" || data.authority == MediaStore.AUTHORITY)
             ) {

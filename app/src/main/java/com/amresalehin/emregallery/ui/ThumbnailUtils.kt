@@ -6,6 +6,7 @@ import android.net.Uri
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
+import java.io.File
 import kotlin.math.max
 
 /**
@@ -19,6 +20,27 @@ object ThumbnailUtils {
 
     fun mediaThumbnailKey(uri: String): String = "${uri}_thumb"
 
+    /**
+     * Safely parses a media URI or raw filesystem path so local files with spaces, '#', or '%'
+     * never get truncated as URI fragments/queries.
+     */
+    fun parseMediaDataModel(uri: String): Any {
+        val trimmed = uri.trim()
+        if (trimmed.startsWith("/")) {
+            return File(trimmed)
+        }
+        if (trimmed.startsWith("file://", ignoreCase = true)) {
+            val filePath = runCatching { Uri.parse(trimmed).path }.getOrNull() ?: trimmed.removePrefix("file://")
+            return File(filePath)
+        }
+        return Uri.parse(trimmed)
+    }
+
+    private fun isAnimatedFormatUri(uri: String): Boolean {
+        val clean = uri.substringBefore('?').substringBefore('#').lowercase()
+        return clean.endsWith(".gif") || clean.endsWith(".webp")
+    }
+
     fun buildThumbnailRequest(
         context: Context,
         uri: String,
@@ -26,8 +48,9 @@ object ThumbnailUtils {
         heightPx: Int = THUMBNAIL_DIMENSION,
         useRgb565: Boolean = false
     ): ImageRequest {
+        val isAnimated = isAnimatedFormatUri(uri)
         val builder = ImageRequest.Builder(context)
-            .data(Uri.parse(uri))
+            .data(parseMediaDataModel(uri))
             .size(widthPx, heightPx)
             .precision(Precision.INEXACT)
             // Grid thumbnails should appear on the first available frame; the outline is already
@@ -37,10 +60,10 @@ object ThumbnailUtils {
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCacheKey(mediaThumbnailKey(uri))
             .memoryCachePolicy(CachePolicy.ENABLED)
-            .allowHardware(true)
-            .allowRgb565(true)
+            .allowHardware(!isAnimated)
+            .allowRgb565(!isAnimated && useRgb565)
 
-        if (useRgb565) {
+        if (useRgb565 && !isAnimated) {
             builder.bitmapConfig(Bitmap.Config.RGB_565)
         }
         return builder.build()
@@ -51,10 +74,13 @@ object ThumbnailUtils {
         uri: String,
         isVideo: Boolean
     ): ImageRequest {
+        val isAnimated = isAnimatedFormatUri(uri)
         val builder = ImageRequest.Builder(context)
-            .data(Uri.parse(uri))
+            .data(parseMediaDataModel(uri))
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
+            .allowHardware(!isAnimated)
+            .allowRgb565(false)
 
         if (isVideo) {
             builder
@@ -73,8 +99,10 @@ object ThumbnailUtils {
                 .placeholderMemoryCacheKey(mediaThumbnailKey(uri))
                 .diskCacheKey("${uri}:viewer-scaled")
                 .memoryCacheKey("${uri}:viewer-scaled")
-                .crossfade(true)
-                .crossfade(150)
+                .crossfade(!isAnimated)
+                .apply {
+                    if (!isAnimated) crossfade(150)
+                }
         }
         return builder.build()
     }

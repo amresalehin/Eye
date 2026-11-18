@@ -1196,7 +1196,9 @@ fun GalleryApp() {
                             val file = java.io.File(uri.removePrefix("file://"))
                             val fallbackName = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
                             val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { uri })
-                            val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
+                            val match = media.firstOrNull {
+                                it.uri == uri || (file.exists() && it.name.equals(file.name, ignoreCase = true) && (it.sizeBytes == 0L || it.sizeBytes == file.length()))
+                            }
                             val targetItem = if (match != null) {
                                 if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
                                     match.copy(mimeType = classified.mimeType)
@@ -1226,7 +1228,9 @@ fun GalleryApp() {
                                 val file = java.io.File(u.removePrefix("file://"))
                                 val fallbackName = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
                                 val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { u })
-                                val match = media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) }
+                                val match = media.firstOrNull {
+                                    it.uri == u || (file.exists() && it.name.equals(file.name, ignoreCase = true) && (it.sizeBytes == 0L || it.sizeBytes == file.length()))
+                                }
                                 if (match != null) {
                                     if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
                                         match.copy(mimeType = classified.mimeType)

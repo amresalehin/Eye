@@ -850,10 +850,13 @@ fun SavedStackPreviewCard(
                         ?: coverItem?.sourceUrl?.takeIf { it.isNotBlank() }
 
                     if (imageModel != null) {
+                        val parsedModel = ThumbnailUtils.parseMediaDataModel(imageModel)
+                        val isAnimated = imageModel.endsWith(".gif", ignoreCase = true) || imageModel.endsWith(".webp", ignoreCase = true)
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
-                                .data(imageModel)
-                                .crossfade(true)
+                                .data(parsedModel)
+                                .allowHardware(!isAnimated)
+                                .crossfade(!isAnimated)
                                 .build(),
                             contentDescription = stack.title,
                             modifier = Modifier.fillMaxSize(),
@@ -2324,12 +2327,50 @@ fun DownloaderMediaCard(
                     }
                 } else {
                     val previewUrl = item.thumbnailUrl ?: item.url
+                    val isGif = item.format.equals("GIF", ignoreCase = true) ||
+                        previewUrl.substringBefore('?').endsWith(".gif", ignoreCase = true)
+                    val ctx = LocalContext.current
+                    val cardRequest = remember(previewUrl, item.downloadHeaders, item.provenance.pageUrl, isGif) {
+                        val referer = item.downloadHeaders["Referer"]
+                            ?: item.provenance.pageUrl.takeIf { it.isNotBlank() }
+                        val cookies = item.downloadHeaders["Cookie"]
+                            ?: OkHttpDownloader.sharedCookieJar.getCookieString(previewUrl)
+                                .ifBlank { referer?.let { OkHttpDownloader.sharedCookieJar.getCookieString(it) }.orEmpty() }
+                        ImageRequest.Builder(ctx)
+                            .data(ThumbnailUtils.parseMediaDataModel(previewUrl))
+                            .setHeader("User-Agent", item.downloadHeaders["User-Agent"] ?: OkHttpDownloader.DEFAULT_USER_AGENT)
+                            .apply {
+                                if (!referer.isNullOrBlank()) setHeader("Referer", referer)
+                                if (cookies.isNotBlank()) setHeader("Cookie", cookies)
+                            }
+                            .allowHardware(!isGif)
+                            .crossfade(!isGif)
+                            .build()
+                    }
                     AsyncImage(
-                        model = previewUrl,
+                        model = cardRequest,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
+                    if (item.isVideo || item.isStream) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Top-Left Format Pill

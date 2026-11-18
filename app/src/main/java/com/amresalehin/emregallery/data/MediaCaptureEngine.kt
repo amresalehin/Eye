@@ -105,11 +105,13 @@ object MediaCaptureEngine {
                     }
                 }
 
-                // 2. Video Elements & Sources
+                // 2. Video Elements, Reddit shreddit-player & Sources
+                var ogImgMeta = document.querySelector('meta[property="og:image"], meta[name="twitter:image"]');
+                var ogFallbackPoster = ogImgMeta ? resolveAbs(ogImgMeta.getAttribute('content')) : null;
                 var videos = document.querySelectorAll('video');
                 for (var v = 0; v < videos.length; v++) {
                     var vid = videos[v];
-                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster);
+                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster) || ogFallbackPoster;
                     var chosenVideo = null;
                     if (vid.src && !vid.src.startsWith('blob:') && !vid.src.startsWith('data:')) {
                         chosenVideo = resolveAbs(vid.src);
@@ -127,6 +129,25 @@ object MediaCaptureEngine {
                         list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video'});
                     } else if (poster) {
                         list.push({u: poster, s: 'POSTER', r: 'poster'});
+                    }
+                }
+
+                var shredditPlayers = document.querySelectorAll('shreddit-player, [packaged-media-json]');
+                for (var sp = 0; sp < shredditPlayers.length; sp++) {
+                    var playerEl = shredditPlayers[sp];
+                    var spPoster = resolveAbs(playerEl.getAttribute('preview') || playerEl.getAttribute('poster')) || ogFallbackPoster;
+                    var spSrc = playerEl.getAttribute('src');
+                    if (spSrc && !spSrc.startsWith('blob:')) {
+                        var absSp = resolveAbs(spSrc);
+                        if (absSp) list.push({u: absSp, s: 'DOM', p: spPoster, r: 'video'});
+                    }
+                    var pkg = playerEl.getAttribute('packaged-media-json');
+                    if (pkg) {
+                        var mp4Regex = /https:\/\/[^"'\s\\]+\.mp4(?:\?[^"'\s\\]*)?/g;
+                        var m;
+                        while ((m = mp4Regex.exec(pkg)) !== null) {
+                            list.push({u: m[0].replace(/&amp;/g, '&'), s: 'DOM', p: spPoster, r: 'video'});
+                        }
                     }
                 }
 
@@ -350,7 +371,7 @@ object MediaCaptureEngine {
         mimeHint: String? = null,
         indexHint: Int = 0
     ): ScrapedMediaItem? {
-        val trimmed = rawUrl.trim()
+        val trimmed = MediaClassifier.cleanMediaUrl(rawUrl.trim())
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
         if (trimmed.startsWith("data:", ignoreCase = true) && !MediaClassifier.isSubstantialDataUri(trimmed)) return null
         if (MediaClassifier.isMediaFragment(trimmed)) return null
@@ -431,12 +452,13 @@ object MediaCaptureEngine {
             return AdBlockEngine.createEmptyResponse()
         }
 
-        // 2. Reject streaming slice fragments (.ts slices, dash segments)
-        if (MediaClassifier.isMediaFragment(reqUrl)) {
+        // 2. Clean byte-range params first, then reject true streaming slice fragments (.ts slices, dash segments)
+        val cleanedReqCandidate = MediaClassifier.cleanMediaUrl(reqUrl)
+        if (MediaClassifier.isMediaFragment(cleanedReqCandidate)) {
             return null
         }
 
-        val reqLower = reqUrl.lowercase()
+        val reqLower = cleanedReqCandidate.lowercase()
         val cleanReqPath = reqLower.substringBefore("?").substringBefore("#")
         val headers = request.requestHeaders ?: emptyMap()
         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
@@ -444,7 +466,7 @@ object MediaCaptureEngine {
         // Reject non-media API, logging, telemetry endpoints
         val isNonMediaEndpoint = cleanReqPath.contains("/api/") || cleanReqPath.contains("/apis/") ||
                 cleanReqPath.contains("/youtubei/") || cleanReqPath.contains("/stats/") ||
-                cleanReqPath.contains("/log") || cleanReqPath.contains("/logging") ||
+                cleanReqPath.contains("/log/") || cleanReqPath.endsWith("/log") || cleanReqPath.contains("/logging") ||
                 cleanReqPath.contains("/ptracking") || cleanReqPath.contains("/beacon") ||
                 cleanReqPath.contains("/telemetry") || cleanReqPath.contains("/metrics") ||
                 cleanReqPath.contains("generate_204") || cleanReqPath.contains("/recaptcha") ||

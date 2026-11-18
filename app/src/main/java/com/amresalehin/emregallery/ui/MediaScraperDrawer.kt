@@ -131,8 +131,28 @@ fun RealScrapedCard(
                         )
                     }
                 } else {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val isGif = item.format.equals("GIF", ignoreCase = true) ||
+                        previewUrl.substringBefore('?').endsWith(".gif", ignoreCase = true)
+                    val scraperImageRequest = remember(previewUrl, item.downloadHeaders, item.provenance.pageUrl, isGif) {
+                        val referer = item.downloadHeaders["Referer"]
+                            ?: item.provenance.pageUrl.takeIf { it.isNotBlank() }
+                        val cookies = item.downloadHeaders["Cookie"]
+                            ?: com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar.getCookieString(previewUrl)
+                                .ifBlank { referer?.let { com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar.getCookieString(it) }.orEmpty() }
+                        coil.request.ImageRequest.Builder(context)
+                            .data(ThumbnailUtils.parseMediaDataModel(previewUrl))
+                            .setHeader("User-Agent", item.downloadHeaders["User-Agent"] ?: com.amresalehin.emregallery.data.OkHttpDownloader.DEFAULT_USER_AGENT)
+                            .apply {
+                                if (!referer.isNullOrBlank()) setHeader("Referer", referer)
+                                if (cookies.isNotBlank()) setHeader("Cookie", cookies)
+                            }
+                            .allowHardware(!isGif)
+                            .crossfade(!isGif)
+                            .build()
+                    }
                     SubcomposeAsyncImage(
-                        model = previewUrl,
+                        model = scraperImageRequest,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),

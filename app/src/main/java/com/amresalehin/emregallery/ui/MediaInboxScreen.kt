@@ -814,7 +814,7 @@ fun TrueMediaMosaicThumbnail(
             }
             items.size == 1 -> {
                 AsyncImage(
-                    model = items[0].localUri,
+                    model = ThumbnailUtils.parseMediaDataModel(items[0].localUri),
                     contentDescription = items[0].title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -1109,10 +1109,12 @@ fun ImageStackCard(
                             )
                         }
                     } else if (coverImageModel != null) {
+                        val isAnimatedCover = coverImageModel.endsWith(".gif", ignoreCase = true) || coverImageModel.endsWith(".webp", ignoreCase = true)
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(coverImageModel)
-                                .crossfade(true)
+                                .data(ThumbnailUtils.parseMediaDataModel(coverImageModel))
+                                .allowHardware(!isAnimatedCover)
+                                .crossfade(!isAnimatedCover)
                                 .build(),
                             contentDescription = stack.title,
                             contentScale = ContentScale.Crop,
@@ -1982,9 +1984,13 @@ fun RealDeckMediaCard(
                             val u = java.net.URI(resolvedUrl)
                             "${u.scheme ?: "https"}://${u.host}/"
                         }.getOrNull()
+                    val isAnimatedCard = resolvedUrl.substringBefore('?').endsWith(".gif", ignoreCase = true) ||
+                        resolvedUrl.substringBefore('?').endsWith(".webp", ignoreCase = true) ||
+                        item.format.equals("GIF", ignoreCase = true)
                     val builder = ImageRequest.Builder(context)
-                        .data(if (imageSource is File) imageSource else resolvedUrl)
-                        .crossfade(true)
+                        .data(if (imageSource is File) imageSource else ThumbnailUtils.parseMediaDataModel(resolvedUrl))
+                        .allowHardware(!isAnimatedCard)
+                        .crossfade(!isAnimatedCard)
                         .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
                         .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                         .setHeader("Sec-Fetch-Dest", "image")

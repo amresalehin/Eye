@@ -104,6 +104,7 @@ class MediaDownloadWorker(
         }.getOrDefault(emptyMap())
 
         val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
+            ?: OkHttpDownloader.sharedCookieJar.getCookieString(sourceUrl).takeIf { it.isNotBlank() }
             ?: downloadHeaders["Cookie"]
         val resolvedSubfolder = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
             context = applicationContext,
@@ -137,8 +138,9 @@ class MediaDownloadWorker(
             var errorDiagnostic: String? = null
 
             val socialHosts = listOf(
-                "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com",
-                "twitter.com", "x.com", "reddit.com", "redd.it", "v.redd.it", "facebook.com", "fb.watch"
+                "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am", "vimeo.com",
+                "twitter.com", "x.com", "reddit.com", "redd.it", "v.redd.it", "facebook.com", "fb.watch",
+                "pinterest.com", "pin.it", "v1.pinimg.com"
             )
             val isSocialUrl = socialHosts.any { host ->
                 mediaUrl.contains(host, ignoreCase = true) ||
@@ -242,15 +244,20 @@ class MediaDownloadWorker(
             if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
                 setProgress(workDataOf(KEY_PROGRESS to 1.0f, KEY_STATUS to "Saved successfully"))
 
+                val localClass = MediaClassifier.resolveLocalMediaMimeType(downloadedFile.name)
+                val finalIsAudio = isAudio || localClass.isAudio
+                val finalIsVideo = !finalIsAudio && (isVideo || localClass.isVideo)
+                val finalFormat = if (finalIsAudio) localClass.format else format.ifBlank { localClass.format }
+
                 val inboxItem = MediaInboxItem(
                     id = itemId,
                     title = title,
                     localUri = downloadedFile.absolutePath,
                     sourceUrl = mediaUrl,
-                    isVideo = isVideo,
-                    isAudio = isAudio,
+                    isVideo = finalIsVideo,
+                    isAudio = finalIsAudio,
                     isStream = isStream,
-                    format = format,
+                    format = finalFormat,
                     sizeBytes = downloadedFile.length(),
                     dateAddedMillis = System.currentTimeMillis()
                 )

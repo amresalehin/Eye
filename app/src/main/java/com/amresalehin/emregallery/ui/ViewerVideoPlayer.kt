@@ -61,6 +61,8 @@ class ViewerVideoState(
     var durationMs by mutableLongStateOf(0L)
     var isMuted by mutableStateOf(false)
     var isFullscreen by mutableStateOf(false)
+    var videoWidth by mutableIntStateOf(0)
+    var videoHeight by mutableIntStateOf(0)
 
     fun togglePlayPause() {
         val targetPlay = !isPlaying
@@ -122,9 +124,14 @@ fun rememberViewerVideoState(
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
                 .setDataSourceFactory(upstreamDataSourceFactory)
 
-            val parsedUri = Uri.parse(uri)
-            val isHls = uri.contains(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
-            val isDash = uri.contains(".mpd", ignoreCase = true) || uri.contains("dash", ignoreCase = true)
+            val parsedUri = when {
+                uri.startsWith("/") -> Uri.fromFile(java.io.File(uri))
+                uri.startsWith("file://", ignoreCase = true) -> Uri.fromFile(java.io.File(uri.removePrefix("file://")))
+                else -> Uri.parse(uri)
+            }
+            val cleanUriPath = uri.substringBefore('?').substringBefore('#')
+            val isHls = cleanUriPath.endsWith(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
+            val isDash = cleanUriPath.endsWith(".mpd", ignoreCase = true)
 
             val mediaItem = ExoMediaItem.Builder()
                 .setUri(parsedUri)
@@ -169,6 +176,14 @@ fun rememberViewerVideoState(
                 state.isFirstFrameRendered = true
             }
 
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    state.videoWidth = videoSize.width
+                    state.videoHeight = videoSize.height
+                    state.isFirstFrameRendered = true
+                }
+            }
+
             override fun onIsPlayingChanged(playing: Boolean) {
                 state.isPlaying = playing
             }
@@ -176,6 +191,12 @@ fun rememberViewerVideoState(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     state.durationMs = player?.duration?.takeIf { it > 0L } ?: 0L
+                    val vSize = player?.videoSize
+                    if (vSize != null && vSize.width > 0 && vSize.height > 0) {
+                        state.videoWidth = vSize.width
+                        state.videoHeight = vSize.height
+                    }
+                    state.isFirstFrameRendered = true
                 }
             }
         }
@@ -200,9 +221,8 @@ fun rememberViewerVideoState(
         }
     }
 
-    // Poll current playback position while controls are visible
-    LaunchedEffect(player, uri, showControls) {
-        if (!showControls) return@LaunchedEffect
+    // Poll current playback position for controls and Story Mode progress
+    LaunchedEffect(player, uri) {
         while (player != null && isActive) {
             state.positionMs = player.currentPosition.coerceAtLeast(0L)
             val d = player.duration

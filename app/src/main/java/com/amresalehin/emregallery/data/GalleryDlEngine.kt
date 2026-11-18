@@ -37,7 +37,9 @@ data class GalleryDlSupportInfo(
 data class GalleryDlOptions(
     val userAgent: String? = null,
     val cookies: String? = null,
-    val timeoutSeconds: Int = 30
+    val timeoutSeconds: Int = 30,
+    val maxHeight: Int = 0,
+    val audioOnly: Boolean = false
 )
 
 data class GalleryDlExtractResult(
@@ -66,7 +68,7 @@ class PythonProgressBridge(
 /**
  * Gallery-dl and yt-dlp integration service powered by Chaquopy Python SDK on Android.
  * Enables extracting multi-image galleries, videos, high-resolution original artwork,
- * and direct downloads from 280+ supported websites (Reddit, Imgur, X/Twitter, Pinterest,
+ * and direct downloads from 280+ supported websites (Reddit, Instagram, Imgur, X/Twitter, Pinterest,
  * ArtStation, DeviantArt, Booru boards, Flickr, Tumblr, Wikimedia Commons, etc.).
  */
 object GalleryDlEngine {
@@ -203,6 +205,16 @@ object GalleryDlEngine {
         val itemsArray = root.optJSONArray("items") ?: JSONArray()
         val itemsList = mutableListOf<ScrapedMediaItem>()
 
+        val sessionCookies = runCatching { OkHttpDownloader.sharedCookieJar.getCookieString(pageUrl) }.getOrDefault("")
+        val baseHeaders = mutableMapOf(
+            "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+            "Referer" to pageUrl
+        ).apply {
+            if (sessionCookies.isNotBlank()) {
+                put("Cookie", sessionCookies)
+            }
+        }
+
         for (i in 0 until itemsArray.length()) {
             val obj = itemsArray.getJSONObject(i)
             val catStr = obj.optString("category", "IMAGES")
@@ -237,10 +249,7 @@ object GalleryDlEngine {
                     pageUrl = pageUrl
                 ),
                 metadata = mapOf("source_url" to pageUrl),
-                downloadHeaders = mapOf(
-                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                    "Referer" to pageUrl
-                )
+                downloadHeaders = baseHeaders
             )
             itemsList.add(item)
         }
@@ -267,6 +276,12 @@ object GalleryDlEngine {
                 options.userAgent?.let { put("user_agent", it) }
                 options.cookies?.let { put("cookies", it) }
                 put("timeout", options.timeoutSeconds)
+                if (options.maxHeight > 0) {
+                    put("max_height", options.maxHeight)
+                }
+                if (options.audioOnly) {
+                    put("audio_only", true)
+                }
             }.toString()
 
             val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
@@ -325,22 +340,40 @@ object GalleryDlEngine {
 
         val candidateAudioUrls = AndroidMediaMuxer.tryResolveRedditAudioUrls(mediaUrl)
         for (audioUrl in candidateAudioUrls) {
-            val audioTempName = "${videoFile.nameWithoutExtension}_reddit_audio.m4a"
-            val audioRes = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = audioUrl,
-                fileName = audioTempName,
-                referer = referer,
-                headers = headers
-            )
-            val audioFile = audioRes.file
-            if (audioRes.isSuccessful && audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
-                val muxed = AndroidMediaMuxer.muxVideoAndAudio(videoFile, audioFile, videoFile)
-                runCatching { if (audioFile.exists()) audioFile.delete() }
-                if (muxed) {
-                    Log.d(TAG, "Successfully muxed companion Reddit DASH audio from $audioUrl")
-                    break
+            val audioTempFile = File(context.cacheDir, "${videoFile.nameWithoutExtension}_reddit_audio_${System.currentTimeMillis()}.m4a")
+            try {
+                val reqBuilder = okhttp3.Request.Builder()
+                    .url(audioUrl)
+                    .header("User-Agent", headers?.get("User-Agent") ?: OkHttpDownloader.DEFAULT_USER_AGENT)
+                    .header("Accept", "*/*")
+                if (!referer.isNullOrBlank()) {
+                    reqBuilder.header("Referer", referer)
                 }
+                headers?.forEach { (k, v) -> reqBuilder.header(k, v) }
+
+                var downloadedAudio = false
+                OkHttpDownloader.client.newCall(reqBuilder.build()).execute().use { resp ->
+                    val contentType = resp.header("Content-Type")?.lowercase().orEmpty()
+                    if (resp.isSuccessful && !contentType.contains("text/html") && !contentType.contains("xml")) {
+                        resp.body?.byteStream()?.use { input ->
+                            audioTempFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        downloadedAudio = audioTempFile.exists() && audioTempFile.length() > 512L
+                    }
+                }
+
+                if (downloadedAudio) {
+                    val muxed = AndroidMediaMuxer.muxVideoAndAudio(videoFile, audioTempFile, videoFile)
+                    if (muxed) {
+                        Log.d(TAG, "Successfully muxed companion Reddit DASH audio from $audioUrl")
+                        break
+                    }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                runCatching { if (audioTempFile.exists()) audioTempFile.delete() }
             }
         }
         videoFile
@@ -363,24 +396,36 @@ object GalleryDlEngine {
     ): File? = withContext(Dispatchers.IO) {
         try {
             val dir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
+            val qualityCap = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
+            val audioOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context)
+
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val rawExt = sanitizedName.substringAfterLast('.', "")
+            val effectiveExt = if (audioOnly && rawExt.lowercase() in setOf("mp4", "webm", "mkv", "mov", "m3u8", "mpd", "")) {
+                "m4a"
+            } else {
+                rawExt
+            }
+            val adjustedSanitizedName = if (effectiveExt.isNotEmpty() && effectiveExt != rawExt) {
+                "${sanitizedName.substringBeforeLast('.')}.$effectiveExt"
+            } else {
+                sanitizedName
+            }
+
             val deterministicBase = if (!downloadId.isNullOrBlank()) {
                 val cleanId = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-                val ext = sanitizedName.substringAfterLast('.', "")
-                if (ext.isNotEmpty() && !cleanId.endsWith(".$ext", ignoreCase = true)) {
-                    "$cleanId.$ext"
+                if (effectiveExt.isNotEmpty() && !cleanId.endsWith(".$effectiveExt", ignoreCase = true)) {
+                    "$cleanId.$effectiveExt"
                 } else {
                     cleanId
                 }
             } else {
-                OkHttpDownloader.generateDeterministicId(mediaUrl, sanitizedName)
+                OkHttpDownloader.generateDeterministicId(mediaUrl, adjustedSanitizedName)
             }
             val targetFile = File(dir, deterministicBase)
 
             val userAgent = headers?.get("User-Agent") ?: OkHttpDownloader.DEFAULT_USER_AGENT
             val effectiveCookies = cookies ?: headers?.get("Cookie")
-            val qualityCap = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
-            val audioOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context)
             val headersJson = run {
                 val json = JSONObject()
                 headers?.forEach { (k, v) -> json.put(k, v) }
@@ -419,7 +464,11 @@ object GalleryDlEngine {
                 }
 
                 if (success && targetFile.exists() && targetFile.length() > 0L) {
-                    val finalizedFile = ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                    val finalizedFile = if (audioOnly) {
+                        targetFile
+                    } else {
+                        ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                    }
                     android.media.MediaScannerConnection.scanFile(
                         context,
                         arrayOf(finalizedFile.absolutePath),
@@ -436,7 +485,7 @@ object GalleryDlEngine {
             val fallbackFile = OkHttpDownloader.downloadMediaFile(
                 context = context,
                 mediaUrl = mediaUrl,
-                fileName = fileName,
+                fileName = adjustedSanitizedName,
                 referer = referer,
                 downloadId = downloadId,
                 headers = headers,
@@ -450,7 +499,11 @@ object GalleryDlEngine {
                 } else null
             )
             if (fallbackFile != null && fallbackFile.exists() && fallbackFile.length() > 0L) {
-                return@withContext ensureRedditAudioMuxed(context, fallbackFile, mediaUrl, referer, headers)
+                return@withContext if (audioOnly) {
+                    fallbackFile
+                } else {
+                    ensureRedditAudioMuxed(context, fallbackFile, mediaUrl, referer, headers)
+                }
             }
             null
         } catch (e: Exception) {
@@ -461,9 +514,10 @@ object GalleryDlEngine {
 
     fun defaultPopularSites(): List<GalleryDlSite> = listOf(
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
+        GalleryDlSite("Instagram", listOf("instagram.com", "instagr.am"), "photo_camera"),
         GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
         GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
-        GalleryDlSite("Pinterest", listOf("pinterest.com", "i.pinimg.com"), "pin"),
+        GalleryDlSite("Pinterest", listOf("pinterest.com", "pin.it", "i.pinimg.com", "v1.pinimg.com"), "pin"),
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),

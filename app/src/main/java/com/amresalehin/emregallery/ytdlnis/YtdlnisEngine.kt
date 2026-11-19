@@ -41,8 +41,13 @@ object YtdlnisEngine {
         flatPlaylist: Boolean = true
     ): YtdlnisFetchResult = withContext(Dispatchers.IO) {
         GalleryDlEngine.init(context)
-        if (urlOrQuery.startsWith("http", ignoreCase = true) && !HostRateLimiter.acquire(urlOrQuery)) {
-            val waitSec = (HostRateLimiter.remainingCooldownMs(urlOrQuery) / 1000L).coerceAtLeast(1L)
+        val effectiveUrlOrQuery = if (GalleryDlEngine.isYouTubeUrl(urlOrQuery)) {
+            GalleryDlEngine.normalizeYouTubeUrl(urlOrQuery)
+        } else {
+            urlOrQuery
+        }
+        if (effectiveUrlOrQuery.startsWith("http", ignoreCase = true) && !HostRateLimiter.acquire(effectiveUrlOrQuery)) {
+            val waitSec = (HostRateLimiter.remainingCooldownMs(effectiveUrlOrQuery) / 1000L).coerceAtLeast(1L)
             return@withContext YtdlnisFetchResult(
                 success = false,
                 errorMessage = "Rate-limit cooldown active for host (${waitSec}s remaining)"
@@ -61,19 +66,21 @@ object YtdlnisEngine {
             put("timeout", DownloaderPreferencesManager.getNetworkTimeoutSync(context))
             put("retries", DownloaderPreferencesManager.getRetryCountSync(context))
             DownloaderPreferencesManager.getActiveProxyUrlSync(context)?.let { put("proxy", it) }
-            repo.findCookiesForUrl(urlOrQuery)?.let { put("cookies", it) }
+            GalleryDlEngine.sanitizeCookiesForUrl(effectiveUrlOrQuery, repo.findCookiesForUrl(effectiveUrlOrQuery))?.let {
+                put("cookies", it)
+            }
             repo.youtubePoToken.value.takeIf { it.isNotBlank() }?.let { put("po_token", it) }
         }
         try {
             val py = Python.getInstance()
             val mod = py.getModule("ytdlnis_engine")
-            val raw = mod.callAttr("fetch_video_info", urlOrQuery, options.toString()).toString()
+            val raw = mod.callAttr("fetch_video_info", effectiveUrlOrQuery, options.toString()).toString()
             val parsed = parseFetchResultJson(raw)
-            if (urlOrQuery.startsWith("http", ignoreCase = true)) {
+            if (effectiveUrlOrQuery.startsWith("http", ignoreCase = true)) {
                 if (parsed.success) {
-                    HostRateLimiter.recordSuccess(urlOrQuery)
+                    HostRateLimiter.recordSuccess(effectiveUrlOrQuery)
                 } else if (HostRateLimiter.classifyError(errorMessage = parsed.errorMessage) == HostRateLimiter.ErrorCategory.RATE_LIMITED) {
-                    HostRateLimiter.recordRateLimitOrBotChallenge(urlOrQuery)
+                    HostRateLimiter.recordRateLimitOrBotChallenge(effectiveUrlOrQuery)
                 }
             }
             parsed
@@ -292,8 +299,13 @@ object YtdlnisEngine {
         val logBuilder = StringBuilder()
         onStatusUpdate?.invoke(0.1f, "Starting yt-dlp download...")
 
+        val effectiveDownloadUrl = if (GalleryDlEngine.isYouTubeUrl(item.url)) {
+            GalleryDlEngine.normalizeYouTubeUrl(item.url)
+        } else {
+            item.url
+        }
         val configJson = JSONObject().apply {
-            put("url", item.url)
+            put("url", effectiveDownloadUrl)
             put("type", item.type.id)
             put("title", item.title)
             put("author", item.author)
@@ -314,7 +326,9 @@ object YtdlnisEngine {
             put("timeout", DownloaderPreferencesManager.getNetworkTimeoutSync(context))
             put("retries", DownloaderPreferencesManager.getRetryCountSync(context))
             DownloaderPreferencesManager.getActiveProxyUrlSync(context)?.let { put("proxy", it) }
-            repo.findCookiesForUrl(item.url)?.let { put("cookies", it) }
+            GalleryDlEngine.sanitizeCookiesForUrl(effectiveDownloadUrl, repo.findCookiesForUrl(effectiveDownloadUrl))?.let {
+                put("cookies", it)
+            }
             repo.youtubePoToken.value.takeIf { it.isNotBlank() }?.let { put("po_token", it) }
         }
 

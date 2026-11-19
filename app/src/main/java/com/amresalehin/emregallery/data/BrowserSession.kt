@@ -215,15 +215,17 @@ object BrowserSession {
                     val wv = webView ?: return
                     (wv.parent as? ViewGroup)?.removeView(wv)
                     wv.stopLoading()
-                    wv.loadUrl("about:blank")
-                    wv.clearHistory()
                     wv.onPause()
                     wv.removeJavascriptInterface("EmreBridge")
                     wv.webViewClient = WebViewClient()
                     wv.webChromeClient = WebChromeClient()
-                    wv.post {
-                        try { wv.destroy() } catch (_: Throwable) {}
-                    }
+                    mainHandler.postDelayed({
+                        try {
+                            wv.clearHistory()
+                            wv.destroy()
+                        } catch (_: Throwable) {
+                        }
+                    }, 90L)
                 } catch (_: Throwable) {
                 } finally {
                     webView = null
@@ -454,14 +456,16 @@ object BrowserSession {
                     val wv = webView ?: return
                     (wv.parent as? ViewGroup)?.removeView(wv)
                     wv.stopLoading()
-                    wv.loadUrl("about:blank")
-                    wv.clearHistory()
                     wv.onPause()
                     wv.webViewClient = WebViewClient()
                     wv.webChromeClient = WebChromeClient()
-                    wv.post {
-                        try { wv.destroy() } catch (_: Throwable) {}
-                    }
+                    mainHandler.postDelayed({
+                        try {
+                            wv.clearHistory()
+                            wv.destroy()
+                        } catch (_: Throwable) {
+                        }
+                    }, 90L)
                 } catch (_: Throwable) {
                 } finally {
                     webView = null

@@ -443,11 +443,12 @@ object GalleryDlEngine {
             val runner = py.getModule("gallery_dl_runner")
 
             val effectiveUa = options.userAgent ?: BotDetectionMitigator.STEALTH_USER_AGENT
-            val effectiveCookies = options.cookies
+            val rawCookies = options.cookies
                 ?: appContext?.let { ctx ->
                     runCatching { com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(ctx).findCookiesForUrl(url.trim()) }.getOrNull()
                 }
                 ?: runCatching { android.webkit.CookieManager.getInstance().getCookie(url.trim()) }.getOrNull()
+            val effectiveCookies = sanitizeCookiesForUrl(url.trim(), rawCookies)
 
             val optsJson = JSONObject().apply {
                 put("user_agent", effectiveUa)
@@ -587,11 +588,12 @@ object GalleryDlEngine {
             File(dir, stagingOutputFile.name + ".part").delete()
 
             val userAgent = headers?.get("User-Agent") ?: BotDetectionMitigator.STEALTH_USER_AGENT
-            val effectiveCookies = cookies ?: headers?.get("Cookie")
+            val rawCookies = cookies ?: headers?.get("Cookie")
                 ?: runCatching {
                     val cm = android.webkit.CookieManager.getInstance()
                     cm.getCookie(mediaUrl) ?: referer?.let { cm.getCookie(it) }
                 }.getOrNull()
+            val effectiveCookies = sanitizeCookiesForUrl(referer ?: mediaUrl, rawCookies)
             val headersJson = if (!headers.isNullOrEmpty()) {
                 val json = JSONObject()
                 headers.forEach { (k, v) -> json.put(k, v) }
@@ -692,4 +694,80 @@ object GalleryDlEngine {
         GalleryDlSite("Bilibili", listOf("bilibili.com"), "smart_display"),
         GalleryDlSite("4chan", listOf("4chan.org", "4channel.org", "i.4cdn.org"), "forum")
     )
+
+    private val YOUTUBE_AUTH_COOKIE_KEYS = setOf(
+        "SAPISID",
+        "__Secure-3PSID",
+        "__Secure-1PSID",
+        "LOGIN_INFO",
+        "SSID",
+        "HSID"
+    )
+
+    fun isYouTubeUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val lower = url.trim().lowercase(java.util.Locale.ROOT)
+        if (lower.startsWith("ytsearch")) return true
+        return lower.contains("youtube.com/") ||
+            lower.contains("youtu.be/") ||
+            lower.contains("youtube-nocookie.com/")
+    }
+
+    fun hasAuthenticatedYouTubeCookies(cookiesText: String?): Boolean {
+        if (cookiesText.isNullOrBlank()) return false
+        val text = cookiesText.trim()
+        for (key in YOUTUBE_AUTH_COOKIE_KEYS) {
+            if (text.contains("$key=") || text.contains("\t$key\t")) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Strips anonymous YouTube guest cookies (e.g. VISITOR_INFO1_LIVE, YSC, GPS) so yt-dlp
+     * does not disable its unauthenticated android_vr / ios / android InnerTube clients.
+     */
+    fun sanitizeCookiesForUrl(url: String?, rawCookies: String?): String? {
+        val trimmed = rawCookies?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (isYouTubeUrl(url) && !hasAuthenticatedYouTubeCookies(trimmed)) {
+            return null
+        }
+        return trimmed
+    }
+
+    fun normalizeYouTubeUrl(url: String): String {
+        val trimmed = url.trim()
+        if (!isYouTubeUrl(trimmed) || trimmed.lowercase(java.util.Locale.ROOT).startsWith("ytsearch")) {
+            return trimmed
+        }
+        return runCatching {
+            val uri = java.net.URI(trimmed)
+            val host = (uri.host ?: "").lowercase(java.util.Locale.ROOT).removePrefix("www.")
+            val path = uri.path ?: ""
+            val query = uri.rawQuery ?: ""
+            val params = query.split("&").mapNotNull { part ->
+                val idx = part.indexOf('=')
+                if (idx > 0) part.substring(0, idx) to part.substring(idx + 1) else null
+            }.toMap()
+
+            val videoId = when {
+                host == "youtu.be" -> path.trim('/').substringBefore('/')
+                path.startsWith("/shorts/") -> path.removePrefix("/shorts/").substringBefore('/')
+                path.startsWith("/embed/") -> path.removePrefix("/embed/").substringBefore('/')
+                path.startsWith("/live/") -> path.removePrefix("/live/").substringBefore('/')
+                else -> params["v"].orEmpty()
+            }.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{11}$")) }
+
+            val listId = params["list"]
+            when {
+                videoId != null && !listId.isNullOrBlank() -> "https://www.youtube.com/watch?v=$videoId&list=$listId"
+                videoId != null -> "https://www.youtube.com/watch?v=$videoId"
+                !listId.isNullOrBlank() && path.startsWith("/playlist") -> "https://www.youtube.com/playlist?list=$listId"
+                host == "m.youtube.com" -> trimmed.replaceFirst("m.youtube.com", "www.youtube.com")
+                else -> trimmed
+            }
+        }.getOrDefault(trimmed)
+    }
 }
+

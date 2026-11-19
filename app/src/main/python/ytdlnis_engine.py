@@ -246,8 +246,91 @@ def render_filename_template(template, metadata_json="{}"):
     return rendered
 
 
-def _write_temp_cookiefile(cookies_text):
+_YOUTUBE_AUTH_COOKIE_KEYS = (
+    "SAPISID",
+    "__Secure-3PSID",
+    "__Secure-1PSID",
+    "LOGIN_INFO",
+    "SSID",
+    "HSID",
+)
+
+
+def is_youtube_url(url):
+    if not url:
+        return False
+    raw = str(url).strip().lower()
+    if raw.startswith("ytsearch"):
+        return True
+    return any(
+        h in raw
+        for h in (
+            "youtube.com/",
+            "youtu.be/",
+            "youtube-nocookie.com/",
+            "music.youtube.com/",
+        )
+    )
+
+
+def extract_youtube_video_id(url):
+    if not url:
+        return None
+    raw = str(url).strip()
+    patterns = (
+        r"(?:v=|/v/|youtu\.be/|/embed/|/shorts/|/live/)([A-Za-z0-9_-]{11})",
+        r"^([A-Za-z0-9_-]{11})$",
+    )
+    for pat in patterns:
+        m = re.search(pat, raw)
+        if m:
+            return m.group(1)
+    return None
+
+
+def normalize_youtube_url(url, allow_playlist=True):
+    if not url:
+        return url
+    raw = str(url).strip()
+    if not is_youtube_url(raw) or raw.startswith("ytsearch"):
+        return raw
+    try:
+        parsed = urllib.parse.urlparse(raw)
+        host = (parsed.hostname or "").lower()
+        query_params = urllib.parse.parse_qs(parsed.query)
+        vid = extract_youtube_video_id(raw)
+        list_id = (query_params.get("list") or [None])[0]
+        if vid:
+            if allow_playlist and list_id and ("/playlist" in parsed.path or "list=" in raw):
+                return f"https://www.youtube.com/watch?v={vid}&list={list_id}"
+            return f"https://www.youtube.com/watch?v={vid}"
+        if host in ("m.youtube.com", "music.youtube.com"):
+            parsed = parsed._replace(netloc="www.youtube.com")
+            return urllib.parse.urlunparse(parsed)
+    except Exception:
+        pass
+    return raw
+
+
+def has_authenticated_youtube_cookies(cookies_text):
+    """
+    Returns True ONLY if the cookie string contains genuine YouTube login session cookies.
+    Anonymous guest cookies (VISITOR_INFO1_LIVE, YSC, PREF, GPS) must NEVER be passed to yt-dlp
+    for YouTube because yt-dlp disables android_vr/ios/android clients whenever a cookiefile is set.
+    """
     if not cookies_text or not str(cookies_text).strip():
+        return False
+    raw = str(cookies_text)
+    for key in _YOUTUBE_AUTH_COOKIE_KEYS:
+        if re.search(rf"(?:^|[;\s\t]){re.escape(key)}(?:=|\t)", raw):
+            return True
+    return False
+
+
+def _write_temp_cookiefile(cookies_text, target_url=None):
+    if not cookies_text or not str(cookies_text).strip():
+        return None
+    if target_url and is_youtube_url(target_url) and not has_authenticated_youtube_cookies(cookies_text):
         return None
     text = str(cookies_text).strip()
     fd, path = tempfile.mkstemp(prefix="ytdlnis_cookies_", suffix=".txt")
@@ -258,6 +341,439 @@ def _write_temp_cookiefile(cookies_text):
         if not text.endswith("\n"):
             f.write("\n")
     return path
+
+
+def _extract_youtube_innertube_or_piped_fallback(video_id, original_url=""):
+    """
+    Multi-tier direct YouTube stream resolver used when yt-dlp's bundled extractor hits
+    datacenter BotGuard ('Sign in to confirm you are not a bot').
+    Tier A: Direct InnerTube player API with ANDROID_VR, IOS, and ANDROID_TESTSUITE clients.
+    Tier B: Public Piped & Invidious instances returning direct googlevideo/HLS streams.
+    """
+    if not video_id:
+        return None
+
+    canonical_url = original_url or f"https://www.youtube.com/watch?v={video_id}"
+
+    # Tier A: Direct InnerTube player requests with non-web native client contexts
+    innertube_clients = [
+        {
+            "name": "ANDROID_VR",
+            "ua": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+            "client_id": "28",
+            "version": "1.60.19",
+            "context": {
+                "client": {
+                    "clientName": "ANDROID_VR",
+                    "clientVersion": "1.60.19",
+                    "deviceMake": "Oculus",
+                    "deviceModel": "Quest 3",
+                    "osName": "Android",
+                    "osVersion": "12L",
+                    "androidSdkVersion": 32,
+                    "hl": "en",
+                    "gl": "US",
+                }
+            },
+        },
+        {
+            "name": "IOS",
+            "ua": "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+            "client_id": "5",
+            "version": "19.45.4",
+            "context": {
+                "client": {
+                    "clientName": "IOS",
+                    "clientVersion": "19.45.4",
+                    "deviceMake": "Apple",
+                    "deviceModel": "iPhone16,2",
+                    "osName": "iOS",
+                    "osVersion": "18.1.0.22B83",
+                    "hl": "en",
+                    "gl": "US",
+                }
+            },
+        },
+        {
+            "name": "ANDROID_TESTSUITE",
+            "ua": "com.google.android.youtube/1.9 (Linux; U; Android 11) gzip",
+            "client_id": "30",
+            "version": "1.9",
+            "context": {
+                "client": {
+                    "clientName": "ANDROID_TESTSUITE",
+                    "clientVersion": "1.9",
+                    "androidSdkVersion": 30,
+                    "osName": "Android",
+                    "osVersion": "11",
+                    "hl": "en",
+                    "gl": "US",
+                }
+            },
+        },
+    ]
+
+    for client_cfg in innertube_clients:
+        try:
+            payload = json.dumps({
+                "videoId": video_id,
+                "context": client_cfg["context"],
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": client_cfg["ua"],
+                    "X-YouTube-Client-Name": client_cfg["client_id"],
+                    "X-YouTube-Client-Version": client_cfg["version"],
+                    "Origin": "https://www.youtube.com",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+            streaming = data.get("streamingData") or {}
+            raw_fmts = (streaming.get("formats") or []) + (streaming.get("adaptiveFormats") or [])
+            hls_url = streaming.get("hlsManifestUrl") or ""
+            parsed_formats = []
+
+            for f in raw_fmts:
+                f_url = f.get("url")
+                if not f_url:
+                    continue
+                mime_raw = str(f.get("mimeType") or "")
+                mime_base = mime_raw.split(";")[0].strip()
+                ext = "mp4"
+                if "/" in mime_base:
+                    ext = mime_base.split("/")[1].strip()
+                    if ext == "mp4" and mime_base.startswith("audio/"):
+                        ext = "m4a"
+                codecs_part = ""
+                if 'codecs="' in mime_raw:
+                    codecs_part = mime_raw.split('codecs="', 1)[1].split('"', 1)[0]
+                codecs = [c.strip() for c in codecs_part.split(",") if c.strip()]
+                is_video_mime = mime_base.startswith("video/")
+                is_audio_mime = mime_base.startswith("audio/")
+                vcodec = codecs[0] if (is_video_mime and codecs) else ("h264" if is_video_mime else "none")
+                acodec = (
+                    codecs[1]
+                    if (is_video_mime and len(codecs) > 1)
+                    else (codecs[0] if (is_audio_mime and codecs) else ("aac" if is_audio_mime else "none"))
+                )
+                height = int(f.get("height") or 0)
+                width = int(f.get("width") or 0)
+                clen = int(f.get("contentLength") or 0)
+                bitrate = float(f.get("bitrate") or 0) / 1000.0
+                parsed_formats.append({
+                    "format_id": str(f.get("itag") or f"itag_{len(parsed_formats)}"),
+                    "url": f_url,
+                    "ext": ext,
+                    "vcodec": vcodec,
+                    "acodec": acodec,
+                    "height": height,
+                    "width": width,
+                    "fps": float(f.get("fps") or 0),
+                    "abr": bitrate if is_audio_mime else 0.0,
+                    "tbr": bitrate,
+                    "filesize": clen,
+                    "resolution": f"{width}x{height}" if width and height else (f"{height}p" if height else "audio only"),
+                    "format_note": str(f.get("qualityLabel") or ("audio" if is_audio_mime else "")),
+                })
+
+            if hls_url and not parsed_formats:
+                parsed_formats.append({
+                    "format_id": "hls",
+                    "url": hls_url,
+                    "ext": "mp4",
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "height": 720,
+                    "width": 1280,
+                    "fps": 30.0,
+                    "abr": 128.0,
+                    "tbr": 2000.0,
+                    "filesize": 0,
+                    "resolution": "1280x720",
+                    "format_note": "HLS Stream",
+                })
+
+            if parsed_formats:
+                vd = data.get("videoDetails") or {}
+                thumbs = ((vd.get("thumbnail") or {}).get("thumbnails") or [])
+                best_thumb = thumbs[-1].get("url") if thumbs else f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                muxed = [x for x in parsed_formats if x.get("vcodec") != "none" and x.get("acodec") != "none"]
+                best_direct = (muxed[-1] if muxed else parsed_formats[0])
+                return {
+                    "id": video_id,
+                    "url": best_direct.get("url") or canonical_url,
+                    "webpage_url": canonical_url,
+                    "title": vd.get("title") or f"YouTube Video {video_id}",
+                    "uploader": vd.get("author") or "YouTube",
+                    "duration": int(vd.get("lengthSeconds") or 0),
+                    "thumbnail": best_thumb,
+                    "description": vd.get("shortDescription") or "",
+                    "extractor": f"youtube:{client_cfg['name'].lower()}",
+                    "ext": best_direct.get("ext") or "mp4",
+                    "vcodec": best_direct.get("vcodec") or "h264",
+                    "acodec": best_direct.get("acodec") or "aac",
+                    "width": best_direct.get("width") or 0,
+                    "height": best_direct.get("height") or 0,
+                    "formats": parsed_formats,
+                }
+        except Exception:
+            continue
+
+    # Tier B: Piped & Invidious API fallback for datacenter-blocked IPs
+    piped_hosts = (
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.adminforge.de",
+        "https://pipedapi.drgns.space",
+        "https://api.piped.private.coffee",
+    )
+    for host in piped_hosts:
+        try:
+            req = urllib.request.Request(
+                f"{host}/streams/{video_id}",
+                headers={"User-Agent": "Mozilla/5.0 (Android 14; Mobile)"},
+            )
+            with urllib.request.urlopen(req, timeout=7) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            parsed_formats = []
+            for vs in (data.get("videoStreams") or []):
+                v_url = vs.get("url")
+                if not v_url:
+                    continue
+                video_only = bool(vs.get("videoOnly", False))
+                height = int(vs.get("height") or 0)
+                width = int(vs.get("width") or 0)
+                fmt_str = str(vs.get("format") or "MPEG_4").lower()
+                ext = "webm" if "webm" in fmt_str else "mp4"
+                parsed_formats.append({
+                    "format_id": str(vs.get("itag") or f"v_{height}p_{ext}"),
+                    "url": v_url,
+                    "ext": ext,
+                    "vcodec": str(vs.get("codec") or "h264"),
+                    "acodec": "none" if video_only else "aac",
+                    "height": height,
+                    "width": width,
+                    "fps": float(vs.get("fps") or 30),
+                    "abr": 0.0,
+                    "tbr": float(vs.get("bitrate") or 0) / 1000.0,
+                    "filesize": int(vs.get("contentLength") or 0),
+                    "resolution": f"{width}x{height}" if width and height else f"{height}p",
+                    "format_note": str(vs.get("quality") or ""),
+                })
+            for aus in (data.get("audioStreams") or []):
+                a_url = aus.get("url")
+                if not a_url:
+                    continue
+                fmt_str = str(aus.get("format") or "M4A").lower()
+                ext = "webm" if "webm" in fmt_str else "m4a"
+                abr = float(aus.get("bitrate") or 0) / 1000.0
+                parsed_formats.append({
+                    "format_id": str(aus.get("itag") or f"a_{int(abr)}k_{ext}"),
+                    "url": a_url,
+                    "ext": ext,
+                    "vcodec": "none",
+                    "acodec": str(aus.get("codec") or "aac"),
+                    "height": 0,
+                    "width": 0,
+                    "fps": 0.0,
+                    "abr": abr,
+                    "tbr": abr,
+                    "filesize": int(aus.get("contentLength") or 0),
+                    "resolution": "audio only",
+                    "format_note": str(aus.get("quality") or "audio"),
+                })
+            hls_url = data.get("hls")
+            if hls_url and not parsed_formats:
+                parsed_formats.append({
+                    "format_id": "hls",
+                    "url": hls_url,
+                    "ext": "mp4",
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "height": 720,
+                    "width": 1280,
+                    "fps": 30.0,
+                    "abr": 128.0,
+                    "tbr": 2000.0,
+                    "filesize": 0,
+                    "resolution": "1280x720",
+                    "format_note": "HLS",
+                })
+            if parsed_formats:
+                muxed = [x for x in parsed_formats if x.get("vcodec") != "none" and x.get("acodec") != "none"]
+                best_direct = muxed[-1] if muxed else parsed_formats[0]
+                return {
+                    "id": video_id,
+                    "url": best_direct.get("url") or canonical_url,
+                    "webpage_url": canonical_url,
+                    "title": data.get("title") or f"YouTube Video {video_id}",
+                    "uploader": data.get("uploader") or "YouTube",
+                    "duration": int(data.get("duration") or 0),
+                    "thumbnail": data.get("thumbnailUrl") or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    "description": data.get("description") or "",
+                    "extractor": "youtube:piped",
+                    "ext": best_direct.get("ext") or "mp4",
+                    "vcodec": best_direct.get("vcodec") or "h264",
+                    "acodec": best_direct.get("acodec") or "aac",
+                    "width": best_direct.get("width") or 0,
+                    "height": best_direct.get("height") or 0,
+                    "formats": parsed_formats,
+                }
+        except Exception:
+            continue
+
+    invidious_hosts = (
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://yewtu.be",
+    )
+    for host in invidious_hosts:
+        try:
+            req = urllib.request.Request(
+                f"{host}/api/v1/videos/{video_id}",
+                headers={"User-Agent": "Mozilla/5.0 (Android 14; Mobile)"},
+            )
+            with urllib.request.urlopen(req, timeout=7) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            parsed_formats = []
+            for fs in (data.get("formatStreams") or []):
+                f_url = fs.get("url")
+                if not f_url:
+                    continue
+                res_str = str(fs.get("resolution") or "360p").replace("p", "")
+                height = int(res_str) if res_str.isdigit() else 360
+                parsed_formats.append({
+                    "format_id": str(fs.get("itag") or f"muxed_{height}p"),
+                    "url": f_url,
+                    "ext": str(fs.get("container") or "mp4"),
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "height": height,
+                    "width": int(height * 16 / 9),
+                    "fps": float(fs.get("fps") or 30),
+                    "abr": 128.0,
+                    "tbr": 1500.0,
+                    "filesize": 0,
+                    "resolution": f"{height}p",
+                    "format_note": str(fs.get("qualityLabel") or f"{height}p"),
+                })
+            for af in (data.get("adaptiveFormats") or []):
+                f_url = af.get("url")
+                if not f_url:
+                    continue
+                t_str = str(af.get("type") or "")
+                is_aud = t_str.startswith("audio/")
+                res_str = str(af.get("resolution") or "0").replace("p", "")
+                height = int(res_str) if res_str.isdigit() else 0
+                parsed_formats.append({
+                    "format_id": str(af.get("itag") or f"adapt_{len(parsed_formats)}"),
+                    "url": f_url,
+                    "ext": "m4a" if is_aud else str(af.get("container") or "mp4"),
+                    "vcodec": "none" if is_aud else str(af.get("encoding") or "h264"),
+                    "acodec": str(af.get("encoding") or "aac") if is_aud else "none",
+                    "height": height,
+                    "width": int(height * 16 / 9) if height else 0,
+                    "fps": float(af.get("fps") or 0),
+                    "abr": float(af.get("bitrate") or 0) / 1000.0 if is_aud else 0.0,
+                    "tbr": float(af.get("bitrate") or 0) / 1000.0,
+                    "filesize": int(af.get("clen") or 0),
+                    "resolution": "audio only" if is_aud else f"{height}p",
+                    "format_note": str(af.get("qualityLabel") or ("audio" if is_aud else "")),
+                })
+            if parsed_formats:
+                muxed = [x for x in parsed_formats if x.get("vcodec") != "none" and x.get("acodec") != "none"]
+                best_direct = muxed[-1] if muxed else parsed_formats[0]
+                return {
+                    "id": video_id,
+                    "url": best_direct.get("url") or canonical_url,
+                    "webpage_url": canonical_url,
+                    "title": data.get("title") or f"YouTube Video {video_id}",
+                    "uploader": data.get("author") or "YouTube",
+                    "duration": int(data.get("lengthSeconds") or 0),
+                    "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    "description": data.get("description") or "",
+                    "extractor": "youtube:invidious",
+                    "ext": best_direct.get("ext") or "mp4",
+                    "vcodec": best_direct.get("vcodec") or "h264",
+                    "acodec": best_direct.get("acodec") or "aac",
+                    "width": best_direct.get("width") or 0,
+                    "height": best_direct.get("height") or 0,
+                    "formats": parsed_formats,
+                }
+        except Exception:
+            continue
+
+    return None
+
+
+def extract_youtube_info_resilient(target_url, base_ydl_opts, cookie_path=None, po_token=None):
+    """
+    Executes yt-dlp against a YouTube URL with automatic InnerTube client rotation,
+    guest-cookie isolation, and Direct InnerTube / Piped / Invidious fallback.
+    """
+    profiles = []
+    if cookie_path or po_token:
+        yt_args = {"player_client": ["tv", "web", "mweb", "web_creator"]}
+        if po_token:
+            yt_args["po_token"] = [f"web+{po_token}"]
+        profiles.append({"use_cookies": bool(cookie_path), "youtube_args": yt_args})
+
+    # Cookie-less native mobile/VR/TV profiles (never pass guest cookies so android_vr/ios/android stay enabled)
+    profiles.append({
+        "use_cookies": False,
+        "youtube_args": {
+            "player_client": ["android_vr", "tv", "web_embedded", "ios", "android"],
+            "player_skip": ["webpage", "configs"],
+        },
+    })
+    profiles.append({
+        "use_cookies": False,
+        "youtube_args": {
+            "player_client": ["ios", "android", "tv_embedded"],
+            "player_skip": ["webpage"],
+        },
+    })
+
+    last_err = None
+    for prof in profiles:
+        try_opts = dict(base_ydl_opts)
+        # Never pass custom browser User-Agent / Sec-Ch-Ua headers to YouTube InnerTube clients
+        try_opts.pop("http_headers", None)
+        if prof["use_cookies"] and cookie_path:
+            try_opts["cookiefile"] = cookie_path
+        else:
+            try_opts.pop("cookiefile", None)
+
+        ext_args = dict(try_opts.get("extractor_args") or {})
+        ext_args["youtube"] = prof["youtube_args"]
+        try_opts["extractor_args"] = ext_args
+
+        try:
+            with yt_dlp.YoutubeDL(try_opts) as ydl:
+                info = ydl.extract_info(target_url, download=False)
+            if info:
+                # Verify that either playlist entries or playable formats/url were returned
+                if info.get("_type") == "playlist" or info.get("entries") or info.get("formats") or info.get("url"):
+                    return info, None
+        except Exception as exc:
+            last_err = exc
+            continue
+
+    # Layer 3 fallback: Direct InnerTube (ANDROID_VR / IOS / ANDROID_TESTSUITE) + Piped + Invidious
+    vid = extract_youtube_video_id(target_url)
+    if vid:
+        fallback_info = _extract_youtube_innertube_or_piped_fallback(vid, target_url)
+        if fallback_info:
+            return fallback_info, None
+
+    return None, last_err
 
 
 def _normalize_format(fmt):
@@ -338,41 +854,57 @@ def fetch_video_info(url_or_query, options_json="{}"):
     except Exception:
         opts = {}
 
-    cookie_path = _write_temp_cookiefile(opts.get("cookies"))
+    target = str(url_or_query).strip()
+    if not re.match(r"^https?://", target, re.IGNORECASE) and not target.startswith("ytsearch"):
+        if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", target):
+            target = f"https://{target}"
+        else:
+            target = f"ytsearch5:{target}"
+
+    allow_playlist = bool(opts.get("allow_playlist", True))
+    is_yt = is_youtube_url(target)
+    if is_yt:
+        target = normalize_youtube_url(target, allow_playlist=allow_playlist)
+
+    cookie_path = _write_temp_cookiefile(opts.get("cookies"), target_url=target)
     try:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "ignoreerrors": True,
+            "ignoreerrors": not is_yt,
             "ffmpeg_location": None,
             "prefer_ffmpeg": False,
             "extract_flat": "in_playlist" if opts.get("flat_playlist", True) else False,
             "socket_timeout": int(opts.get("timeout", 30)),
             "retries": int(opts.get("retries", 3)),
         }
-        if not opts.get("allow_playlist", True):
+        if not allow_playlist:
             ydl_opts["noplaylist"] = True
         if cookie_path:
             ydl_opts["cookiefile"] = cookie_path
         if opts.get("proxy"):
             ydl_opts["proxy"] = opts["proxy"]
-        if opts.get("po_token"):
+        po_token = str(opts.get("po_token") or "").strip() or None
+        if po_token:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "po_token": [f"web+{opts['po_token']}"]
+                    "po_token": [f"web+{po_token}"]
                 }
             }
 
-        target = str(url_or_query).strip()
-        if not re.match(r"^https?://", target, re.IGNORECASE) and not target.startswith("ytsearch"):
-            if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", target):
-                target = f"https://{target}"
-            else:
-                target = f"ytsearch5:{target}"
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target, download=False)
+        if is_yt:
+            info, yt_err = extract_youtube_info_resilient(
+                target_url=target,
+                base_ydl_opts=ydl_opts,
+                cookie_path=cookie_path,
+                po_token=po_token,
+            )
+            if not info and yt_err is not None:
+                raise yt_err
+        else:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target, download=False)
 
         if not info:
             return json.dumps({"success": False, "error": "No media info returned for query"})
@@ -502,6 +1034,103 @@ def build_ytdlp_options(config_dict, output_dir):
     return ydl_opts
 
 
+def _download_direct_http_stream(stream_url, dest_path, timeout=35):
+    req = urllib.request.Request(
+        stream_url,
+        headers={
+            "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+            "Accept": "*/*",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest_path, "wb") as out_f:
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            out_f.write(chunk)
+    return os.path.exists(dest_path) and os.path.getsize(dest_path) > 0
+
+
+def _download_youtube_fallback_streams(url, output_dir, download_type, format_id, max_h, logs):
+    vid = extract_youtube_video_id(url)
+    if not vid:
+        return None, "", []
+    info = _extract_youtube_innertube_or_piped_fallback(vid, url)
+    if not info:
+        return None, "", []
+    fmts = info.get("formats") or []
+    if not fmts:
+        return None, "", []
+
+    safe_title = sanitize_filename(info.get("title") or f"youtube_{vid}")
+    merge_audio = []
+
+    if download_type == "audio":
+        audio_candidates = [f for f in fmts if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
+        if not audio_candidates:
+            audio_candidates = [f for f in fmts if f.get("url") and f.get("acodec") != "none"]
+        chosen = None
+        if format_id and format_id != "best":
+            chosen = next((f for f in audio_candidates if str(f.get("format_id")) == format_id), None)
+        if not chosen and audio_candidates:
+            chosen = sorted(audio_candidates, key=lambda x: float(x.get("abr") or x.get("tbr") or 0))[-1]
+        if not chosen:
+            return None, "", []
+        ext = chosen.get("ext") or "m4a"
+        dest = os.path.join(output_dir, f"{safe_title}.{ext}")
+        if _download_direct_http_stream(chosen["url"], dest):
+            logs.append(f"Downloaded YouTube audio via {info.get('extractor')} fallback ({chosen.get('format_id')})")
+            info["acodec"] = chosen.get("acodec") or "aac"
+            info["vcodec"] = "none"
+            return info, dest, []
+        return None, "", []
+
+    # Video mode
+    chosen_video = None
+    if format_id and format_id != "best":
+        chosen_video = next((f for f in fmts if str(f.get("format_id")) == format_id and f.get("url")), None)
+
+    if not chosen_video:
+        video_candidates = [f for f in fmts if f.get("url") and f.get("vcodec") != "none"]
+        if max_h > 0:
+            capped = [f for f in video_candidates if int(f.get("height") or 0) <= max_h]
+            if capped:
+                video_candidates = capped
+        # Prefer pre-muxed stream if resolution is >= 360p, otherwise highest resolution video+companion audio
+        muxed = [f for f in video_candidates if f.get("acodec") != "none"]
+        if muxed:
+            chosen_video = sorted(muxed, key=lambda x: (int(x.get("height") or 0), float(x.get("tbr") or 0)))[-1]
+        elif video_candidates:
+            chosen_video = sorted(video_candidates, key=lambda x: (int(x.get("height") or 0), float(x.get("tbr") or 0)))[-1]
+
+    if not chosen_video:
+        return None, "", []
+
+    v_ext = chosen_video.get("ext") or "mp4"
+    primary_dest = os.path.join(output_dir, f"{safe_title}.{v_ext}")
+    if not _download_direct_http_stream(chosen_video["url"], primary_dest):
+        return None, "", []
+
+    logs.append(f"Downloaded YouTube video via {info.get('extractor')} fallback ({chosen_video.get('format_id')})")
+    info["acodec"] = chosen_video.get("acodec") or "none"
+    info["vcodec"] = chosen_video.get("vcodec") or "h264"
+
+    if info["acodec"] == "none":
+        audio_candidates = [f for f in fmts if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
+        if audio_candidates:
+            best_a = sorted(audio_candidates, key=lambda x: float(x.get("abr") or x.get("tbr") or 0))[-1]
+            a_ext = best_a.get("ext") or "m4a"
+            a_dest = os.path.join(output_dir, f"__companion_audio_0_{vid}.{a_ext}")
+            try:
+                if _download_direct_http_stream(best_a["url"], a_dest):
+                    merge_audio.append(a_dest)
+                    logs.append(f"Downloaded companion audio ({best_a.get('format_id')})")
+            except Exception as a_err:
+                logs.append(f"WARNING: Companion audio fallback failed: {a_err}")
+
+    return info, primary_dest, merge_audio
+
+
 def download_item(config_json, output_dir):
     """
     Downloads a media item via yt-dlp in-process (Chaquopy) and returns the downloaded
@@ -524,11 +1153,16 @@ def download_item(config_json, output_dir):
         if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", url):
             url = f"https://{url}"
 
+    allow_playlist = bool(config.get("allow_playlist", False))
+    is_yt = is_youtube_url(url)
+    if is_yt:
+        url = normalize_youtube_url(url, allow_playlist=allow_playlist)
+
     download_type = str(config.get("type") or "video").lower()
     if download_type == "command" and config.get("custom_command"):
         return run_terminal_command(f"{config['custom_command']} {shlex.quote(url)}", output_dir)
 
-    cookie_path = _write_temp_cookiefile(config.get("cookies"))
+    cookie_path = _write_temp_cookiefile(config.get("cookies"), target_url=url)
     logs = []
     downloaded_files = []
     merge_audio_files = []
@@ -587,17 +1221,82 @@ def download_item(config_json, output_dir):
         ydl_opts["logger"] = _ListLogger()
         ydl_opts["progress_hooks"] = [_hook]
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            prepared = ydl.prepare_filename(info) if info else ""
-
+        info = None
+        prepared = ""
         primary_file = ""
-        for candidate in downloaded_files:
-            if os.path.exists(candidate):
-                primary_file = candidate
-                break
-        if not primary_file and prepared and os.path.exists(prepared):
-            primary_file = prepared
+
+        if is_yt:
+            po_token = str(config.get("po_token") or "").strip() or None
+            yt_profiles = []
+            if cookie_path or po_token:
+                yt_args = {"player_client": ["tv", "web", "mweb", "web_creator"]}
+                if po_token:
+                    yt_args["po_token"] = [f"web+{po_token}"]
+                yt_profiles.append({"use_cookies": bool(cookie_path), "youtube_args": yt_args})
+            yt_profiles.append({
+                "use_cookies": False,
+                "youtube_args": {
+                    "player_client": ["android_vr", "tv", "web_embedded", "ios", "android"],
+                    "player_skip": ["webpage", "configs"],
+                },
+            })
+            yt_profiles.append({
+                "use_cookies": False,
+                "youtube_args": {
+                    "player_client": ["ios", "android", "tv_embedded"],
+                    "player_skip": ["webpage"],
+                },
+            })
+
+            last_yt_err = None
+            for prof in yt_profiles:
+                try_opts = dict(ydl_opts)
+                try_opts.pop("http_headers", None)
+                if prof["use_cookies"] and cookie_path:
+                    try_opts["cookiefile"] = cookie_path
+                else:
+                    try_opts.pop("cookiefile", None)
+                ext_args = dict(try_opts.get("extractor_args") or {})
+                ext_args["youtube"] = prof["youtube_args"]
+                try_opts["extractor_args"] = ext_args
+                try:
+                    with yt_dlp.YoutubeDL(try_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        prepared = ydl.prepare_filename(info) if info else ""
+                    for candidate in downloaded_files:
+                        if os.path.exists(candidate):
+                            primary_file = candidate
+                            break
+                    if not primary_file and prepared and os.path.exists(prepared):
+                        primary_file = prepared
+                    if primary_file:
+                        ydl_opts["extractor_args"] = ext_args
+                        break
+                except Exception as yt_exc:
+                    last_yt_err = yt_exc
+                    continue
+
+            if not primary_file:
+                fb_info, fb_file, fb_audios = _download_youtube_fallback_streams(
+                    url, output_dir, download_type, format_id, max_h, logs
+                )
+                if fb_file:
+                    info = fb_info
+                    primary_file = fb_file
+                    merge_audio_files.extend(fb_audios)
+                elif last_yt_err is not None:
+                    raise last_yt_err
+        else:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                prepared = ydl.prepare_filename(info) if info else ""
+
+            for candidate in downloaded_files:
+                if os.path.exists(candidate):
+                    primary_file = candidate
+                    break
+            if not primary_file and prepared and os.path.exists(prepared):
+                primary_file = prepared
 
         # If a video-only stream was downloaded or explicit audio track IDs were requested,
         # download companion audio stream(s) separately for in-process FfmpegKitEngine muxing.
@@ -605,6 +1304,7 @@ def download_item(config_json, output_dir):
         needs_companion_audio = (
             download_type != "audio"
             and bool(primary_file)
+            and not merge_audio_files
             and (info_acodec == "none" or bool(audio_format_ids))
         )
         if needs_companion_audio:

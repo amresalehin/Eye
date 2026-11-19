@@ -374,6 +374,17 @@ def _prepare_cookiefile(cookies_str, url=None):
     cookies_trimmed = cookies_str.strip()
     if not cookies_trimmed:
         return None
+    if YTDLNIS_AVAILABLE and _ytdlnis_engine is not None and url and _ytdlnis_engine.is_youtube_url(url):
+        if os.path.exists(cookies_trimmed):
+            try:
+                with open(cookies_trimmed, "r", encoding="utf-8", errors="ignore") as cf:
+                    content = cf.read()
+                if not _ytdlnis_engine.has_authenticated_youtube_cookies(content):
+                    return None
+            except Exception:
+                return None
+        elif not _ytdlnis_engine.has_authenticated_youtube_cookies(cookies_trimmed):
+            return None
     if os.path.exists(cookies_trimmed):
         return cookies_trimmed
 
@@ -848,6 +859,10 @@ def extract_yt_dlp(url, options_json="{}"):
 
     cookie_file = None
     try:
+        is_yt = YTDLNIS_AVAILABLE and _ytdlnis_engine is not None and _ytdlnis_engine.is_youtube_url(clean_url)
+        if is_yt:
+            clean_url = _ytdlnis_engine.normalize_youtube_url(clean_url, allow_playlist=download_playlist)
+
         cookie_file = _prepare_cookiefile(cookies, clean_url)
         http_headers = {
             "User-Agent": user_agent,
@@ -862,7 +877,7 @@ def extract_yt_dlp(url, options_json="{}"):
             "Sec-Fetch-User": "?1",
             "Upgrade-Insecure-Requests": "1"
         }
-        if cookies:
+        if cookies and not is_yt:
             http_headers["Cookie"] = cookies
 
         height_filter = f"[height<={max_height}]" if max_height > 0 else ""
@@ -889,12 +904,11 @@ def extract_yt_dlp(url, options_json="{}"):
             "geo_bypass": True,
             "retries": min(retries, 2),
             "fragment_retries": min(retries, 3),
-            "http_headers": http_headers,
             "extractor_args": {
                 "youtube": (
-                    {"player_client": ["android", "ios", "mweb", "web"]}
+                    {"player_client": ["android_vr", "tv", "web_embedded", "ios", "android", "mweb", "web"]}
                     if cookie_file
-                    else {"player_client": ["android", "ios", "mweb", "web"], "player_skip": ["webpage", "configs"]}
+                    else {"player_client": ["android_vr", "tv", "web_embedded", "ios", "android"], "player_skip": ["webpage", "configs"]}
                 ),
                 "instagram": {
                     "api": ["graphql", "web"]
@@ -907,13 +921,29 @@ def extract_yt_dlp(url, options_json="{}"):
                 }
             }
         }
+        if not is_yt:
+            ydl_opts["http_headers"] = http_headers
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
         if proxy:
             ydl_opts["proxy"] = proxy
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
+        info = None
+        yt_err = None
+        if is_yt:
+            info, yt_err = _ytdlnis_engine.extract_youtube_info_resilient(
+                clean_url,
+                ydl_opts,
+                cookie_path=cookie_file,
+                po_token=opts.get("po_token")
+            )
+            if info is None and yt_err:
+                raise RuntimeError(yt_err)
+        else:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(clean_url, download=False)
+
+        if True:
             if info:
                 entries = info.get("entries") or [info]
                 for entry in entries:
@@ -1164,11 +1194,16 @@ def extract_media(url, options_json="{}"):
     })
 
 def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_headers, media_mode="best", proxy=None, max_height=0, timeout=35, retries=3):
-    """Downloads media exclusively via yt-dlp."""
+    """Downloads media exclusively via yt-dlp with InnerTube/Piped fallback for YouTube."""
     if not YTDLP_AVAILABLE:
         return False
     cookie_file = None
     try:
+        is_yt = YTDLNIS_AVAILABLE and _ytdlnis_engine is not None and (
+            _ytdlnis_engine.is_youtube_url(url) or (referer and _ytdlnis_engine.is_youtube_url(referer))
+        )
+        effective_url = _ytdlnis_engine.normalize_youtube_url(url, allow_playlist=False) if (is_yt and _ytdlnis_engine.is_youtube_url(url)) else url
+
         http_headers = {
             "User-Agent": user_agent or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -1177,24 +1212,21 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
             "Sec-Ch-Ua-Mobile": "?1",
             "Sec-Ch-Ua-Platform": '"Android"',
         }
-        if referer:
+        if referer and not is_yt:
             http_headers["Referer"] = referer
-        if cookies:
+        if cookies and not is_yt:
             http_headers["Cookie"] = cookies
-        if extra_headers:
+        if extra_headers and not is_yt:
             http_headers.update(extra_headers)
 
-        cookie_file = _prepare_cookiefile(cookies, url)
+        cookie_file = _prepare_cookiefile(cookies, effective_url)
         mode = (media_mode or "best").lower()
         height_filter = f"[height<={int(max_height)}]" if max_height and int(max_height) > 0 else ""
         if mode == "audio":
-            # Never fall back to a muxed video when the user explicitly requested audio-only.
-            format_selector = "bestaudio"
+            format_selector = "bestaudio/best"
         elif mode == "video_only":
             format_selector = f"bestvideo{height_filter}/bestvideo"
         elif mode == "video":
-            # Prefer a muxed result; separate video+audio is permitted only when yt-dlp can
-            # merge it. Do not silently fall back to a video-only format.
             format_selector = f"best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best[vcodec!=none][acodec!=none]"
         else:
             format_selector = f"b{height_filter}[vcodec!=none][acodec!=none]/best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best"
@@ -1210,10 +1242,9 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
             "geo_bypass": True,
             "retries": int(retries or 3),
             "fragment_retries": int(retries or 3),
-            "http_headers": http_headers,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "ios", "mweb", "web"],
+                    "player_client": ["android_vr", "tv", "web_embedded", "ios", "android"],
                     "player_skip": ["webpage", "configs"]
                 },
                 "instagram": {
@@ -1227,21 +1258,75 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
                 }
             }
         }
+        if not is_yt:
+            ydl_opts["http_headers"] = http_headers
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
         if proxy and isinstance(proxy, str) and proxy.strip():
             ydl_opts["proxy"] = proxy.strip()
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        def _verify_downloaded_file():
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                with open(target_path, "rb") as f:
+                    head = f.read(512).lower()
+                if b"#extm3u" in head or b"<mpd" in head:
+                    os.remove(target_path)
+                    return False
+                return True
+            return False
 
-        if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-            with open(target_path, "rb") as f:
-                head = f.read(512).lower()
-            if b"#extm3u" in head or b"<mpd" in head:
-                os.remove(target_path)
-                return False
-            return True
+        if is_yt:
+            yt_profiles = [
+                {"clients": ["android_vr", "tv", "web_embedded", "ios", "android"], "use_cookies": False},
+                {"clients": ["ios", "android", "tv_embedded"], "use_cookies": False},
+            ]
+            if cookie_file:
+                yt_profiles.append({"clients": ["mweb", "web", "tv"], "use_cookies": True})
+            for prof in yt_profiles:
+                attempt_opts = dict(ydl_opts)
+                attempt_opts.pop("http_headers", None)
+                if prof["use_cookies"] and cookie_file:
+                    attempt_opts["cookiefile"] = cookie_file
+                else:
+                    attempt_opts.pop("cookiefile", None)
+                ext_args = dict(ydl_opts.get("extractor_args") or {})
+                ext_args["youtube"] = {
+                    "player_client": prof["clients"],
+                    "player_skip": ["webpage", "configs"]
+                }
+                attempt_opts["extractor_args"] = ext_args
+                try:
+                    with yt_dlp.YoutubeDL(attempt_opts) as ydl:
+                        ydl.download([effective_url])
+                    if _verify_downloaded_file():
+                        return True
+                except Exception:
+                    pass
+
+            # InnerTube / Piped / Invidious stream fallback
+            vid = _ytdlnis_engine.extract_youtube_video_id(effective_url) or (
+                _ytdlnis_engine.extract_youtube_video_id(referer) if referer else None
+            )
+            if vid:
+                fb_info = _ytdlnis_engine._extract_youtube_innertube_or_piped_fallback(vid, effective_url)
+                if fb_info and fb_info.get("formats"):
+                    fmts = fb_info.get("formats") or []
+                    chosen_url = None
+                    if mode == "audio":
+                        auds = [f for f in fmts if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
+                        chosen_url = (auds[-1] if auds else fmts[-1]).get("url")
+                    else:
+                        muxed = [f for f in fmts if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none"]
+                        vids = [f for f in fmts if f.get("url") and f.get("vcodec") != "none"]
+                        chosen_url = (muxed[-1] if muxed else (vids[-1] if vids else fmts[-1])).get("url")
+                    if chosen_url and _ytdlnis_engine._download_direct_http_stream(chosen_url, target_path):
+                        if _verify_downloaded_file():
+                            return True
+        else:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([effective_url])
+            if _verify_downloaded_file():
+                return True
     except Exception:
         pass
     finally:

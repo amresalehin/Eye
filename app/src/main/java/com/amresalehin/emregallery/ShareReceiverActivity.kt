@@ -242,6 +242,7 @@ private fun ShareReceiverScreen(
 
     // Lightweight background initialization (no storage directory walk on share sheet startup!)
     LaunchedEffect(Unit) {
+        com.amresalehin.emregallery.data.PocketDeepScanEngine.stopScan()
         withContext(Dispatchers.IO) {
             DownloadActivityManager.initialize(context)
             GalleryDlEngine.init(context)
@@ -255,12 +256,20 @@ private fun ShareReceiverScreen(
     }
 
     fun startFastExtractionAndProbe(targetUrl: String) {
-        val cleanTarget = targetUrl.trim()
-        if (cleanTarget.isBlank()) return
+        val rawTarget = targetUrl.trim()
+        if (rawTarget.isBlank()) return
+        val cleanTarget = if (GalleryDlEngine.isYouTubeUrl(rawTarget)) {
+            GalleryDlEngine.normalizeYouTubeUrl(rawTarget)
+        } else {
+            rawTarget
+        }
+        val isYouTube = GalleryDlEngine.isYouTubeUrl(cleanTarget)
         DownloaderSession.startSession(cleanTarget)
-        extractionCoordinator.extract(cleanTarget, scope)
+        if (!isYouTube) {
+            extractionCoordinator.extract(cleanTarget, scope)
+        }
 
-        // Concurrently probe rich format/stream metadata for Studio & 1-tap download
+        // Probe rich format/stream metadata for Studio & 1-tap download (and primary YouTube discovery)
         scope.launch(Dispatchers.IO) {
             isProbingStudio = true
             GalleryDlEngine.init(context)
@@ -276,6 +285,63 @@ private fun ShareReceiverScreen(
                 if (first.title.isNotBlank()) {
                     DownloaderSession.setPageTitle(first.title)
                 }
+                if (DownloaderSession.discoveredItems.value.isEmpty()) {
+                    val synthItems = mutableListOf<com.amresalehin.emregallery.data.ScrapedMediaItem>()
+                    val bestVideoFmt = first.formats.lastOrNull { it.vcodec != "none" && it.acodec != "none" }
+                        ?: first.formats.lastOrNull { it.vcodec != "none" }
+                    val bestAudioFmt = first.formats.lastOrNull { it.vcodec == "none" && it.acodec != "none" }
+                    val videoTitle = first.title.ifBlank { "YouTube Video" }
+                    val vExt = bestVideoFmt?.ext?.ifBlank { "mp4" } ?: "mp4"
+                    synthItems += com.amresalehin.emregallery.data.ScrapedMediaItem(
+                        id = "yt_video_${first.id.ifBlank { cleanTarget.hashCode().toString() }}",
+                        url = first.url.ifBlank { cleanTarget },
+                        title = if (videoTitle.endsWith(".$vExt", ignoreCase = true)) videoTitle else "$videoTitle.$vExt",
+                        isVideo = true,
+                        isAudio = false,
+                        isStream = false,
+                        category = com.amresalehin.emregallery.data.MediaCategory.VIDEOS,
+                        format = vExt.uppercase(),
+                        mimeType = "video/$vExt",
+                        thumbnailUrl = first.thumbnail.takeIf { it.isNotBlank() },
+                        sizeBytes = bestVideoFmt?.filesize?.takeIf { it > 0L },
+                        resolutionHint = bestVideoFmt?.let {
+                            if (it.width > 0 && it.height > 0) "${it.width}x${it.height}" else it.formatNote.takeIf { n -> n.isNotBlank() }
+                        },
+                        width = bestVideoFmt?.width?.takeIf { it > 0 },
+                        height = bestVideoFmt?.height?.takeIf { it > 0 },
+                        source = "yt-dlp",
+                        provenance = com.amresalehin.emregallery.data.MediaProvenance(
+                            extractorEngine = "yt-dlp",
+                            pageUrl = cleanTarget
+                        )
+                    )
+                    if (bestAudioFmt != null) {
+                        val aExt = bestAudioFmt.ext.ifBlank { "m4a" }
+                        synthItems += com.amresalehin.emregallery.data.ScrapedMediaItem(
+                            id = "yt_audio_${first.id.ifBlank { cleanTarget.hashCode().toString() }}",
+                            url = first.url.ifBlank { cleanTarget },
+                            title = if (videoTitle.endsWith(".$aExt", ignoreCase = true)) videoTitle else "$videoTitle.$aExt",
+                            isVideo = false,
+                            isAudio = true,
+                            isStream = false,
+                            category = com.amresalehin.emregallery.data.MediaCategory.AUDIO,
+                            format = aExt.uppercase(),
+                            mimeType = "audio/$aExt",
+                            thumbnailUrl = first.thumbnail.takeIf { it.isNotBlank() },
+                            sizeBytes = bestAudioFmt.filesize.takeIf { it > 0L },
+                            source = "yt-dlp",
+                            provenance = com.amresalehin.emregallery.data.MediaProvenance(
+                                extractorEngine = "yt-dlp",
+                                pageUrl = cleanTarget
+                            )
+                        )
+                    }
+                    DownloaderSession.addDiscoveredItems(synthItems)
+                    extractionCoordinator.addDiscoveredItems(synthItems, title = first.title, domain = "youtube.com")
+                }
+            } else if (isYouTube) {
+                // Fallback to ExtractionCoordinator if YtdlnisEngine returned empty
+                extractionCoordinator.extract(cleanTarget, scope)
             }
             isProbingStudio = false
         }

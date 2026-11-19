@@ -278,14 +278,18 @@ object PocketDeepScanEngine {
     private fun destroyWebView(wv: WebView?) {
         if (wv == null) return
         try {
-            wv.stopLoading()
-            wv.loadUrl("about:blank")
-            wv.clearHistory()
-            wv.onPause()
             (wv.parent as? ViewGroup)?.removeView(wv)
+            wv.stopLoading()
+            wv.onPause()
             wv.webViewClient = WebViewClient()
             wv.webChromeClient = WebChromeClient()
-            wv.destroy()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    wv.clearHistory()
+                    wv.destroy()
+                } catch (_: Throwable) {
+                }
+            }, 90L)
         } catch (e: Exception) {
             Log.w(TAG, "Error cleaning up deep scan WebView", e)
         }

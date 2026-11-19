@@ -2,10 +2,12 @@ package com.amresalehin.emregallery.data
 
 import android.content.Context
 import android.util.Log
+import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,7 +15,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.net.URL
 
 /**
  * TargetMediaExpectation represents the expected media type based on URL classification.
@@ -35,6 +36,7 @@ enum class TargetMediaExpectation {
  * 3. Preserves extractor diagnostic error messages (e.g. bot challenge, login required, throttling) without swallowing them.
  * 4. Ensures static thumbnails (og:image) never prematurely terminate video or album extraction pipelines.
  * 5. Falls back to dynamic Chromium browser when specialized or static extractors do not satisfy the expectation.
+ * 6. Modularized coroutine steps so each suspend state machine stays well below Android ART's 16,384-instruction JIT limit.
  */
 typealias ExtractionState = DualMediaExtractor.ExtractionState
 typealias ExtractionPhase = DualMediaExtractor.ExtractionPhase
@@ -46,12 +48,33 @@ class ExtractionCoordinator(private val context: Context) {
     private val _state = MutableStateFlow(ExtractionState())
     val state: StateFlow<ExtractionState> = _state.asStateFlow()
 
+    private class ExtractionSessionContext(
+        val requestContext: MediaRequestContext,
+        val expectation: TargetMediaExpectation,
+        val isRedditTarget: Boolean,
+        val isInstagramTarget: Boolean,
+        val isYouTubeTarget: Boolean,
+        val itemsMap: LinkedHashMap<String, ScrapedMediaItem> = LinkedHashMap(),
+        val itemsMutex: Mutex = Mutex()
+    ) {
+        @Volatile
+        var lastDiagnosticError: String? = null
+
+        @Volatile
+        var captchaChallengeUrl: String? = null
+    }
+
     fun extract(targetUrl: String, scope: CoroutineScope, directOnly: Boolean = false) {
         cancel()
 
         val trimmed = targetUrl.trim()
         val normalizedRedditTarget = MediaClassifier.normalizeRedditShorthand(trimmed)
-        val effectiveInputUrl = normalizedRedditTarget ?: trimmed
+        val rawEffectiveUrl = normalizedRedditTarget ?: trimmed
+        val effectiveInputUrl = if (GalleryDlEngine.isYouTubeUrl(rawEffectiveUrl)) {
+            GalleryDlEngine.normalizeYouTubeUrl(rawEffectiveUrl)
+        } else {
+            rawEffectiveUrl
+        }
         if (!MediaClassifier.isValidWebUrl(effectiveInputUrl)) {
             _state.value = ExtractionState(
                 errorMessage = "Please enter a valid URL or Reddit target (e.g. https://example.com, r/funny, u/username)",
@@ -64,6 +87,17 @@ class ExtractionCoordinator(private val context: Context) {
         val requestContext = MediaRequestContext.create(effectiveInputUrl)
         val domain = requestContext.domain
         val expectation = determineExpectation(requestContext.url)
+        val lowerUrl = requestContext.url.lowercase(java.util.Locale.ROOT)
+        val session = ExtractionSessionContext(
+            requestContext = requestContext,
+            expectation = expectation,
+            isRedditTarget = normalizedRedditTarget != null ||
+                lowerUrl.contains("reddit.com") ||
+                lowerUrl.contains("redd.it") ||
+                lowerUrl.contains("redgifs.com"),
+            isInstagramTarget = lowerUrl.contains("instagram.com") || lowerUrl.contains("instagr.am"),
+            isYouTubeTarget = GalleryDlEngine.isYouTubeUrl(requestContext.url)
+        )
 
         _state.value = ExtractionState(
             isRunning = true,
@@ -74,576 +108,566 @@ class ExtractionCoordinator(private val context: Context) {
         )
 
         extractionJob = scope.launch {
-            val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
-            val itemsMutex = Mutex()
-            var lastDiagnosticError: String? = null
+            executeExtractionPipeline(session, directOnly)
+        }
+    }
 
-            suspend fun updateItems(
-                newList: List<ScrapedMediaItem>,
-                title: String? = null,
-                msg: String? = null,
-                phase: ExtractionPhase? = null
-            ) = itemsMutex.withLock {
-                val modified = MediaNormalizer.mergeCandidates(itemsMap, newList)
-                if (modified || msg != null || phase != null || title != null) {
-                    val currentItems = itemsMap.values.toList()
-                    _state.value = _state.value.copy(
-                        items = currentItems,
-                        pageTitle = if (_state.value.pageTitle.isBlank() && !title.isNullOrBlank()) title else _state.value.pageTitle,
-                        statusMessage = msg ?: _state.value.statusMessage,
-                        phase = phase ?: _state.value.phase
-                    )
-                    DownloaderSession.addDiscoveredItems(currentItems)
-                    if (!title.isNullOrBlank()) DownloaderSession.setPageTitle(title)
-                    if (msg != null) DownloaderSession.setStatusMessage(msg)
-                }
+    private suspend fun executeExtractionPipeline(
+        session: ExtractionSessionContext,
+        directOnly: Boolean
+    ) {
+        try {
+            val activeProxy = DownloaderPreferencesManager.getActiveProxyUrlSync(context)
+            val networkTimeout = DownloaderPreferencesManager.getNetworkTimeoutSync(context)
+            OkHttpDownloader.configureProxy(
+                enabled = activeProxy != null,
+                proxyUrl = activeProxy.orEmpty(),
+                timeoutSeconds = networkTimeout
+            )
+
+            // Step 1: OkHttp Direct-Media Fast Path Probe (skip for YouTube watch pages)
+            if (!session.isYouTubeTarget && probeDirectMediaFastPath(session)) {
+                finishSuccess(session.itemsMap.size)
+                return
             }
 
-            suspend fun updateStatus(status: String, phase: ExtractionPhase? = null) = itemsMutex.withLock {
-                _state.value = _state.value.copy(
-                    statusMessage = status,
-                    phase = phase ?: _state.value.phase
-                )
+            if (directOnly) {
+                finalizeEmptyOrSuccess(session)
+                return
             }
 
-            try {
-                val activeProxy = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getActiveProxyUrlSync(context)
-                val networkTimeout = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getNetworkTimeoutSync(context)
-                OkHttpDownloader.configureProxy(
-                    enabled = activeProxy != null,
-                    proxyUrl = activeProxy.orEmpty(),
-                    timeoutSeconds = networkTimeout
-                )
+            // Step 2: Concurrent Multi-Engine Discovery
+            updateStatus(
+                session,
+                if (session.isYouTubeTarget) {
+                    "Extracting YouTube streams via yt-dlp InnerTube engine..."
+                } else {
+                    "Initiating concurrent discovery (yt-dlp, gallery-dl, Static Scraper, Browser)..."
+                },
+                ExtractionPhase.YT_DLP
+            )
 
-                // Step 1: OkHttp Direct-Media Fast Path Probe
-                updateStatus("Probing URL headers with OkHttp...", ExtractionPhase.DIRECT_MEDIA)
-                val directProbe = OkHttpDownloader.probeDirectMedia(requestContext.url)
+            val supportInfo = withContext(Dispatchers.IO) {
+                GalleryDlEngine.init(context)
+                GalleryDlEngine.checkSupport(session.requestContext.url)
+            }
 
-                if (directProbe.isConfirmedDirectMedia) {
-                    val finalUrl = directProbe.finalUrl
-                    val ct = directProbe.contentType
-                    val cd = directProbe.contentDisposition
-                    val cl = directProbe.contentLength
+            val rawCookies = OkHttpDownloader.sharedCookieJar
+                .getCookieString(session.requestContext.url)
+                .takeIf { it.isNotBlank() }
+            val cookies = GalleryDlEngine.sanitizeCookiesForUrl(session.requestContext.url, rawCookies)
+            val options = buildExtractorOptions(cookies, activeProxy, networkTimeout)
 
-                    val classification = MediaClassifier.classify(finalUrl, mimeHint = ct)
-                    val derivedTitle = if (!cd.isNullOrBlank() && cd.contains("filename=", ignoreCase = true)) {
-                        cd.substringAfter("filename=").replace("\"", "").trim()
-                    } else {
-                        MediaClassifier.deriveFileName(finalUrl, classification.format, 0)
-                    }
+            val satisfiedFast = runConcurrentDiscoveryChannels(session, options)
+            if (satisfiedFast) {
+                finishSuccess(session.itemsMap.size)
+                return
+            }
 
-                    val directItem = ScrapedMediaItem(
-                        id = "direct_${System.currentTimeMillis()}_${(finalUrl.hashCode() and 0xFFFF)}",
-                        url = finalUrl,
-                        title = derivedTitle,
-                        isVideo = classification.isVideo,
-                        isAudio = classification.isAudio,
-                        isStream = classification.isStream,
-                        category = classification.category,
-                        format = classification.format,
-                        mimeType = classification.mimeType,
-                        sizeBytes = cl,
-                        source = "Direct HTTP",
-                        provenance = MediaProvenance(extractorEngine = "OkHttp Direct", pageUrl = requestContext.url)
-                    )
+            // Step 3: Bot Challenge / Cookie Refresh Evaluation
+            if (handleBotAndCookieRetryIfNeeded(session, supportInfo, options, cookies)) {
+                return
+            }
 
-                    updateItems(listOf(directItem), title = derivedTitle, phase = ExtractionPhase.COMPLETED)
-                    finishSuccess(itemsMap.size)
-                    return@launch
+            finalizeEmptyOrSuccess(session)
+        } catch (_: CancellationException) {
+            _state.value = _state.value.copy(
+                isRunning = false,
+                phase = ExtractionPhase.IDLE,
+                statusMessage = "Extraction stopped"
+            )
+        } catch (e: Exception) {
+            Log.e("ExtractionCoordinator", "Routing error", e)
+            val err = e.localizedMessage ?: "Extraction failed"
+            _state.value = _state.value.copy(
+                isRunning = false,
+                phase = ExtractionPhase.ERROR,
+                statusMessage = "Extraction failed: $err",
+                errorMessage = err
+            )
+        }
+    }
+
+    private suspend fun probeDirectMediaFastPath(session: ExtractionSessionContext): Boolean {
+        updateStatus(session, "Probing URL headers with OkHttp...", ExtractionPhase.DIRECT_MEDIA)
+        val directProbe = OkHttpDownloader.probeDirectMedia(session.requestContext.url)
+        if (!directProbe.isConfirmedDirectMedia) return false
+
+        val finalUrl = directProbe.finalUrl
+        val ct = directProbe.contentType
+        val cd = directProbe.contentDisposition
+        val cl = directProbe.contentLength
+
+        val classification = MediaClassifier.classify(finalUrl, mimeHint = ct)
+        val derivedTitle = if (!cd.isNullOrBlank() && cd.contains("filename=", ignoreCase = true)) {
+            cd.substringAfter("filename=").replace("\"", "").trim()
+        } else {
+            MediaClassifier.deriveFileName(finalUrl, classification.format, 0)
+        }
+
+        val directItem = ScrapedMediaItem(
+            id = "direct_${System.currentTimeMillis()}_${(finalUrl.hashCode() and 0xFFFF)}",
+            url = finalUrl,
+            title = derivedTitle,
+            isVideo = classification.isVideo,
+            isAudio = classification.isAudio,
+            isStream = classification.isStream,
+            category = classification.category,
+            format = classification.format,
+            mimeType = classification.mimeType,
+            sizeBytes = cl,
+            source = "Direct HTTP",
+            provenance = MediaProvenance(extractorEngine = "OkHttp Direct", pageUrl = session.requestContext.url)
+        )
+
+        updateItems(session, listOf(directItem), title = derivedTitle, phase = ExtractionPhase.COMPLETED)
+        return true
+    }
+
+    private fun buildExtractorOptions(
+        cookies: String?,
+        activeProxy: String?,
+        networkTimeout: Int
+    ): GalleryDlOptions {
+        val redditPrefs = DownloaderPreferencesManager.getRedditConfigSync(context)
+        return GalleryDlOptions(
+            cookies = cookies,
+            timeoutSeconds = networkTimeout,
+            limit = redditPrefs.limit,
+            afterDate = redditPrefs.afterDate.takeIf { it.isNotBlank() },
+            beforeDate = redditPrefs.beforeDate.takeIf { it.isNotBlank() },
+            includeComments = redditPrefs.includeComments,
+            includePostAuthors = redditPrefs.includePostAuthors,
+            redditClientId = redditPrefs.clientId.takeIf { it.isNotBlank() },
+            redditClientSecret = redditPrefs.clientSecret.takeIf { it.isNotBlank() },
+            redditUsername = redditPrefs.username.takeIf { it.isNotBlank() },
+            redditPassword = redditPrefs.password.takeIf { it.isNotBlank() },
+            redditRefreshToken = redditPrefs.refreshToken.takeIf { it.isNotBlank() },
+            proxy = activeProxy,
+            maxHeight = DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight,
+            formatMode = DownloaderPreferencesManager.getFormatModeSync(context).id,
+            downloadPlaylist = DownloaderPreferencesManager.isDownloadPlaylistSync(context),
+            downloadSubtitles = DownloaderPreferencesManager.isDownloadSubtitlesSync(context),
+            includeAutoSubtitles = DownloaderPreferencesManager.isIncludeAutoSubtitlesSync(context),
+            subtitleLanguages = DownloaderPreferencesManager.getSubtitleLanguagesSync(context),
+            retries = DownloaderPreferencesManager.getRetryCountSync(context)
+        )
+    }
+
+    private suspend fun runConcurrentDiscoveryChannels(
+        session: ExtractionSessionContext,
+        options: GalleryDlOptions
+    ): Boolean = coroutineScope {
+        val url = session.requestContext.url
+        val lowerUrl = url.lowercase(java.util.Locale.ROOT)
+        val detectedPlatform = SupportedMediaPlatform.detect(url)
+        val isSpotifyTarget = detectedPlatform == SupportedMediaPlatform.SPOTIFY
+        val isRadioJavanTarget = detectedPlatform == SupportedMediaPlatform.RADIOJAVAN
+        val isXSpaceTarget = SupportedMediaPlatform.isXSpace(url)
+        val isTumblrTarget = lowerUrl.contains("tumblr.com")
+        val isPixivTarget = lowerUrl.contains("pixiv.net")
+        val isFacebookTarget = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch")
+        val isTwitterStatusTarget = (lowerUrl.contains("twitter.com/") || lowerUrl.contains("x.com/")) && lowerUrl.contains("/status/")
+        val recursiveCrawlEnabled = DownloaderPreferencesManager.isRecursiveCrawlEnabledSync(context)
+
+        val fastJobs = mutableListOf<Job>()
+
+        // Skip static HTML scraper, gallery-dl, and headless WebView for YouTube watch/shorts URLs
+        // because YouTube uses MSE blob streams and offscreen WebViews trigger guest-cookie bot checks.
+        if (!session.isYouTubeTarget) {
+            fastJobs += launch(Dispatchers.IO) { runStaticScraperChannel(session) }
+        }
+        if (session.isRedditTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "reddit-dl", GalleryDlEngine.isRedditDlAvailable()) {
+                    GalleryDlEngine.extractReddit(url, options)
                 }
-
-                // Step 2: Inconclusive / Not direct media -> Concurrent Multi-Engine Discovery
-                updateStatus("Initiating concurrent discovery (yt-dlp, gallery-dl, Static Scraper, Browser)...", ExtractionPhase.YT_DLP)
-
-                val supportInfo = withContext(Dispatchers.IO) {
-                    GalleryDlEngine.init(context)
-                    GalleryDlEngine.checkSupport(requestContext.url)
-                }
-
-                val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
-                val redditPrefs = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRedditConfigSync(context)
-                val options = GalleryDlOptions(
-                    cookies = cookies,
-                    timeoutSeconds = networkTimeout,
-                    limit = redditPrefs.limit,
-                    afterDate = redditPrefs.afterDate.takeIf { it.isNotBlank() },
-                    beforeDate = redditPrefs.beforeDate.takeIf { it.isNotBlank() },
-                    includeComments = redditPrefs.includeComments,
-                    includePostAuthors = redditPrefs.includePostAuthors,
-                    redditClientId = redditPrefs.clientId.takeIf { it.isNotBlank() },
-                    redditClientSecret = redditPrefs.clientSecret.takeIf { it.isNotBlank() },
-                    redditUsername = redditPrefs.username.takeIf { it.isNotBlank() },
-                    redditPassword = redditPrefs.password.takeIf { it.isNotBlank() },
-                    redditRefreshToken = redditPrefs.refreshToken.takeIf { it.isNotBlank() },
-                    proxy = activeProxy,
-                    maxHeight = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight,
-                    formatMode = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getFormatModeSync(context).id,
-                    downloadPlaylist = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isDownloadPlaylistSync(context),
-                    downloadSubtitles = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isDownloadSubtitlesSync(context),
-                    includeAutoSubtitles = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isIncludeAutoSubtitlesSync(context),
-                    subtitleLanguages = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getSubtitleLanguagesSync(context),
-                    retries = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRetryCountSync(context)
-                )
-
-                // Launch concurrent discovery jobs:
-                // Rule 1: No exclusive extractor selection. Both yt-dlp and gallery-dl run concurrently.
-                // Rule 2: Browser discovery is complementary. Runs to discover dynamic network requests and DOM media.
-                // Rule 5: One unified candidate manager.
-                val lowerRequestUrl = requestContext.url.lowercase(java.util.Locale.ROOT)
-                val isInstagramTarget = lowerRequestUrl.contains("instagram.com") || lowerRequestUrl.contains("instagr.am")
-                val isRedditTarget = normalizedRedditTarget != null ||
-                    lowerRequestUrl.contains("reddit.com") ||
-                    lowerRequestUrl.contains("redd.it") ||
-                    lowerRequestUrl.contains("redgifs.com")
-                val detectedPlatform = SupportedMediaPlatform.detect(requestContext.url)
-                val isSpotifyTarget = detectedPlatform == SupportedMediaPlatform.SPOTIFY
-                val isRadioJavanTarget = detectedPlatform == SupportedMediaPlatform.RADIOJAVAN
-                val isXSpaceTarget = SupportedMediaPlatform.isXSpace(requestContext.url)
-                val isTumblrTarget = lowerRequestUrl.contains("tumblr.com")
-                val isPixivTarget = lowerRequestUrl.contains("pixiv.net")
-                val isFacebookTarget = lowerRequestUrl.contains("facebook.com") || lowerRequestUrl.contains("fb.watch")
-                val isTwitterStatusTarget = (lowerRequestUrl.contains("twitter.com/") || lowerRequestUrl.contains("x.com/")) && lowerRequestUrl.contains("/status/")
-                val recursiveCrawlEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isRecursiveCrawlEnabledSync(context)
-                val recursiveCrawlConfig = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRecursiveCrawlConfigSync(context)
-                var captchaChallengeUrl: String? = null
-
-                // Fast-path Pure-Kotlin OkHttp Static HTML/JSON/OpenGraph/srcset scraper (~200ms)
-                val staticScraperJob = launch(Dispatchers.IO) {
-                    try {
-                        val staticRes = StaticMediaScraper().scrape(requestContext.url)
-                        if (staticRes.items.isNotEmpty()) {
-                            // For VIDEO_OR_STREAM targets, only merge non-poster video/audio/stream items from static HTML
-                            // so static og:image posters don't clutter a single-video target.
-                            val filteredStatic = if (expectation == TargetMediaExpectation.VIDEO_OR_STREAM) {
-                                staticRes.items.filter { it.isVideo || it.isAudio || it.isStream }
-                            } else {
-                                staticRes.items
-                            }
-                            if (filteredStatic.isNotEmpty()) {
-                                updateItems(
-                                    filteredStatic,
-                                    title = staticRes.pageTitle,
-                                    msg = "Discovered ${filteredStatic.size} item(s) via fast HTML scraper"
-                                )
-                            } else if (staticRes.pageTitle.isNotBlank()) {
-                                updateItems(emptyList(), title = staticRes.pageTitle)
-                            }
-                        } else if (!staticRes.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                            lastDiagnosticError = staticRes.errorMessage
-                        }
-                    } catch (e: Exception) {
-                        Log.w("ExtractionCoordinator", "Concurrent StaticMediaScraper error", e)
-                    }
-                }
-
-                val redditDlJob = if (isRedditTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isRedditDlAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractReddit(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via reddit-dl")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent reddit-dl error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val instaloaderJob = if (isInstagramTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isInstaloaderAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractInstagram(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via Instaloader")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Instaloader error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val spotifyJob = if (isSpotifyTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractSpotify(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Matched ${res.items.size} Spotify audio track(s) via YouTube")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Spotify error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val radioJavanJob = if (isRadioJavanTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractRadioJavan(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} RadioJavan item(s)")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent RadioJavan error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val xSpaceJob = if (isXSpaceTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaDownloaderAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractXSpace(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Resolved Twitter/X Space HLS audio stream")
-                                } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                    lastDiagnosticError = res.errorMessage
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent X Space error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val tumblrJob = if (isTumblrTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaScraperAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractTumblr(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Tumblr item(s) via media-scraper")
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Tumblr media-scraper error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val pixivJob = if (isPixivTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaScraperAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractPixiv(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Pixiv artwork page(s) via media-scraper")
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Pixiv media-scraper error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val twitterScraperJob = if (isTwitterStatusTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaScraperAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractTwitterMediaScraper(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Twitter/X media item(s) via media-scraper")
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Twitter media-scraper error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val facebookScraperJob = if (isFacebookTarget) {
-                    launch(Dispatchers.IO) {
-                        if (GalleryDlEngine.isMediaScraperAvailable()) {
-                            try {
-                                val res = GalleryDlEngine.extractFacebookMediaScraper(requestContext.url, options)
-                                if (res.success && res.items.isNotEmpty()) {
-                                    updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} Facebook item(s) via media-scraper")
-                                }
-                            } catch (e: Exception) {
-                                Log.w("ExtractionCoordinator", "Concurrent Facebook media-scraper error", e)
-                            }
-                        }
-                    }
-                } else null
-
-                val recursiveCrawlJob = if (recursiveCrawlEnabled && expectation != TargetMediaExpectation.VIDEO_OR_STREAM) {
-                    launch(Dispatchers.IO) {
-                        try {
-                            val crawler = RecursiveSiteCrawler()
-                            val crawlRes = crawler.crawl(
-                                startUrl = requestContext.url,
-                                config = recursiveCrawlConfig,
-                                context = context,
-                                onProgress = { p ->
-                                    launch {
-                                        updateStatus(
-                                            "Recursive crawl (${p.pagesCrawled}/${p.maxPages} pages, depth ${p.currentDepth}): ${p.mediaDiscovered} media",
-                                            ExtractionPhase.STATIC_SCRAPING
-                                        )
-                                    }
-                                },
-                                onMediaDiscovered = { discovered ->
-                                    launch { updateItems(discovered) }
-                                }
-                            )
-                            if (crawlRes.items.isNotEmpty()) {
-                                updateItems(
-                                    crawlRes.items,
-                                    title = crawlRes.pageTitle,
-                                    msg = "Recursive crawl discovered ${crawlRes.items.size} media across ${crawlRes.pagesCrawled} page(s)"
-                                )
-                            }
-                            if (crawlRes.captchaDetected) {
-                                captchaChallengeUrl = crawlRes.captchaUrl ?: requestContext.url
-                                if (lastDiagnosticError == null) {
-                                    lastDiagnosticError = crawlRes.errorMessage
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.w("ExtractionCoordinator", "Concurrent RecursiveSiteCrawler error", e)
-                        }
-                    }
-                } else null
-
-                val ytdlpJob = launch(Dispatchers.IO) {
-                    if (GalleryDlEngine.isYtDlpAvailable()) {
-                        try {
-                            val res = GalleryDlEngine.extractYtDlp(requestContext.url, options)
-                            if (res.success && res.items.isNotEmpty()) {
-                                updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via yt-dlp")
-                            } else if (!res.errorMessage.isNullOrBlank()) {
-                                lastDiagnosticError = res.errorMessage
-                            }
-                        } catch (e: Exception) {
-                            Log.w("ExtractionCoordinator", "Concurrent yt-dlp error", e)
-                        }
-                    }
-                }
-
-                val galleryDlJob = launch(Dispatchers.IO) {
-                    if (GalleryDlEngine.isGalleryDlAvailable()) {
-                        try {
-                            val res = GalleryDlEngine.extractGalleryDl(requestContext.url, options)
-                            if (res.success && res.items.isNotEmpty()) {
-                                updateItems(res.items, title = res.pageTitle, msg = "Discovered ${res.items.size} items via gallery-dl")
-                            } else if (!res.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
-                                lastDiagnosticError = res.errorMessage
-                            }
-                        } catch (e: Exception) {
-                            Log.w("ExtractionCoordinator", "Concurrent gallery-dl error", e)
-                        }
-                    }
-                }
-
-                val browserJob = launch(Dispatchers.IO) {
-                    try {
-                        // Brief 350ms head-start for fast OkHttp/Python extractors so we don't spin up a heavy
-                        // main-thread WebView if fast extractors already satisfy the media expectation.
-                        kotlinx.coroutines.delay(350L)
-                        val alreadySufficient = itemsMutex.withLock {
-                            isExtractionSufficient(expectation, itemsMap.values)
-                        }
-                        if (alreadySufficient) return@launch
-
-                        val browserRes = withContext(Dispatchers.Main) {
-                            BrowserSession.extractHeadless(
-                                context = context,
-                                targetUrl = requestContext.url,
-                                onStatusUpdate = { s -> launch { updateStatus(s, ExtractionPhase.BROWSER_INTERCEPTING) } },
-                                onMediaDiscovered = { item -> launch { updateItems(listOf(item)) } }
-                            )
-                        }
-                        if (browserRes.items.isNotEmpty()) {
-                            updateItems(browserRes.items, title = browserRes.pageTitle)
-                        } else if (lastDiagnosticError == null) {
-                            lastDiagnosticError = browserRes.errorMessage
-                        }
-                    } catch (_: CancellationException) {
-                        // Fast extractors succeeded and cancelled headless browser early
-                    } catch (e: Exception) {
-                        Log.w("ExtractionCoordinator", "Concurrent BrowserSession error", e)
-                    }
-                }
-
-                // Await all fast HTTP and Python discovery channels first
-                staticScraperJob.join()
-                redditDlJob?.join()
-                instaloaderJob?.join()
-                spotifyJob?.join()
-                radioJavanJob?.join()
-                xSpaceJob?.join()
-                tumblrJob?.join()
-                pixivJob?.join()
-                twitterScraperJob?.join()
-                facebookScraperJob?.join()
-                recursiveCrawlJob?.join()
-                ytdlpJob.join()
-                galleryDlJob.join()
-
-                // If fast HTTP/Python extractors already satisfied the media expectation,
-                // cancel the slow headless WebView immediately instead of waiting 5-16 seconds!
-                val fastExtractorsSufficient = itemsMutex.withLock {
-                    isExtractionSufficient(expectation, itemsMap.values)
-                }
-                if (fastExtractorsSufficient) {
-                    browserJob.cancel()
-                    finishSuccess(itemsMap.size)
-                    return@launch
-                }
-
-                // Otherwise wait for headless Chromium browser fallback to finish intercepting dynamic DOM/network media
-                browserJob.join()
-
-                // Check bot challenges or login requirement if candidates are still empty
-                val needsSignInDirect = BotDetectionMitigator.indicatesSignInRequired(lastDiagnosticError)
-                val isSupportedByEngines = supportInfo.isSupported
-                val needsCookiesOrBot = BotDetectionMitigator.indicatesCookiesOrBotVerificationNeeded(lastDiagnosticError) ||
-                        (isSupportedByEngines && itemsMap.isEmpty() && cookies.isNullOrBlank())
-
-                if (captchaChallengeUrl != null && itemsMap.isEmpty()) {
-                    _state.value = _state.value.copy(
-                        isRunning = false,
-                        requiresSignIn = true,
-                        signInUrl = captchaChallengeUrl,
-                        statusMessage = "CAPTCHA verification required for $domain",
-                        errorMessage = "CAPTCHA detected on $domain. Complete verification in the browser to continue."
-                    )
-                    return@launch
-                }
-
-                if (needsSignInDirect && itemsMap.isEmpty()) {
-                    _state.value = _state.value.copy(
-                        isRunning = false,
-                        requiresSignIn = true,
-                        signInUrl = requestContext.url,
-                        statusMessage = "Sign-in required for $domain",
-                        errorMessage = "Sign in to $domain to access and download this media."
-                    )
-                    return@launch
-                } else if (needsCookiesOrBot && itemsMap.isEmpty()) {
-                    updateStatus("Resolving session cookies in background for $domain...", ExtractionPhase.YT_DLP)
-                    _state.value = _state.value.copy(isObtainingCookiesInBackground = true)
-
-                    val cookieRes = withContext(Dispatchers.Main) {
-                        BrowserSession.fetchCookiesInBackground(
-                            context = context,
-                            targetUrl = requestContext.url,
-                            onStatusUpdate = { s -> launch { updateStatus(s) } }
-                        )
-                    }
-                    _state.value = _state.value.copy(isObtainingCookiesInBackground = false)
-
-                    if (cookieRes.requiresSignIn) {
-                        _state.value = _state.value.copy(
-                            isRunning = false,
-                            requiresSignIn = true,
-                            signInUrl = cookieRes.signInUrl ?: requestContext.url,
-                            statusMessage = "Sign-in required for $domain",
-                            errorMessage = "Sign in to $domain to access and download this media."
-                        )
-                        return@launch
-                    } else if (!cookieRes.cookies.isNullOrBlank()) {
-                        val updatedOptions = options.copy(cookies = cookieRes.cookies)
-                        updateStatus("Cookies refreshed. Re-probing with yt-dlp & gallery-dl...", ExtractionPhase.YT_DLP)
-
-                        if (isRedditTarget && GalleryDlEngine.isRedditDlAvailable()) {
-                            val retryReddit = withContext(Dispatchers.IO) {
-                                try {
-                                    GalleryDlEngine.extractReddit(requestContext.url, updatedOptions)
-                                } catch (e: Exception) {
-                                    GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
-                                }
-                            }
-                            if (retryReddit.success && retryReddit.items.isNotEmpty()) {
-                                updateItems(retryReddit.items, title = retryReddit.pageTitle)
-                            }
-                        }
-
-                        if (isInstagramTarget && GalleryDlEngine.isInstaloaderAvailable()) {
-                            val retryIg = withContext(Dispatchers.IO) {
-                                try {
-                                    GalleryDlEngine.extractInstagram(requestContext.url, updatedOptions)
-                                } catch (e: Exception) {
-                                    GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
-                                }
-                            }
-                            if (retryIg.success && retryIg.items.isNotEmpty()) {
-                                updateItems(retryIg.items, title = retryIg.pageTitle)
-                            }
-                        }
-
-                        val retryYt = withContext(Dispatchers.IO) {
-                            try {
-                                GalleryDlEngine.extractYtDlp(requestContext.url, updatedOptions)
-                            } catch (e: Exception) {
-                                GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
-                            }
-                        }
-                        if (retryYt.success && retryYt.items.isNotEmpty()) {
-                            updateItems(retryYt.items, title = retryYt.pageTitle)
-                        }
-
-                        val retryGdl = withContext(Dispatchers.IO) {
-                            try {
-                                GalleryDlEngine.extractGalleryDl(requestContext.url, updatedOptions)
-                            } catch (e: Exception) {
-                                GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage)
-                            }
-                        }
-                        if (retryGdl.success && retryGdl.items.isNotEmpty()) {
-                            updateItems(retryGdl.items, title = retryGdl.pageTitle)
-                        }
-                    }
-                }
-
-                // Evaluate merged discovery results
-                if (itemsMap.isNotEmpty()) {
-                    finishSuccess(itemsMap.size)
-                    return@launch
-                }
-
-                // Final Evaluation if no items discovered
-                val finalReason: String = lastDiagnosticError?.takeIf { it.isNotBlank() }
-                    ?: "No media items discovered by any discovery engine."
-
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.ERROR,
-                    statusMessage = finalReason,
-                    errorMessage = finalReason
-                )
-            } catch (ce: CancellationException) {
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.IDLE,
-                    statusMessage = "Extraction stopped"
-                )
-            } catch (e: Exception) {
-                Log.e("ExtractionCoordinator", "Routing error", e)
-                val err = e.localizedMessage ?: "Extraction failed"
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.ERROR,
-                    statusMessage = "Extraction failed: $err",
-                    errorMessage = err
-                )
             }
         }
+        if (session.isInstagramTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Instaloader", GalleryDlEngine.isInstaloaderAvailable()) {
+                    GalleryDlEngine.extractInstagram(url, options)
+                }
+            }
+        }
+        if (isSpotifyTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Spotify", GalleryDlEngine.isMediaDownloaderAvailable()) {
+                    GalleryDlEngine.extractSpotify(url, options)
+                }
+            }
+        }
+        if (isRadioJavanTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "RadioJavan", GalleryDlEngine.isMediaDownloaderAvailable()) {
+                    GalleryDlEngine.extractRadioJavan(url, options)
+                }
+            }
+        }
+        if (isXSpaceTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "X Spaces", GalleryDlEngine.isMediaDownloaderAvailable()) {
+                    GalleryDlEngine.extractXSpace(url, options)
+                }
+            }
+        }
+        if (isTumblrTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Tumblr media-scraper", GalleryDlEngine.isMediaScraperAvailable(), recordError = false) {
+                    GalleryDlEngine.extractTumblr(url, options)
+                }
+            }
+        }
+        if (isPixivTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Pixiv media-scraper", GalleryDlEngine.isMediaScraperAvailable(), recordError = false) {
+                    GalleryDlEngine.extractPixiv(url, options)
+                }
+            }
+        }
+        if (isTwitterStatusTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Twitter media-scraper", GalleryDlEngine.isMediaScraperAvailable(), recordError = false) {
+                    GalleryDlEngine.extractTwitterMediaScraper(url, options)
+                }
+            }
+        }
+        if (isFacebookTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Facebook media-scraper", GalleryDlEngine.isMediaScraperAvailable(), recordError = false) {
+                    GalleryDlEngine.extractFacebookMediaScraper(url, options)
+                }
+            }
+        }
+        if (recursiveCrawlEnabled && session.expectation != TargetMediaExpectation.VIDEO_OR_STREAM && !session.isYouTubeTarget) {
+            fastJobs += launch(Dispatchers.IO) { runRecursiveCrawlerChannel(session) }
+        }
+
+        // Primary yt-dlp channel
+        fastJobs += launch(Dispatchers.IO) {
+            runPythonChannel(session, "yt-dlp", GalleryDlEngine.isYtDlpAvailable(), overwriteError = true) {
+                GalleryDlEngine.extractYtDlp(url, options)
+            }
+        }
+
+        // Secondary gallery-dl channel (skip on YouTube video links)
+        if (!session.isYouTubeTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "gallery-dl", GalleryDlEngine.isGalleryDlAvailable()) {
+                    GalleryDlEngine.extractGalleryDl(url, options)
+                }
+            }
+        }
+
+        // Complementary headless Chromium browser channel (never spawn on YouTube URLs)
+        val browserJob = if (!session.isYouTubeTarget) {
+            launch(Dispatchers.IO) { runHeadlessBrowserChannel(session) }
+        } else null
+
+        for (job in fastJobs) {
+            job.join()
+        }
+
+        val fastExtractorsSufficient = session.itemsMutex.withLock {
+            isExtractionSufficient(session.expectation, session.itemsMap.values)
+        }
+        if (fastExtractorsSufficient) {
+            browserJob?.cancel()
+            return@coroutineScope true
+        }
+
+        browserJob?.join()
+        return@coroutineScope false
+    }
+
+    private suspend fun runStaticScraperChannel(session: ExtractionSessionContext) {
+        try {
+            val staticRes = StaticMediaScraper().scrape(session.requestContext.url)
+            if (staticRes.items.isNotEmpty()) {
+                val filteredStatic = if (session.expectation == TargetMediaExpectation.VIDEO_OR_STREAM) {
+                    staticRes.items.filter { it.isVideo || it.isAudio || it.isStream }
+                } else {
+                    staticRes.items
+                }
+                if (filteredStatic.isNotEmpty()) {
+                    updateItems(
+                        session,
+                        filteredStatic,
+                        title = staticRes.pageTitle,
+                        msg = "Discovered ${filteredStatic.size} item(s) via fast HTML scraper"
+                    )
+                } else if (staticRes.pageTitle.isNotBlank()) {
+                    updateItems(session, emptyList(), title = staticRes.pageTitle)
+                }
+            } else if (!staticRes.errorMessage.isNullOrBlank() && session.lastDiagnosticError == null) {
+                session.lastDiagnosticError = staticRes.errorMessage
+            }
+        } catch (e: Exception) {
+            Log.w("ExtractionCoordinator", "Concurrent StaticMediaScraper error", e)
+        }
+    }
+
+    private suspend fun runPythonChannel(
+        session: ExtractionSessionContext,
+        engineLabel: String,
+        isAvailable: Boolean,
+        recordError: Boolean = true,
+        overwriteError: Boolean = false,
+        block: suspend () -> GalleryDlExtractResult
+    ) {
+        if (!isAvailable) return
+        try {
+            val res = block()
+            if (res.success && res.items.isNotEmpty()) {
+                updateItems(
+                    session,
+                    res.items,
+                    title = res.pageTitle,
+                    msg = "Discovered ${res.items.size} items via $engineLabel"
+                )
+            } else if (recordError && !res.errorMessage.isNullOrBlank()) {
+                if (overwriteError || session.lastDiagnosticError == null) {
+                    session.lastDiagnosticError = res.errorMessage
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ExtractionCoordinator", "Concurrent $engineLabel error", e)
+        }
+    }
+
+    private suspend fun runRecursiveCrawlerChannel(session: ExtractionSessionContext) = coroutineScope {
+        try {
+            val recursiveCrawlConfig = DownloaderPreferencesManager.getRecursiveCrawlConfigSync(context)
+            val crawler = RecursiveSiteCrawler()
+            val crawlRes = crawler.crawl(
+                startUrl = session.requestContext.url,
+                config = recursiveCrawlConfig,
+                context = context,
+                onProgress = { p ->
+                    launch {
+                        updateStatus(
+                            session,
+                            "Recursive crawl (${p.pagesCrawled}/${p.maxPages} pages, depth ${p.currentDepth}): ${p.mediaDiscovered} media",
+                            ExtractionPhase.STATIC_SCRAPING
+                        )
+                    }
+                },
+                onMediaDiscovered = { discovered ->
+                    launch { updateItems(session, discovered) }
+                }
+            )
+            if (crawlRes.items.isNotEmpty()) {
+                updateItems(
+                    session,
+                    crawlRes.items,
+                    title = crawlRes.pageTitle,
+                    msg = "Recursive crawl discovered ${crawlRes.items.size} media across ${crawlRes.pagesCrawled} page(s)"
+                )
+            }
+            if (crawlRes.captchaDetected) {
+                session.captchaChallengeUrl = crawlRes.captchaUrl ?: session.requestContext.url
+                if (session.lastDiagnosticError == null) {
+                    session.lastDiagnosticError = crawlRes.errorMessage
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ExtractionCoordinator", "Concurrent RecursiveSiteCrawler error", e)
+        }
+    }
+
+    private suspend fun runHeadlessBrowserChannel(session: ExtractionSessionContext) = coroutineScope {
+        try {
+            kotlinx.coroutines.delay(350L)
+            val alreadySufficient = session.itemsMutex.withLock {
+                isExtractionSufficient(session.expectation, session.itemsMap.values)
+            }
+            if (alreadySufficient) return@coroutineScope
+
+            val browserRes = withContext(Dispatchers.Main) {
+                BrowserSession.extractHeadless(
+                    context = context,
+                    targetUrl = session.requestContext.url,
+                    onStatusUpdate = { s -> launch { updateStatus(session, s, ExtractionPhase.BROWSER_INTERCEPTING) } },
+                    onMediaDiscovered = { item -> launch { updateItems(session, listOf(item)) } }
+                )
+            }
+            if (browserRes.items.isNotEmpty()) {
+                updateItems(session, browserRes.items, title = browserRes.pageTitle)
+            } else if (session.lastDiagnosticError == null) {
+                session.lastDiagnosticError = browserRes.errorMessage
+            }
+        } catch (_: CancellationException) {
+            // Fast extractors succeeded and cancelled headless browser early
+        } catch (e: Exception) {
+            Log.w("ExtractionCoordinator", "Concurrent BrowserSession error", e)
+        }
+    }
+
+    private suspend fun handleBotAndCookieRetryIfNeeded(
+        session: ExtractionSessionContext,
+        supportInfo: GalleryDlSupportInfo,
+        options: GalleryDlOptions,
+        initialCookies: String?
+    ): Boolean = coroutineScope {
+        if (session.itemsMap.isNotEmpty()) return@coroutineScope false
+        // Do not run anonymous WebView cookie scraping for YouTube (it only produces unauthenticated VISITOR_INFO1_LIVE cookies)
+        if (session.isYouTubeTarget) return@coroutineScope false
+
+        val domain = session.requestContext.domain
+        val url = session.requestContext.url
+        val needsSignInDirect = BotDetectionMitigator.indicatesSignInRequired(session.lastDiagnosticError)
+        val isSupportedByEngines = supportInfo.isSupported
+        val needsCookiesOrBot = BotDetectionMitigator.indicatesCookiesOrBotVerificationNeeded(session.lastDiagnosticError) ||
+            (isSupportedByEngines && session.itemsMap.isEmpty() && initialCookies.isNullOrBlank())
+
+        if (session.captchaChallengeUrl != null) {
+            _state.value = _state.value.copy(
+                isRunning = false,
+                requiresSignIn = true,
+                signInUrl = session.captchaChallengeUrl,
+                statusMessage = "CAPTCHA verification required for $domain",
+                errorMessage = "CAPTCHA detected on $domain. Complete verification in the browser to continue."
+            )
+            return@coroutineScope true
+        }
+
+        if (needsSignInDirect) {
+            _state.value = _state.value.copy(
+                isRunning = false,
+                requiresSignIn = true,
+                signInUrl = url,
+                statusMessage = "Sign-in required for $domain",
+                errorMessage = "Sign in to $domain to access and download this media."
+            )
+            return@coroutineScope true
+        }
+
+        if (!needsCookiesOrBot) return@coroutineScope false
+
+        updateStatus(session, "Resolving session cookies in background for $domain...", ExtractionPhase.YT_DLP)
+        _state.value = _state.value.copy(isObtainingCookiesInBackground = true)
+
+        val cookieRes = withContext(Dispatchers.Main) {
+            BrowserSession.fetchCookiesInBackground(
+                context = context,
+                targetUrl = url,
+                onStatusUpdate = { s -> launch { updateStatus(session, s) } }
+            )
+        }
+        _state.value = _state.value.copy(isObtainingCookiesInBackground = false)
+
+        if (cookieRes.requiresSignIn) {
+            _state.value = _state.value.copy(
+                isRunning = false,
+                requiresSignIn = true,
+                signInUrl = cookieRes.signInUrl ?: url,
+                statusMessage = "Sign-in required for $domain",
+                errorMessage = "Sign in to $domain to access and download this media."
+            )
+            return@coroutineScope true
+        }
+
+        val sanitizedRetryCookies = GalleryDlEngine.sanitizeCookiesForUrl(url, cookieRes.cookies)
+        if (!sanitizedRetryCookies.isNullOrBlank()) {
+            val updatedOptions = options.copy(cookies = sanitizedRetryCookies)
+            updateStatus(session, "Cookies refreshed. Re-probing with yt-dlp & gallery-dl...", ExtractionPhase.YT_DLP)
+            retryPythonExtractorsWithCookies(session, updatedOptions)
+        }
+        return@coroutineScope false
+    }
+
+    private suspend fun retryPythonExtractorsWithCookies(
+        session: ExtractionSessionContext,
+        updatedOptions: GalleryDlOptions
+    ) {
+        val url = session.requestContext.url
+        if (session.isRedditTarget && GalleryDlEngine.isRedditDlAvailable()) {
+            val retryReddit = withContext(Dispatchers.IO) {
+                runCatching { GalleryDlEngine.extractReddit(url, updatedOptions) }
+                    .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }
+            }
+            if (retryReddit.success && retryReddit.items.isNotEmpty()) {
+                updateItems(session, retryReddit.items, title = retryReddit.pageTitle)
+            }
+        }
+
+        if (session.isInstagramTarget && GalleryDlEngine.isInstaloaderAvailable()) {
+            val retryIg = withContext(Dispatchers.IO) {
+                runCatching { GalleryDlEngine.extractInstagram(url, updatedOptions) }
+                    .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }
+            }
+            if (retryIg.success && retryIg.items.isNotEmpty()) {
+                updateItems(session, retryIg.items, title = retryIg.pageTitle)
+            }
+        }
+
+        val retryYt = withContext(Dispatchers.IO) {
+            runCatching { GalleryDlEngine.extractYtDlp(url, updatedOptions) }
+                .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }
+        }
+        if (retryYt.success && retryYt.items.isNotEmpty()) {
+            updateItems(session, retryYt.items, title = retryYt.pageTitle)
+        }
+
+        if (!session.isYouTubeTarget) {
+            val retryGdl = withContext(Dispatchers.IO) {
+                runCatching { GalleryDlEngine.extractGalleryDl(url, updatedOptions) }
+                    .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }
+            }
+            if (retryGdl.success && retryGdl.items.isNotEmpty()) {
+                updateItems(session, retryGdl.items, title = retryGdl.pageTitle)
+            }
+        }
+    }
+
+    private fun finalizeEmptyOrSuccess(session: ExtractionSessionContext) {
+        if (session.itemsMap.isNotEmpty()) {
+            finishSuccess(session.itemsMap.size)
+            return
+        }
+        val finalReason: String = session.lastDiagnosticError?.takeIf { it.isNotBlank() }
+            ?: "No media items discovered by any discovery engine."
+
+        _state.value = _state.value.copy(
+            isRunning = false,
+            phase = ExtractionPhase.ERROR,
+            statusMessage = finalReason,
+            errorMessage = finalReason
+        )
+    }
+
+    private suspend fun updateItems(
+        session: ExtractionSessionContext,
+        newList: List<ScrapedMediaItem>,
+        title: String? = null,
+        msg: String? = null,
+        phase: ExtractionPhase? = null
+    ) = session.itemsMutex.withLock {
+        val modified = MediaNormalizer.mergeCandidates(session.itemsMap, newList)
+        if (modified || msg != null || phase != null || title != null) {
+            val currentItems = session.itemsMap.values.toList()
+            _state.value = _state.value.copy(
+                items = currentItems,
+                pageTitle = if (_state.value.pageTitle.isBlank() && !title.isNullOrBlank()) title else _state.value.pageTitle,
+                statusMessage = msg ?: _state.value.statusMessage,
+                phase = phase ?: _state.value.phase
+            )
+            DownloaderSession.addDiscoveredItems(currentItems)
+            if (!title.isNullOrBlank()) DownloaderSession.setPageTitle(title)
+            if (msg != null) DownloaderSession.setStatusMessage(msg)
+        }
+    }
+
+    private suspend fun updateStatus(
+        session: ExtractionSessionContext,
+        status: String,
+        phase: ExtractionPhase? = null
+    ) = session.itemsMutex.withLock {
+        _state.value = _state.value.copy(
+            statusMessage = status,
+            phase = phase ?: _state.value.phase
+        )
     }
 
     private fun finishSuccess(count: Int) {

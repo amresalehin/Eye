@@ -200,4 +200,43 @@ class YtdlnisFeaturesUnitTest {
         assertTrue(matchesQueueActivitySearch(item, linkedYt, "retrowave"))
         assertFalse(matchesQueueActivitySearch(item, linkedYt, "unrelated_query_xyz"))
     }
+
+    @Test
+    fun youtubeUrlNormalization_convertsMobileAndShortUrlsToCanonicalWatchUrl() {
+        assertEquals(
+            "https://www.youtube.com/watch?v=S4Q0sI2wkq4",
+            com.amresalehin.emregallery.data.GalleryDlEngine.normalizeYouTubeUrl("https://m.youtube.com/watch?v=S4Q0sI2wkq4&pp=ygUFdGVzdA%3D%3D")
+        )
+        assertEquals(
+            "https://www.youtube.com/watch?v=S4Q0sI2wkq4",
+            com.amresalehin.emregallery.data.GalleryDlEngine.normalizeYouTubeUrl("https://youtu.be/S4Q0sI2wkq4?si=12345")
+        )
+        assertEquals(
+            "https://www.youtube.com/watch?v=S4Q0sI2wkq4",
+            com.amresalehin.emregallery.data.GalleryDlEngine.normalizeYouTubeUrl("https://m.youtube.com/shorts/S4Q0sI2wkq4")
+        )
+    }
+
+    @Test
+    fun youtubeCookieSanitization_stripsAnonymousGuestCookiesAndPreservesAuthenticatedCookies() {
+        val ytUrl = "https://m.youtube.com/watch?v=S4Q0sI2wkq4"
+        val guestCookies = "VISITOR_INFO1_LIVE=abc123xyz; YSC=def456; GPS=1; PREF=f4=4000000"
+        assertNull(
+            "Anonymous YouTube guest cookies must be stripped so yt-dlp does not disable android_vr/ios clients",
+            com.amresalehin.emregallery.data.GalleryDlEngine.sanitizeCookiesForUrl(ytUrl, guestCookies)
+        )
+
+        val authCookies = "VISITOR_INFO1_LIVE=abc123xyz; SAPISID=123456/abcdef; __Secure-3PSID=token"
+        assertEquals(
+            authCookies,
+            com.amresalehin.emregallery.data.GalleryDlEngine.sanitizeCookiesForUrl(ytUrl, authCookies)
+        )
+
+        val nonYtCookies = "session_id=guest123"
+        assertEquals(
+            nonYtCookies,
+            com.amresalehin.emregallery.data.GalleryDlEngine.sanitizeCookiesForUrl("https://x.com/user/status/123", nonYtCookies)
+        )
+    }
 }
+

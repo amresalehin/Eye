@@ -114,7 +114,7 @@ dependencies {
 
 chaquopy {
     defaultConfig {
-        version = "3.10"
+        version = "3.11"
         pip {
             install("gallery-dl")
             install("yt-dlp")

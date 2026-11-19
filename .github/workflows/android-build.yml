@@ -141,7 +141,7 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/fix/cloud-vision-production-20261110' }}
 
       - name: Run unit tests, lint, debug and release verification
-        run: bash ./gradlew --stacktrace --max-workers=2 --build-cache testDebugUnitTest lintDebug assembleDebug assembleRelease
+        run: bash ./gradlew --stacktrace --no-parallel --max-workers=1 --build-cache testDebugUnitTest lintDebug assembleDebug assembleRelease
 
       - name: Upload unit test and lint reports
         if: always()

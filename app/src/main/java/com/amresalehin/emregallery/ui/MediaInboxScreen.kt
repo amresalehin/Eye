@@ -879,7 +879,7 @@ fun WebbyDiscoveredMediaGrid(
                     selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
                 },
                 onDownloadSingle = onDownloadSingle,
-                onDownloadAudio = handleDownloadAudio,
+                onDownloadAudio = onDownloadAudio,
                 onOpenInStudio = onOpenInStudio,
                 onDismiss = { previewIndex = null }
             )

@@ -1,66 +1,79 @@
 package com.amresalehin.emregallery
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.BrowserSession
 import com.amresalehin.emregallery.data.DownloaderSession
-import com.amresalehin.emregallery.data.ExtractionCoordinator
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PocketRepository
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.DirectBrowserView
-import com.amresalehin.emregallery.ui.DiscoveredMediaPage
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
+import com.amresalehin.emregallery.ui.ytdlnis.UnifiedDownloaderTab
 import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisDownloadConfigCard
+import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisMonochromeTheme
+import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisScreen
 import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadItem
+import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus
 import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadType
 import com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker
 import com.amresalehin.emregallery.ytdlnis.YtdlnisRepository
@@ -68,10 +81,10 @@ import com.amresalehin.emregallery.ytdlnis.YtdlnisVideoInfo
 
 /**
  * Translucent share-sheet target that opens directly over the sharing app
- * (e.g. Chrome, Twitter, Instagram, YouTube) without switching applications.
+ * (e.g. Chrome, Twitter/X, Instagram, YouTube, Reddit) without switching applications.
  *
- * It immediately extracts media from the shared link and displays a bottom
- * drawer for selecting and downloading media in the background.
+ * Matches the app's unified monochrome Downloader (Search, Queue with media kind & file type
+ * filters, in-queue search, fast scrollbar, Browser, and Settings).
  */
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -120,21 +133,23 @@ class ShareReceiverActivity : ComponentActivity() {
             val currentUrl by sharedUrlState
 
             EmreGalleryTheme(theme = theme, colorTheme = colorTheme, surfaceColor = Color.Transparent) {
-                if (currentUrl != null) {
-                    ShareReceiverScreen(
-                        url = currentUrl!!,
-                        onDismiss = {
-                            finishWithFade()
-                        },
-                        onDownloadComplete = {
-                            Toast.makeText(
-                                applicationContext,
-                                "Download queued in background",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            finishWithFade()
-                        }
-                    )
+                YtdlnisMonochromeTheme {
+                    if (currentUrl != null) {
+                        ShareReceiverScreen(
+                            url = currentUrl!!,
+                            onDismiss = {
+                                finishWithFade()
+                            },
+                            onDownloadComplete = {
+                                Toast.makeText(
+                                    applicationContext,
+                                    "Download queued in background",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                finishWithFade()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -181,34 +196,29 @@ private fun ShareReceiverScreen(
 ) {
     var showLiveBrowser by remember { mutableStateOf(false) }
     var showYtdlnisCard by remember { mutableStateOf(false) }
-    var liveBrowserUrl by remember { mutableStateOf(url) }
+    var liveBrowserUrl by remember(url) { mutableStateOf(url) }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val coordinator = remember(context) { ExtractionCoordinator(context) }
-    val extractionState by coordinator.state.collectAsState()
 
     LaunchedEffect(url) {
         liveBrowserUrl = url
-        DownloaderSession.startSession(url)
-        coordinator.extract(url, scope)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { coordinator.cancel() }
     }
 
     BackHandler {
-        if (showLiveBrowser) {
-            showLiveBrowser = false
-        } else {
-            onDismiss()
+        when {
+            showLiveBrowser -> showLiveBrowser = false
+            showYtdlnisCard -> showYtdlnisCard = false
+            else -> onDismiss()
         }
+    }
+
+    val cleanDomain = remember(liveBrowserUrl) {
+        MediaClassifier.cleanDomainFromUrl(liveBrowserUrl).ifBlank { "Shared Link" }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f))
+            .background(Color.Black.copy(alpha = 0.55f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -217,17 +227,22 @@ private fun ShareReceiverScreen(
             .testTag("share_receiver_root"),
         contentAlignment = Alignment.BottomCenter
     ) {
-        androidx.compose.material3.Surface(
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(
+        Surface(
+            shape = RoundedCornerShape(
                 topStart = 28.dp,
                 topEnd = 28.dp
             ),
             color = MaterialTheme.colorScheme.background,
             tonalElevation = 6.dp,
-            shadowElevation = 16.dp,
+            shadowElevation = 20.dp,
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+            ),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 96.dp)
+                .statusBarsPadding()
+                .padding(top = 44.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -240,7 +255,7 @@ private fun ShareReceiverScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp, bottom = 2.dp),
+                        .padding(top = 10.dp, bottom = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
@@ -249,91 +264,136 @@ private fun ShareReceiverScreen(
                             .height(4.dp)
                             .background(
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                                androidx.compose.foundation.shape.CircleShape
+                                CircleShape
                             )
                     )
                 }
 
-                // Live extraction status bar with direct Browser and Library actions
+                // Monochrome URL Receiver Quick Bar matching the Downloader pill aesthetic
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (extractionState.isRunning) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
+                    // Shared domain badge
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = cleanDomain,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        var savedToPocket by remember(liveBrowserUrl) { mutableStateOf(false) }
+                        ReceiverActionPill(
+                            label = if (savedToPocket) "Saved" else "Bookmark",
+                            icon = if (savedToPocket) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            selected = savedToPocket,
+                            onClick = {
+                                val pocketRepo = PocketRepository.getInstance(context)
+                                val existing = pocketRepo.findDuplicateBookmark(liveBrowserUrl)
+                                if (existing != null) {
+                                    savedToPocket = true
+                                    Toast.makeText(
+                                        context,
+                                        "Already saved in Pocket: ${existing.title}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    val domain = MediaClassifier.cleanDomainFromUrl(liveBrowserUrl)
+                                    pocketRepo.addBookmark(
+                                        title = domain.ifBlank { liveBrowserUrl },
+                                        url = liveBrowserUrl
+                                    )
+                                    savedToPocket = true
+                                    Toast.makeText(context, "Bookmark saved to Pocket", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.testTag("share_save_bookmark_btn")
+                        )
+
+                        ReceiverActionPill(
+                            label = if (showYtdlnisCard) "Downloader" else "Studio",
+                            icon = Icons.Default.Tune,
+                            selected = showYtdlnisCard,
+                            onClick = { showYtdlnisCard = !showYtdlnisCard },
+                            modifier = Modifier.testTag("share_open_ytdlnis_btn")
+                        )
+
+                        ReceiverActionPill(
+                            label = "Browser",
+                            icon = Icons.Default.Language,
+                            selected = showLiveBrowser,
+                            onClick = {
+                                BrowserSession.savedBrowserSite = liveBrowserUrl
+                                showLiveBrowser = true
+                            },
+                            modifier = Modifier.testTag("share_open_browser_btn")
+                        )
+
+                        ReceiverActionPill(
+                            label = "Library",
+                            icon = Icons.Default.PhotoLibrary,
+                            selected = false,
+                            onClick = {
+                                val mainIntent = Intent(context, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                }
+                                context.startActivity(mainIntent)
+                                onDismiss()
+                            },
+                            modifier = Modifier.testTag("share_open_library_btn")
                         )
                     }
-                    Text(
-                        text = extractionState.errorMessage
-                            ?: extractionState.statusMessage.ifBlank { "Scanning shared link..." },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (extractionState.errorMessage != null) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    var savedToPocket by remember(liveBrowserUrl) { mutableStateOf(false) }
-                    TextButton(
-                        onClick = {
-                            val pocketRepo = PocketRepository.getInstance(context)
-                            val existing = pocketRepo.findDuplicateBookmark(liveBrowserUrl)
-                            if (existing != null) {
-                                savedToPocket = true
-                                Toast.makeText(context, "Already saved in Pocket: ${existing.title}", Toast.LENGTH_SHORT).show()
-                            } else {
-                                val domain = MediaClassifier.cleanDomainFromUrl(liveBrowserUrl)
-                                pocketRepo.addBookmark(
-                                    title = domain.ifBlank { liveBrowserUrl },
-                                    url = liveBrowserUrl
-                                )
-                                savedToPocket = true
-                                Toast.makeText(context, "Bookmark saved to Pocket", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.testTag("share_save_bookmark_btn")
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .testTag("share_close_sheet_btn")
                     ) {
-                        Text(if (savedToPocket) "Saved" else "Bookmark")
-                    }
-                    TextButton(
-                        onClick = {
-                            BrowserSession.savedBrowserSite = liveBrowserUrl
-                            showLiveBrowser = true
-                        },
-                        modifier = Modifier.testTag("share_open_browser_btn")
-                    ) {
-                        Text("Browser")
-                    }
-                    TextButton(
-                        onClick = { showYtdlnisCard = !showYtdlnisCard },
-                        modifier = Modifier.testTag("share_open_ytdlnis_btn")
-                    ) {
-                        Text(if (showYtdlnisCard) "Media" else "YTDLnis")
-                    }
-                    TextButton(
-                        onClick = {
-                            val mainIntent = Intent(context, MainActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            }
-                            context.startActivity(mainIntent)
-                            onDismiss()
-                        },
-                        modifier = Modifier.testTag("share_open_library_btn")
-                    ) {
-                        Text("Library")
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close URL receiver",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
-                if (extractionState.isRunning) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    thickness = 0.5.dp
+                )
 
                 if (showYtdlnisCard) {
                     val ytdlnisRepo = remember(context) { YtdlnisRepository.getInstance(context) }
@@ -352,24 +412,56 @@ private fun ShareReceiverScreen(
                         incognito = ytdlnisIncog,
                         onEnqueue = { item ->
                             YtdlnisDownloadWorker.enqueue(context, item)
-                            onDownloadComplete()
+                            showYtdlnisCard = false
+                            Toast.makeText(
+                                context,
+                                if (item.scheduledTimeMillis > System.currentTimeMillis()) "Scheduled" else "Download started",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         },
                         onSaveForLater = { item ->
-                            ytdlnisRepo.upsertDownload(item)
-                            Toast.makeText(context, "Saved in YTDLnis", Toast.LENGTH_SHORT).show()
-                            onDismiss()
+                            ytdlnisRepo.upsertDownload(item.copy(status = YtdlnisDownloadStatus.SAVED))
+                            showYtdlnisCard = false
+                            Toast.makeText(context, "Saved for later in Queue", Toast.LENGTH_SHORT).show()
                         },
                         onDismiss = { showYtdlnisCard = false },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .navigationBarsPadding()
                     )
                 } else {
-                    DiscoveredMediaPage(
+                    // Embed the app's current unified Downloader (Search, Queue with Kind & File Type pills,
+                    // in-queue search bar, fast scrollbar, Browser, and Power/Terminal Settings)
+                    YtdlnisScreen(
                         onBack = onDismiss,
-                        onDeepScanClick = {
+                        initialUrl = liveBrowserUrl,
+                        initialTab = UnifiedDownloaderTab.ACTIVITY,
+                        isEmbeddedSheet = true,
+                        onOpenBrowser = { targetUrl ->
+                            val resolved = targetUrl?.takeIf { it.isNotBlank() } ?: liveBrowserUrl
+                            liveBrowserUrl = resolved
+                            BrowserSession.savedBrowserSite = resolved
+                            showLiveBrowser = true
+                        },
+                        onOpenDiscoveredMedia = {
                             BrowserSession.savedBrowserSite = liveBrowserUrl
                             showLiveBrowser = true
                         },
-                        isDeepScanning = extractionState.isRunning,
+                        onOpenMediaFile = { uriString ->
+                            runCatching {
+                                val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = Uri.parse(uriString)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(viewIntent)
+                            }.onFailure {
+                                val mainIntent = Intent(context, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                }
+                                context.startActivity(mainIntent)
+                                onDismiss()
+                            }
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -394,7 +486,50 @@ private fun ShareReceiverScreen(
                 onOpenDiscoveredMedia = {
                     showLiveBrowser = false
                 },
-                modifier = Modifier.fillMaxSize().zIndex(25f)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(25f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReceiverActionPill(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+        border = if (selected) null else BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        ),
+        modifier = modifier
+            .height(28.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
             )
         }
     }

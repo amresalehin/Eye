@@ -221,6 +221,7 @@ fun YtdlnisScreen(
     onOpenBrowserForCookies: ((String) -> Unit)? = null,
     onOpenDiscoveredMedia: () -> Unit = {},
     onOpenMediaFile: (String) -> Unit = {},
+    isEmbeddedSheet: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -434,10 +435,14 @@ fun YtdlnisScreen(
         canvasMode = DownloaderCanvasMode.SEARCH
     }
 
-    LaunchedEffect(initialUrl, initialTab) {
+    LaunchedEffect(initialUrl, initialTab, isEmbeddedSheet) {
         if (initialUrl.isNotBlank()) {
             urlInput = initialUrl
-            triggerStudioFetch(initialUrl)
+            if (isEmbeddedSheet && !quickDownload && initialTab != UnifiedDownloaderTab.STUDIO) {
+                triggerMultiEngineGridScan(initialUrl)
+            } else {
+                triggerStudioFetch(initialUrl)
+            }
         }
     }
 
@@ -478,13 +483,14 @@ fun YtdlnisScreen(
 
     YtdlnisMonochromeTheme {
         Scaffold(
+            modifier = modifier,
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
-                        .statusBarsPadding()
+                        .let { if (isEmbeddedSheet) it else it.statusBarsPadding() }
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -597,6 +603,23 @@ fun YtdlnisScreen(
                                             ).show()
                                         }
                                     )
+
+                                    if (urlInput.isNotBlank()) {
+                                        IconButton(
+                                            onClick = { triggerStudioFetch(urlInput) },
+                                            enabled = !isFetching,
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .testTag("downloader_studio_config_button")
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Tune,
+                                                contentDescription = "Studio Format & Quality",
+                                                modifier = Modifier.size(17.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
 
                                     Surface(
                                         shape = CircleShape,

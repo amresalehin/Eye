@@ -20,10 +20,18 @@ import html as html_lib
 import inspect
 import json
 import re
+import http.cookiejar
+import urllib.error
 import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 
-import requests
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:
+    requests = None
+    REQUESTS_AVAILABLE = False
 
 try:
     import pinterest_dl
@@ -851,8 +859,96 @@ def _extract_via_pinterest_dl_library(parsed_target, resolved_url, cookies_dict,
 # Tier 2: Direct Pinterest Resource API Fallback (modeled on sean1832/pinterest-dl)
 # ---------------------------------------------------------------------------
 
+class _UrllibCookieJarAdapter:
+    """Requests-compatible cookie jar wrapper backed by a dict and http.cookiejar.CookieJar."""
+
+    def __init__(self, cookie_jar):
+        self._jar = cookie_jar
+        self._store = {}
+
+    def set(self, name, value, domain=".pinterest.com"):
+        self._store[name] = value
+
+    def get(self, name, default=None):
+        for cookie in self._jar:
+            if cookie.name == name:
+                return cookie.value
+        return self._store.get(name, default)
+
+    def as_cookie_header(self):
+        merged = dict(self._store)
+        for cookie in self._jar:
+            merged[cookie.name] = cookie.value
+        return "; ".join(f"{k}={v}" for k, v in merged.items() if k and v is not None)
+
+
+class _UrllibResponseAdapter:
+    """Minimal requests.Response-compatible wrapper around urllib responses."""
+
+    def __init__(self, status_code, text, url, headers=None):
+        self.status_code = status_code
+        self.text = text
+        self.url = url
+        self.headers = headers or {}
+
+    def json(self):
+        return json.loads(self.text)
+
+    def close(self):
+        pass
+
+
+class _UrllibSessionFallback:
+    """Requests.Session-compatible HTTP client using Python's standard library urllib."""
+
+    def __init__(self):
+        self.headers = {}
+        self._cookie_jar = http.cookiejar.CookieJar()
+        self.cookies = _UrllibCookieJarAdapter(self._cookie_jar)
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self._cookie_jar)
+        )
+
+    def _request(self, method, url, params=None, headers=None, allow_redirects=True, timeout=25, stream=False):
+        target_url = url
+        if params:
+            qs = urllib.parse.urlencode(params)
+            sep = "&" if "?" in target_url else "?"
+            target_url = f"{target_url}{sep}{qs}"
+
+        merged_headers = dict(self.headers)
+        if headers:
+            merged_headers.update(headers)
+        cookie_hdr = self.cookies.as_cookie_header()
+        if cookie_hdr and "Cookie" not in merged_headers:
+            merged_headers["Cookie"] = cookie_hdr
+
+        req = urllib.request.Request(target_url, headers=merged_headers, method=method)
+        try:
+            with self._opener.open(req, timeout=timeout) as resp:
+                final_url = resp.geturl() or target_url
+                status = getattr(resp, "status", 200)
+                raw = b"" if method == "HEAD" else resp.read()
+                text = raw.decode("utf-8", errors="replace")
+                return _UrllibResponseAdapter(status, text, final_url, dict(resp.headers))
+        except urllib.error.HTTPError as e:
+            raw = b""
+            try:
+                raw = e.read()
+            except Exception:
+                pass
+            text = raw.decode("utf-8", errors="replace")
+            return _UrllibResponseAdapter(e.code, text, e.geturl() or target_url, dict(e.headers or {}))
+
+    def get(self, url, params=None, headers=None, allow_redirects=True, timeout=25, stream=False):
+        return self._request("GET", url, params=params, headers=headers, allow_redirects=allow_redirects, timeout=timeout, stream=stream)
+
+    def head(self, url, allow_redirects=True, timeout=15):
+        return self._request("HEAD", url, allow_redirects=allow_redirects, timeout=timeout)
+
+
 def _build_session(user_agent, cookies_dict):
-    sess = requests.Session()
+    sess = requests.Session() if REQUESTS_AVAILABLE and requests is not None else _UrllibSessionFallback()
     sess.headers.update({
         "User-Agent": user_agent or DEFAULT_DESKTOP_UA,
         "Accept": "application/json, text/javascript, */*; q=0.01",

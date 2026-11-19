@@ -91,12 +91,6 @@ class MediaDownloadWorker(
             ?: inputData.getString(KEY_MEDIA_URL)?.takeIf { it.isNotBlank() }
             ?: activityItem?.mediaUrl?.takeIf { it.isNotBlank() }
             ?: return@withContext Result.failure()
-<<<<<<< Updated upstream
-        val fileName = cachedPayload?.fileName?.takeIf { it.isNotBlank() }
-            ?: inputData.getString(KEY_FILE_NAME)?.takeIf { it.isNotBlank() }
-            ?: activityItem?.title?.takeIf { it.isNotBlank() }
-            ?: "media_${System.currentTimeMillis()}"
-=======
         val rawFileName = cachedPayload?.fileName?.takeIf { it.isNotBlank() }
             ?: inputData.getString(KEY_FILE_NAME)?.takeIf { it.isNotBlank() }
             ?: activityItem?.title?.takeIf { it.isNotBlank() }
@@ -108,7 +102,6 @@ class MediaDownloadWorker(
             val base = rawFileName.substringBeforeLast('.', rawFileName).ifBlank { "media_${System.currentTimeMillis()}" }
             "$base.mp4"
         } else rawFileName
->>>>>>> Stashed changes
         val referer = cachedPayload?.referer ?: inputData.getString(KEY_REFERER)
         val title = (cachedPayload?.title?.takeIf { it.isNotBlank() }
             ?: inputData.getString(KEY_TITLE)?.takeIf { it.isNotBlank() }

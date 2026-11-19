@@ -158,12 +158,8 @@ object DownloadQueueManager {
         val sourceDomain: String,
         val sourceUrl: String,
         val sourceEngine: String,
-<<<<<<< Updated upstream
-        val downloadHeaders: Map<String, String>
-=======
         val downloadHeaders: Map<String, String>,
         val mediaModeOverride: String? = null
->>>>>>> Stashed changes
     )
 
     private val payloadCache = ConcurrentHashMap<String, QueuedDownloadPayload>()
@@ -208,10 +204,7 @@ object DownloadQueueManager {
                 put("sourceDomain", payload.sourceDomain)
                 put("sourceUrl", payload.sourceUrl)
                 put("sourceEngine", payload.sourceEngine)
-<<<<<<< Updated upstream
-=======
                 put("mediaModeOverride", payload.mediaModeOverride ?: "")
->>>>>>> Stashed changes
                 put("headers", headersObj)
             }
             payloadFileFor(context, payload.itemId).writeText(root.toString(), Charsets.UTF_8)
@@ -247,12 +240,8 @@ object DownloadQueueManager {
                 sourceDomain = root.optString("sourceDomain", ""),
                 sourceUrl = root.optString("sourceUrl", ""),
                 sourceEngine = root.optString("sourceEngine", ""),
-<<<<<<< Updated upstream
-                downloadHeaders = headersMap
-=======
                 downloadHeaders = headersMap,
                 mediaModeOverride = root.optString("mediaModeOverride", "").takeIf { it.isNotBlank() }
->>>>>>> Stashed changes
             ).also {
                 payloadCache[itemId] = it
             }
@@ -302,12 +291,8 @@ object DownloadQueueManager {
             sourceDomain = sourceDomain,
             sourceUrl = sourceUrl,
             sourceEngine = item.provenance.extractorEngine,
-<<<<<<< Updated upstream
-            downloadHeaders = item.downloadHeaders
-=======
             downloadHeaders = item.downloadHeaders,
             mediaModeOverride = mediaModeOverride?.trim()?.lowercase()?.takeIf { it in setOf("audio", "video", "video_only") }
->>>>>>> Stashed changes
         )
         payloadCache[item.id] = payload
 
@@ -334,10 +319,7 @@ object DownloadQueueManager {
             .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, sourceDomain.takeUtf8Bytes(200))
             .putString(MediaDownloadWorker.KEY_SOURCE_URL, inlineSourceUrl)
             .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine.takeUtf8Bytes(128))
-<<<<<<< Updated upstream
-=======
             .putString(MediaDownloadWorker.KEY_MEDIA_MODE_OVERRIDE, payload.mediaModeOverride)
->>>>>>> Stashed changes
             .apply {
                 if (!headersJson.isNullOrBlank()) {
                     putString(MediaDownloadWorker.KEY_HEADERS_JSON, headersJson)
@@ -404,15 +386,6 @@ object DownloadQueueManager {
                 unregisterActiveWork(activeBefore.id)
             }
 
-<<<<<<< Updated upstream
-            val request = buildRequest(item, referer, sId, sTitle, domain, url)
-            payloadCache[item.id]?.let { persistPayloadToDisk(context, it) }
-
-            val safeThumbnailUrl = item.thumbnailUrl?.takeIf {
-                it.isNotBlank() && !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
-            } ?: item.url.takeIf {
-                !item.isVideo && !item.isAudio && !item.isStream &&
-=======
             val request = buildRequest(requestItem, referer, sId, sTitle, domain, url, normalizedModeOverride)
             payloadCache[requestItem.id]?.let { persistPayloadToDisk(context, it) }
 
@@ -420,23 +393,12 @@ object DownloadQueueManager {
                 it.isNotBlank() && !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
             } ?: requestItem.url.takeIf {
                 !requestItem.isVideo && !requestItem.isAudio && !requestItem.isStream &&
->>>>>>> Stashed changes
                     !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
             }
 
             // Record the owning activity before enqueueing so a fast worker cannot finish
             // before its activity is created.
             DownloadActivityManager.recordQueued(
-<<<<<<< Updated upstream
-                id = item.id,
-                title = item.title,
-                mediaUrl = item.url,
-                thumbnailUrl = safeThumbnailUrl,
-                isVideo = item.isVideo,
-                isAudio = item.isAudio,
-                isStream = item.isStream,
-                format = item.format,
-=======
                 id = requestItem.id,
                 title = requestItem.title,
                 mediaUrl = requestItem.url,
@@ -445,7 +407,6 @@ object DownloadQueueManager {
                 isAudio = requestItem.isAudio,
                 isStream = requestItem.isStream,
                 format = requestItem.format,
->>>>>>> Stashed changes
                 workId = request.id.toString(),
                 isRetry = isRetry,
                 stackId = sId,

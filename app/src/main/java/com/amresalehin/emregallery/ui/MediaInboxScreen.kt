@@ -139,8 +139,6 @@ fun MediaInboxScreen(
                             )
                             Toast.makeText(context, "Queued ${item.title}", Toast.LENGTH_SHORT).show()
                         },
-<<<<<<< Updated upstream
-=======
                         onDownloadAudio = { item ->
                             DownloadQueueManager.enqueueDownload(
                                 context = context,
@@ -153,7 +151,6 @@ fun MediaInboxScreen(
                             )
                             Toast.makeText(context, "Queued audio: ${item.title}", Toast.LENGTH_SHORT).show()
                         },
->>>>>>> Stashed changes
                         onDownloadSelected = { selectedList ->
                             if (selectedList.isNotEmpty()) {
                                 DownloadQueueManager.enqueueBatch(
@@ -217,10 +214,7 @@ fun DiscoveredMediaPage(
     sourceDomain: String? = null,
     sourceUrl: String? = null,
     onDownloadSingle: ((ScrapedMediaItem) -> Unit)? = null,
-<<<<<<< Updated upstream
-=======
     onDownloadAudio: ((ScrapedMediaItem) -> Unit)? = null,
->>>>>>> Stashed changes
     onDownloadSelected: ((List<ScrapedMediaItem>) -> Unit)? = null,
     onOpenInStudio: ((String) -> Unit)? = null,
     onNavigateToActivities: (() -> Unit)? = null,
@@ -253,28 +247,6 @@ fun DiscoveredMediaPage(
         }
     }
 
-<<<<<<< Updated upstream
-    val handleDownloadSelected: (List<ScrapedMediaItem>) -> Unit = { selectedList ->
-        if (onDownloadSelected != null) {
-            onDownloadSelected(selectedList)
-        } else if (selectedList.isNotEmpty()) {
-            DownloadQueueManager.enqueueBatch(
-                context = context,
-                items = selectedList,
-                referer = effectiveUrl.ifBlank { null },
-                stackTitle = effectiveTitle.ifBlank { "Downloaded Media" },
-                sourceDomain = effectiveDomain.ifBlank { "Web" },
-                sourceUrl = effectiveUrl
-            )
-            Toast.makeText(context, "Queued ${selectedList.size} items", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val handleClearAll: () -> Unit = {
-        if (onClearAll != null) onClearAll() else DownloaderSession.clear()
-    }
-
-=======
     val handleDownloadAudio: (ScrapedMediaItem) -> Unit = { item ->
         if (onDownloadAudio != null) {
             onDownloadAudio(item)
@@ -312,7 +284,6 @@ fun DiscoveredMediaPage(
         if (onClearAll != null) onClearAll() else DownloaderSession.clear()
     }
 
->>>>>>> Stashed changes
     YtdlnisMonochromeTheme {
         Scaffold(
             modifier = modifier,
@@ -428,10 +399,7 @@ fun DiscoveredMediaPage(
             WebbyDiscoveredMediaGrid(
                 items = effectiveItems,
                 onDownloadSingle = handleDownloadSingle,
-<<<<<<< Updated upstream
-=======
                 onDownloadAudio = handleDownloadAudio,
->>>>>>> Stashed changes
                 onDownloadSelected = { selected ->
                     handleDownloadSelected(selected)
                     onNavigateToActivities?.invoke()
@@ -459,10 +427,7 @@ fun WebbyDiscoveredMediaGrid(
     items: List<ScrapedMediaItem>,
     onDownloadSingle: (ScrapedMediaItem) -> Unit,
     onDownloadSelected: (List<ScrapedMediaItem>) -> Unit,
-<<<<<<< Updated upstream
-=======
     onDownloadAudio: ((ScrapedMediaItem) -> Unit)? = null,
->>>>>>> Stashed changes
     onOpenInStudio: ((String) -> Unit)? = null,
     onClearAll: (() -> Unit)? = null,
     searchHistory: List<String> = emptyList(),
@@ -914,10 +879,7 @@ fun WebbyDiscoveredMediaGrid(
                     selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
                 },
                 onDownloadSingle = onDownloadSingle,
-<<<<<<< Updated upstream
-=======
                 onDownloadAudio = onDownloadAudio,
->>>>>>> Stashed changes
                 onOpenInStudio = onOpenInStudio,
                 onDismiss = { previewIndex = null }
             )
@@ -948,162 +910,6 @@ private fun MonochromeFilterPill(
         )
     }
 }
-<<<<<<< Updated upstream
-
-/**
- * Webby-Images-Downloader style Built-in Fullscreen Viewer:
- * - Swipe left/right across discovered items at 1x zoom
- * - Pinch-to-zoom and pan, or double-tap to toggle 1x / 2.5x zoom
- * - Single tap toggles the metadata HUD (page index, resolution, engine, direct URL, Download & Studio actions)
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun WebbyFullscreenMediaViewer(
-    items: List<ScrapedMediaItem>,
-    initialIndex: Int,
-    globalOrderMap: Map<String, Int>,
-    selectedIds: Set<String>,
-    onToggleSelect: (String) -> Unit,
-    onDownloadSingle: (ScrapedMediaItem) -> Unit,
-    onOpenInStudio: ((String) -> Unit)?,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { items.size })
-    var showMetadataHud by remember { mutableStateOf(true) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xF50A0A0A))
-        ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val item = items[page]
-                var scale by remember(page) { mutableFloatStateOf(1f) }
-                var offset by remember(page) { mutableStateOf(Offset.Zero) }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(page) {
-                            detectTapGestures(
-                                onTap = { showMetadataHud = !showMetadataHud },
-                                onDoubleTap = {
-                                    if (scale > 1.05f) {
-                                        scale = 1f
-                                        offset = Offset.Zero
-                                    } else {
-                                        scale = 2.5f
-                                    }
-                                }
-                            )
-                        }
-                        .pointerInput(page) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                scale = newScale
-                                offset = if (newScale > 1.02f) {
-                                    Offset(offset.x + pan.x, offset.y + pan.y)
-                                } else {
-                                    Offset.Zero
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    AsyncImage(
-                        model = item.url.takeIf { !item.isVideo && !item.isStream } ?: item.thumbnailUrl ?: item.url,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = offset.x
-                                translationY = offset.y
-                            }
-                    )
-                }
-            }
-
-            val currentItem = items.getOrNull(pagerState.currentPage) ?: items.first()
-            val seqNum = globalOrderMap[currentItem.id] ?: (pagerState.currentPage + 1)
-            val isChecked = currentItem.id in selectedIds
-
-            // Top HUD bar (toggled by single tap)
-            AnimatedVisibility(
-                visible = showMetadataHud,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xBB0A0A0A))
-                        .statusBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                    }
-
-                    Text(
-                        text = "#$seqNum of ${items.size}",
-                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-
-                    IconButton(onClick = { onToggleSelect(currentItem.id) }) {
-                        Icon(
-                            if (isChecked) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                            contentDescription = "Select",
-                            tint = Color.White
-                        )
-                    }
-                }
-            }
-
-            // Bottom Metadata & Quick Actions HUD (toggled by single tap)
-            AnimatedVisibility(
-                visible = showMetadataHud,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xDD0F0F0F))
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = currentItem.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-=======
 
 /**
  * Webby-Images-Downloader style Built-in Fullscreen Viewer:
@@ -1281,7 +1087,6 @@ private fun WebbyFullscreenMediaViewer(
                         overflow = TextOverflow.Ellipsis
                     )
 
->>>>>>> Stashed changes
                     Text(
                         text = listOfNotNull(
                             currentItem.format.takeIf { it.isNotBlank() },
@@ -1329,8 +1134,6 @@ private fun WebbyFullscreenMediaViewer(
                             }
                         }
 
-<<<<<<< Updated upstream
-=======
                         if ((currentItem.isVideo || currentItem.isStream) && !currentItem.isAudio) {
                             OutlinedButton(
                                 onClick = { onDownloadAudio?.invoke(currentItem) ?: onDownloadSingle(currentItem) },
@@ -1345,7 +1148,6 @@ private fun WebbyFullscreenMediaViewer(
                             }
                         }
 
->>>>>>> Stashed changes
                         Button(
                             onClick = { onDownloadSingle(currentItem) },
                             shape = RoundedCornerShape(50),

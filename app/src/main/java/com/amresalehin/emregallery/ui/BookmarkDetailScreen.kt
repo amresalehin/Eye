@@ -82,6 +82,9 @@ fun BookmarkDetailScreen(
     onDelete: () -> Unit,
     onRefreshMetadata: (() -> Unit)? = null,
     onFetchSiteMedia: (() -> Unit)? = null,
+    initialDeckIndex: Int = 0,
+    initialFullScreenMediaIndex: Int? = null,
+    onViewerStateChanged: ((deckIndex: Int, fullScreenMediaIndex: Int?) -> Unit)? = null,
     isDark: Boolean = isSystemInDarkTheme(),
     modifier: Modifier = Modifier
 ) {
@@ -139,6 +142,9 @@ fun BookmarkDetailScreen(
             onEditNote = { editingStack = liveStack },
             onRefreshMetadata = onRefreshMetadata,
             onFetchSiteMedia = onFetchSiteMedia,
+            initialDeckIndex = initialDeckIndex,
+            initialFullScreenMediaIndex = initialFullScreenMediaIndex,
+            onViewerStateChanged = onViewerStateChanged,
             isDark = isDark,
             modifier = Modifier.fillMaxSize()
         )
@@ -237,6 +243,9 @@ fun PocketBookmarkViewerPage(
     onEditNote: () -> Unit,
     onRefreshMetadata: (() -> Unit)? = null,
     onFetchSiteMedia: (() -> Unit)? = null,
+    initialDeckIndex: Int = 0,
+    initialFullScreenMediaIndex: Int? = null,
+    onViewerStateChanged: ((deckIndex: Int, fullScreenMediaIndex: Int?) -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -249,7 +258,7 @@ fun PocketBookmarkViewerPage(
     val dividerCol = PocketThemeColors.divider(isDark)
 
     // Fullscreen media inspection state
-    var fullScreenMediaIndex by remember { mutableStateOf<Int?>(null) }
+    var fullScreenMediaIndex by remember(stack.id) { mutableStateOf(initialFullScreenMediaIndex) }
     var isDeckVideoMuted by remember { mutableStateOf(false) }
 
     // Drawer state: resizable, dismissable, occupies less place
@@ -301,11 +310,15 @@ fun PocketBookmarkViewerPage(
         sanitizedStack.items
     }
 
-    var currentIndex by remember(stack.id) { mutableIntStateOf(0) }
+    var currentIndex by remember(stack.id) { mutableIntStateOf(initialDeckIndex) }
     val totalCards = effectiveMediaList.size
     val safeIndex = if (totalCards > 0) currentIndex.coerceIn(0, totalCards - 1) else 0
     val offsetX = remember { Animatable(0f) }
     var isSwiping by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentIndex, fullScreenMediaIndex) {
+        onViewerStateChanged?.invoke(currentIndex, fullScreenMediaIndex)
+    }
 
     // Preload next deck card into memory cache so visible previews are smoothly ready with minimal RAM
     LaunchedEffect(safeIndex, effectiveMediaList) {
@@ -1390,8 +1403,19 @@ fun PocketBookmarkViewerPage(
                 items = effectiveMediaList,
                 initialIndex = initialIndex,
                 stack = stack,
-                onDismiss = { fullScreenMediaIndex = null },
-                onOpenBrowser = onOpenBrowser,
+                onDismiss = {
+                    fullScreenMediaIndex = null
+                    onViewerStateChanged?.invoke(currentIndex, null)
+                },
+                onPageChanged = { page ->
+                    currentIndex = page
+                    fullScreenMediaIndex = page
+                    onViewerStateChanged?.invoke(page, page)
+                },
+                onOpenBrowser = { url ->
+                    onViewerStateChanged?.invoke(currentIndex, fullScreenMediaIndex)
+                    onOpenBrowser(url)
+                },
                 isDark = isDark
             )
         }

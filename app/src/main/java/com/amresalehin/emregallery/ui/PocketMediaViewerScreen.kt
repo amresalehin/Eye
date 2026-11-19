@@ -137,6 +137,7 @@ fun PocketMediaViewerScreen(
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
     onOpenBrowser: (String) -> Unit,
+    onPageChanged: ((Int) -> Unit)? = null,
     isDark: Boolean = isSystemInDarkTheme()
 ) {
     if (items.isEmpty()) return
@@ -152,6 +153,7 @@ fun PocketMediaViewerScreen(
             stack = stack,
             onDismiss = onDismiss,
             onOpenBrowser = onOpenBrowser,
+            onPageChanged = onPageChanged,
             isDark = isDark
         )
     }
@@ -164,6 +166,7 @@ private fun PocketMediaViewerContent(
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
     onOpenBrowser: (String) -> Unit,
+    onPageChanged: ((Int) -> Unit)? = null,
     isDark: Boolean = isSystemInDarkTheme()
 ) {
     val context = LocalContext.current
@@ -224,6 +227,10 @@ private fun PocketMediaViewerContent(
         initialPage = initialIndex.coerceIn(0, items.size - 1),
         pageCount = { items.size }
     )
+
+    LaunchedEffect(pagerState.currentPage) {
+        onPageChanged?.invoke(pagerState.currentPage)
+    }
 
     val currentItem = items.getOrElse(pagerState.currentPage) { items[0] }
     val currentMediaPath = remember(currentItem) {
@@ -499,8 +506,9 @@ private fun PocketMediaViewerContent(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = ripple(color = rippleColor),
                                     onClick = {
-                                        val targetUrl = currentItem.sourceUrl.ifBlank { stack.sourceUrl }
+                                        val targetUrl = stack.sourceUrl.ifBlank { currentItem.sourceUrl }
                                         if (targetUrl.isNotBlank()) {
+                                            onPageChanged?.invoke(pagerState.currentPage)
                                             onOpenBrowser(targetUrl)
                                         } else {
                                             Toast.makeText(context, "No URL to open", Toast.LENGTH_SHORT).show()

@@ -124,14 +124,25 @@ fun DirectBrowserView(
     val allHistorySites by historyManager.allSites.collectAsState(initial = historyManager.defaultRecentSites)
     val tabsList by historyManager.openTabs.collectAsState(initial = historyManager.defaultTabs)
 
-    val startUrl = remember {
-        val savedSite = BrowserSession.savedBrowserSite.trim()
+    val startUrl = remember(initialUrl) {
         val trimmed = initialUrl.trim()
+        val savedSite = BrowserSession.savedBrowserSite.trim()
         when {
-            savedSite.isNotBlank() -> savedSite
-            trimmed.isNotBlank() -> MediaClassifier.formatQueryOrUrl(trimmed)
-            else -> "" // Clean monochrome home page by default
+            trimmed.isNotBlank() -> {
+                BrowserSession.savedBrowserSite = ""
+                BrowserSession.pendingScrollRestore = false
+                MediaClassifier.formatQueryOrUrl(trimmed)
+            }
+            BrowserSession.pendingScrollRestore && savedSite.isNotBlank() -> savedSite
+            else -> {
+                BrowserSession.savedBrowserSite = ""
+                "" // Clean monochrome home page by default
+            }
         }
+    }
+
+    var hasVisitedBrowserHome by remember(initialUrl) {
+        mutableStateOf(startUrl.isBlank())
     }
 
     // Discovery & Deep Scan states
@@ -139,12 +150,12 @@ fun DirectBrowserView(
     var hasInitiatedScanInStage by remember { mutableStateOf(false) }
     var deepScanJob by remember { mutableStateOf<Job?>(null) }
 
-    var currentUrl by remember { mutableStateOf(startUrl) }
+    var currentUrl by remember(initialUrl) { mutableStateOf(startUrl) }
     val totalDetectedCount = remember(currentUrl, tabDetectedCount, sessionDiscoveredItems.size) {
         if (currentUrl.isBlank() || currentUrl == "about:blank") 0
         else maxOf(tabDetectedCount, sessionDiscoveredItems.size)
     }
-    var addressInput by remember { mutableStateOf(startUrl) }
+    var addressInput by remember(initialUrl) { mutableStateOf(startUrl) }
     var pageTitle by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
@@ -237,6 +248,8 @@ fun DirectBrowserView(
 
     DisposableEffect(Unit) {
         onDispose {
+            BrowserSession.savedBrowserSite = ""
+            BrowserSession.pendingScrollRestore = false
             webViewInstance?.let { wv ->
                 wv.stopLoading()
                 wv.loadUrl("about:blank")
@@ -252,6 +265,9 @@ fun DirectBrowserView(
     }
 
     fun returnToBrowserHome() {
+        hasVisitedBrowserHome = true
+        BrowserSession.savedBrowserSite = ""
+        BrowserSession.pendingScrollRestore = false
         currentUrl = ""
         addressInput = ""
         pageTitle = ""
@@ -284,11 +300,19 @@ fun DirectBrowserView(
             currentUrl.isNotBlank() -> {
                 if (canGoBack && webViewInstance?.canGoBack() == true) {
                     webViewInstance?.goBack()
+                } else if (!hasVisitedBrowserHome && onClose != null) {
+                    BrowserSession.savedBrowserSite = ""
+                    BrowserSession.pendingScrollRestore = false
+                    onClose()
                 } else {
                     returnToBrowserHome()
                 }
             }
-            onClose != null -> onClose()
+            onClose != null -> {
+                BrowserSession.savedBrowserSite = ""
+                BrowserSession.pendingScrollRestore = false
+                onClose()
+            }
         }
     }
 
@@ -479,6 +503,7 @@ fun DirectBrowserView(
                 }, 750)
             }
             BrowserSession.pendingScrollRestore = false
+            BrowserSession.savedBrowserSite = ""
         }
     }
 
@@ -542,6 +567,7 @@ fun DirectBrowserView(
                 onNewTabClick = {
                     val newId = "tab_${System.currentTimeMillis()}"
                     val newTab = BrowserTabItem(id = newId, title = "New Tab", url = "")
+                    hasVisitedBrowserHome = true
                     activeTabId = newId
                     currentUrl = ""
                     addressInput = ""
@@ -1041,6 +1067,7 @@ fun DirectBrowserView(
                                             view.evaluateJavascript("window.scrollTo($targetX, $targetY);", null)
                                         }, 500)
                                         BrowserSession.pendingScrollRestore = false
+                                        BrowserSession.savedBrowserSite = ""
                                         isDeepScanning = false
                                         hasInitiatedScanInStage = false
                                     }
@@ -1241,6 +1268,7 @@ fun DirectBrowserView(
                 if (tab.url.isNotBlank()) {
                     webViewInstance?.loadUrl(tab.url)
                 } else {
+                    hasVisitedBrowserHome = true
                     webViewInstance?.loadUrl("about:blank")
                 }
             },
@@ -1249,6 +1277,7 @@ fun DirectBrowserView(
                 if (remaining.isEmpty()) {
                     val freshId = "tab_${System.currentTimeMillis()}"
                     val freshTab = BrowserTabItem(id = freshId, title = "New Tab", url = "")
+                    hasVisitedBrowserHome = true
                     activeTabId = freshId
                     currentUrl = ""
                     addressInput = ""
@@ -1277,6 +1306,7 @@ fun DirectBrowserView(
                         if (nextTab.url.isNotBlank()) {
                             webViewInstance?.loadUrl(nextTab.url)
                         } else {
+                            hasVisitedBrowserHome = true
                             webViewInstance?.loadUrl("about:blank")
                         }
                     }
@@ -1288,6 +1318,7 @@ fun DirectBrowserView(
             onNewTab = {
                 val newId = "tab_${System.currentTimeMillis()}"
                 val newTab = BrowserTabItem(id = newId, title = "New Tab", url = "")
+                hasVisitedBrowserHome = true
                 activeTabId = newId
                 currentUrl = ""
                 addressInput = ""

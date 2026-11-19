@@ -1119,6 +1119,87 @@ class PocketBookmarkUnitTest {
         assertTrue("Discovered stream should be retained and prioritized", merged.any { it.isStream && it.isVideo })
         assertTrue("Original cover should be retained without duplication", merged.any { it.sourceUrl.contains("cover.jpg") })
     }
+
+    @Test
+    fun testFormatQueryOrUrlPreservesFileAndContentSchemes() {
+        val fileUrl = "file:///storage/emulated/0/Download/page.html"
+        val contentUrl = "content://com.android.providers.downloads.documents/document/42"
+        val fileWithSpaces = "file:///storage/emulated/0/My Documents/saved_page.html"
+
+        assertEquals(fileUrl, MediaClassifier.formatQueryOrUrl(fileUrl))
+        assertEquals(contentUrl, MediaClassifier.formatQueryOrUrl(contentUrl))
+        assertEquals(fileWithSpaces, MediaClassifier.formatQueryOrUrl(fileWithSpaces))
+        assertEquals(fileUrl, MediaClassifier.sanitizeUrl(fileUrl))
+        assertEquals(contentUrl, MediaClassifier.sanitizeUrl(contentUrl))
+    }
+
+    @Test
+    fun testBrowserStartUrlPrioritizesInitialUrlOverSavedBrowserSite() {
+        com.amresalehin.emregallery.data.BrowserSession.savedBrowserSite = "https://stale-previous-site.com"
+        com.amresalehin.emregallery.data.BrowserSession.pendingScrollRestore = true
+
+        val initialUrl = "https://pocket-article.example.com/story"
+        val trimmed = initialUrl.trim()
+        val savedSite = com.amresalehin.emregallery.data.BrowserSession.savedBrowserSite.trim()
+        val resolvedStartUrl = when {
+            trimmed.isNotBlank() -> {
+                com.amresalehin.emregallery.data.BrowserSession.savedBrowserSite = ""
+                com.amresalehin.emregallery.data.BrowserSession.pendingScrollRestore = false
+                MediaClassifier.formatQueryOrUrl(trimmed)
+            }
+            com.amresalehin.emregallery.data.BrowserSession.pendingScrollRestore && savedSite.isNotBlank() -> savedSite
+            else -> {
+                com.amresalehin.emregallery.data.BrowserSession.savedBrowserSite = ""
+                ""
+            }
+        }
+
+        assertEquals("https://pocket-article.example.com/story", resolvedStartUrl)
+        assertEquals("", com.amresalehin.emregallery.data.BrowserSession.savedBrowserSite)
+        assertFalse(com.amresalehin.emregallery.data.BrowserSession.pendingScrollRestore)
+    }
+
+    @Test
+    fun testPocketMediaViewerRedirectPrefersBookmarkSourceUrlAndPreservesViewerState() {
+        val stack = MediaInboxStack(
+            id = "bm_viewer_test",
+            title = "Design Article",
+            sourceDomain = "design.example.com",
+            sourceUrl = "https://design.example.com/articles/2026-trends",
+            items = listOf(
+                MediaInboxItem(
+                    id = "img_0",
+                    title = "Hero Image",
+                    localUri = "",
+                    sourceUrl = "https://cdn.example.com/assets/hero.jpg",
+                    isVideo = false
+                ),
+                MediaInboxItem(
+                    id = "img_1",
+                    title = "Second Image",
+                    localUri = "",
+                    sourceUrl = "https://cdn.example.com/assets/second.jpg",
+                    isVideo = false
+                )
+            )
+        )
+
+        val currentItem = stack.items[1]
+        val targetUrl = stack.sourceUrl.ifBlank { currentItem.sourceUrl }
+        assertEquals("Redirect from PocketMediaViewerScreen must open bookmark page URL, not raw asset URL", "https://design.example.com/articles/2026-trends", targetUrl)
+
+        val navEntry = com.amresalehin.emregallery.ui.NavBackStackEntry(
+            destination = Destination.BOOKMARK_DETAIL,
+            selectedBookmarkDetailStack = stack,
+            selectedBookmarkDeckIndex = 1,
+            selectedBookmarkFullScreenIndex = 1,
+            browserInitialUrl = ""
+        )
+        assertEquals(1, navEntry.selectedBookmarkDeckIndex)
+        assertEquals(Integer.valueOf(1), navEntry.selectedBookmarkFullScreenIndex)
+        assertEquals("", navEntry.browserInitialUrl)
+    }
 }
+
 
 

@@ -79,7 +79,10 @@ data class NavBackStackEntry(
     val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
     val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
     val inboxInitialOpenBrowser: Boolean = false,
-    val selectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
+    val selectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
+    val selectedBookmarkDeckIndex: Int = 0,
+    val selectedBookmarkFullScreenIndex: Int? = null,
+    val browserInitialUrl: String = ""
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -181,6 +184,8 @@ fun GalleryApp() {
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
     var selectedBookmarkDetailStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var selectedBookmarkDeckIndex by remember { mutableIntStateOf(0) }
+    var selectedBookmarkFullScreenIndex by remember { mutableStateOf<Int?>(null) }
     var browserInitialUrl by remember { mutableStateOf("") }
     var isPocketDetailOpen by remember { mutableStateOf(false) }
 
@@ -503,7 +508,9 @@ fun GalleryApp() {
         newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
         newInboxInitialOpenBrowser: Boolean = false,
         newSelectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = selectedBookmarkDetailStack,
-        newBrowserInitialUrl: String = browserInitialUrl
+        newSelectedBookmarkDeckIndex: Int = selectedBookmarkDeckIndex,
+        newSelectedBookmarkFullScreenIndex: Int? = selectedBookmarkFullScreenIndex,
+        newBrowserInitialUrl: String = ""
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -525,7 +532,10 @@ fun GalleryApp() {
                     inboxInitialViewMode = inboxInitialViewMode,
                     inboxInitialStack = inboxInitialStack,
                     inboxInitialOpenBrowser = inboxInitialOpenBrowser,
-                    selectedBookmarkDetailStack = selectedBookmarkDetailStack
+                    selectedBookmarkDetailStack = selectedBookmarkDetailStack,
+                    selectedBookmarkDeckIndex = selectedBookmarkDeckIndex,
+                    selectedBookmarkFullScreenIndex = selectedBookmarkFullScreenIndex,
+                    browserInitialUrl = browserInitialUrl
                 )
             )
             previousDestination = destination
@@ -541,6 +551,8 @@ fun GalleryApp() {
         inboxInitialStack = newInboxInitialStack
         inboxInitialOpenBrowser = newInboxInitialOpenBrowser
         selectedBookmarkDetailStack = newSelectedBookmarkDetailStack
+        selectedBookmarkDeckIndex = newSelectedBookmarkDeckIndex
+        selectedBookmarkFullScreenIndex = newSelectedBookmarkFullScreenIndex
         browserInitialUrl = newBrowserInitialUrl
         isPocketDetailOpen = false
     }
@@ -623,11 +635,16 @@ fun GalleryApp() {
                 inboxInitialStack = entry.inboxInitialStack
                 inboxInitialOpenBrowser = entry.inboxInitialOpenBrowser
                 selectedBookmarkDetailStack = entry.selectedBookmarkDetailStack
+                selectedBookmarkDeckIndex = entry.selectedBookmarkDeckIndex
+                selectedBookmarkFullScreenIndex = entry.selectedBookmarkFullScreenIndex
+                browserInitialUrl = entry.browserInitialUrl
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             destination == Destination.BOOKMARK_DETAIL -> {
                 destination = Destination.POCKET
                 selectedBookmarkDetailStack = null
+                selectedBookmarkDeckIndex = 0
+                selectedBookmarkFullScreenIndex = null
                 viewerStoryTitle = null
             }
             albumFilter != null -> {
@@ -1141,7 +1158,9 @@ fun GalleryApp() {
                             navigateTo(
                                 dest = Destination.BOOKMARK_DETAIL,
                                 rememberPrevious = true,
-                                newSelectedBookmarkDetailStack = stack
+                                newSelectedBookmarkDetailStack = stack,
+                                newSelectedBookmarkDeckIndex = 0,
+                                newSelectedBookmarkFullScreenIndex = null
                             )
                         }
                     )
@@ -1157,10 +1176,10 @@ fun GalleryApp() {
                                 stack = activeStack,
                                 onBack = { performBackNavigation() },
                                 onOpenBrowser = { url ->
-                                    browserInitialUrl = url
                                     navigateTo(
                                         dest = Destination.BROWSER,
-                                        rememberPrevious = true
+                                        rememberPrevious = true,
+                                        newBrowserInitialUrl = url
                                     )
                                 },
                                 onDelete = {
@@ -1178,6 +1197,12 @@ fun GalleryApp() {
                                 },
                                 onFetchSiteMedia = {
                                     pocketRepo.fetchSiteMedia(activeStack.id, context)
+                                },
+                                initialDeckIndex = selectedBookmarkDeckIndex,
+                                initialFullScreenMediaIndex = selectedBookmarkFullScreenIndex,
+                                onViewerStateChanged = { deckIdx, fullScreenIdx ->
+                                    selectedBookmarkDeckIndex = deckIdx
+                                    selectedBookmarkFullScreenIndex = fullScreenIdx
                                 },
                                 isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f,
                                 modifier = Modifier.fillMaxSize()
@@ -1290,10 +1315,11 @@ fun GalleryApp() {
                         initialStackForDetail = inboxInitialStack,
                         initialOpenBrowser = inboxInitialOpenBrowser,
                         onBack = { performBackNavigation() },
-                        onOpenBrowser = { _ ->
+                        onOpenBrowser = { url ->
                             navigateTo(
                                 dest = Destination.BROWSER,
-                                rememberPrevious = true
+                                rememberPrevious = true,
+                                newBrowserInitialUrl = url
                             )
                         },
                         onOpenMediaItem = { uri ->
@@ -1357,9 +1383,6 @@ fun GalleryApp() {
                             performBackNavigation()
                         },
                         onMenuClick = { showSidePanel = true },
-                        onUrlChange = { url ->
-                            browserInitialUrl = url
-                        },
                         onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
                         onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
                         onOpenDownloads = {
@@ -1419,8 +1442,11 @@ fun GalleryApp() {
                             openMediaInViewer(item, listOf(item))
                         },
                         onOpenBrowserForCookies = { url ->
-                            browserInitialUrl = url
-                            navigateTo(dest = Destination.BROWSER, rememberPrevious = true)
+                            navigateTo(
+                                dest = Destination.BROWSER,
+                                rememberPrevious = true,
+                                newBrowserInitialUrl = url
+                            )
                         },
                         modifier = Modifier.fillMaxSize()
                     )

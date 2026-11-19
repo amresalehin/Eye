@@ -387,11 +387,19 @@ object MediaClassifier {
      */
     fun cleanDomainFromUrl(url: String?): String {
         if (url.isNullOrBlank()) return ""
+        val trimmed = url.trim()
+        if (trimmed.startsWith("file://", ignoreCase = true) || trimmed.startsWith("content://", ignoreCase = true)) {
+            return try {
+                URI(trimmed).host?.removePrefix("www.") ?: ""
+            } catch (_: Exception) {
+                ""
+            }
+        }
         return try {
-            val normalized = if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
-                "https://$url"
+            val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
+                "https://$trimmed"
             } else {
-                url
+                trimmed
             }
             val uri = URI(normalized)
             uri.host?.removePrefix("www.") ?: ""
@@ -411,6 +419,10 @@ object MediaClassifier {
         if (raw.isNullOrBlank()) return ""
         var cleaned = raw.trim().trim('"', '\'', '<', '>', '(', ')', '[', ']', ';')
         if (cleaned.isBlank()) return ""
+
+        if (cleaned.startsWith("file://", ignoreCase = true) || cleaned.startsWith("content://", ignoreCase = true)) {
+            return cleaned
+        }
 
         if (!cleaned.startsWith("http://", ignoreCase = true) && !cleaned.startsWith("https://", ignoreCase = true)) {
             cleaned = "https://$cleaned"
@@ -895,6 +907,9 @@ object MediaClassifier {
     fun bookmarkDeduplicationKey(rawUrl: String): String {
         val trimmed = rawUrl.trim()
         if (trimmed.isBlank()) return ""
+        if (trimmed.startsWith("file://", ignoreCase = true) || trimmed.startsWith("content://", ignoreCase = true)) {
+            return trimmed
+        }
 
         return try {
             val candidate = when {
@@ -1850,7 +1865,12 @@ object MediaClassifier {
     fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
         val trimmed = input.trim()
         if (trimmed.isBlank()) return ""
-        return if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+        return if (
+            trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("file://", ignoreCase = true) ||
+            trimmed.startsWith("content://", ignoreCase = true)
+        ) {
             trimmed
         } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {
             "https://$trimmed"

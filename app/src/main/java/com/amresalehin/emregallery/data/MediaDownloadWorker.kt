@@ -238,7 +238,14 @@ class MediaDownloadWorker(
             // Strategy 0: Native parallel HLS/DASH stream reconstruction (Speed Boost segment pool + AES-128 + MP4/TS fallback)
             val isDirectHls = mediaUrl.contains(".m3u8", ignoreCase = true)
             val isDirectDash = mediaUrl.contains(".mpd", ignoreCase = true)
-            if (isStream && (isDirectHls || isDirectDash) && !isYouTubeSource && mediaMode != "audio") {
+            if (shouldUseNativeStreamReconstruction(
+                    isStream = isStream,
+                    isDirectHls = isDirectHls,
+                    isDirectDash = isDirectDash,
+                    isYouTubeSource = isYouTubeSource,
+                    mediaMode = mediaMode
+                )
+            ) {
                 val streamConns = if (speedBoostEnabled) speedBoostConnections else 1
                 setProgress(workDataOf(KEY_PROGRESS to 0.20f, KEY_STATUS to "Reconstructing stream (${streamConns}x): $title..."))
                 val streamRes = if (isDirectHls) {
@@ -584,6 +591,21 @@ class MediaDownloadWorker(
             }
         }
 
+        internal fun shouldUseNativeStreamReconstruction(
+            isStream: Boolean,
+            isDirectHls: Boolean,
+            isDirectDash: Boolean,
+            isYouTubeSource: Boolean,
+            mediaMode: String
+        ): Boolean {
+            val mode = mediaMode.trim().lowercase()
+            return isStream &&
+                (isDirectHls || isDirectDash) &&
+                !isYouTubeSource &&
+                mode != "audio" &&
+                mode != "video_only"
+        }
+
         internal fun validateMediaStreams(
             isVideo: Boolean,
             isAudio: Boolean,
@@ -611,9 +633,6 @@ class MediaDownloadWorker(
             val expectsAudio = audioOnly ||
                 (!videoOnly && (isAudio || (isVideo && requireAudioWithVideo)))
 
-            if (expectsVideo && expectsAudio && (!hasVideo || !hasAudio)) {
-                return "Downloaded file is missing the requested audio or video track"
-            }
             if (expectsVideo && !hasVideo) {
                 return "Downloaded file does not contain a valid video track"
             }

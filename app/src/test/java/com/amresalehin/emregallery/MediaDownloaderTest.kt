@@ -146,6 +146,43 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun nativeHlsDashReconstructionRespectsExplicitAudioAndVideoOnlyModes() {
+        fun shouldReconstruct(mode: String, isYoutube: Boolean = false): Boolean =
+            MediaDownloadWorker.shouldUseNativeStreamReconstruction(
+                isStream = true,
+                isDirectHls = true,
+                isDirectDash = false,
+                isYouTubeSource = isYoutube,
+                mediaMode = mode
+            )
+
+        assertTrue(shouldReconstruct("best"))
+        assertTrue(shouldReconstruct("video"))
+        assertTrue(shouldReconstruct(" BEST "))
+        assertFalse(shouldReconstruct("audio"))
+        assertFalse(shouldReconstruct("video_only"))
+        assertFalse(shouldReconstruct("best", isYoutube = true))
+        assertFalse(
+            MediaDownloadWorker.shouldUseNativeStreamReconstruction(
+                isStream = true,
+                isDirectHls = false,
+                isDirectDash = false,
+                isYouTubeSource = false,
+                mediaMode = "best"
+            )
+        )
+        assertFalse(
+            MediaDownloadWorker.shouldUseNativeStreamReconstruction(
+                isStream = false,
+                isDirectHls = true,
+                isDirectDash = false,
+                isYouTubeSource = false,
+                mediaMode = "best"
+            )
+        )
+    }
+
+    @Test
     fun workerPreservesAudioOnlyAndRequiresYoutubeVideoAudioTrack() {
         assertEquals("audio", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = true, isStream = false))
         assertEquals("video", MediaDownloadWorker.resolveMediaMode(isVideo = true, isAudio = false, isStream = false))

@@ -268,7 +268,12 @@ object YtdlnisEngine {
     suspend fun downloadAndProcess(
         context: Context,
         item: YtdlnisDownloadItem,
-        onStatusUpdate: ((Float, String) -> Unit)? = null
+        onStatusUpdate: ((Float, String) -> Unit)? = null,
+        cookiesOverride: String? = null,
+        proxyOverride: String? = null,
+        maxHeightOverride: Int? = null,
+        videoOnlyOverride: Boolean = false,
+        destinationDirOverride: File? = null
     ): YtdlnisExecutionOutput = withContext(Dispatchers.IO) {
         GalleryDlEngine.init(context)
         if (!GalleryDlEngine.isPythonStarted()) {
@@ -313,6 +318,8 @@ object YtdlnisEngine {
             put("audio_format_ids", JSONArray(item.selectedAudioFormatIds))
             put("container", item.container)
             put("filename_template", item.filenameTemplate)
+            put("video_only", videoOnlyOverride)
+            put("max_height", (maxHeightOverride ?: 0).coerceAtLeast(0))
             put("download_subtitles", item.downloadSubtitles)
             put("embed_subtitles", item.embedSubtitles)
             put("burn_subtitles", item.burnSubtitles)
@@ -325,8 +332,16 @@ object YtdlnisEngine {
             put("custom_command", item.customCommand)
             put("timeout", DownloaderPreferencesManager.getNetworkTimeoutSync(context))
             put("retries", DownloaderPreferencesManager.getRetryCountSync(context))
+<<<<<<< Updated upstream
             DownloaderPreferencesManager.getActiveProxyUrlSync(context)?.let { put("proxy", it) }
             GalleryDlEngine.sanitizeCookiesForUrl(effectiveDownloadUrl, repo.findCookiesForUrl(effectiveDownloadUrl))?.let {
+=======
+            (proxyOverride ?: DownloaderPreferencesManager.getActiveProxyUrlSync(context))
+                ?.takeIf { it.isNotBlank() }?.let { put("proxy", it) }
+            val rawCookies = cookiesOverride?.takeIf { it.isNotBlank() }
+                ?: repo.findCookiesForUrl(effectiveDownloadUrl)
+            GalleryDlEngine.sanitizeCookiesForUrl(effectiveDownloadUrl, rawCookies)?.let {
+>>>>>>> Stashed changes
                 put("cookies", it)
             }
             repo.youtubePoToken.value.takeIf { it.isNotBlank() }?.let { put("po_token", it) }
@@ -357,7 +372,12 @@ object YtdlnisEngine {
                 )
             }
 
+<<<<<<< Updated upstream
             val destDir = resolveDestinationDir(item, context)
+=======
+            val destDir = destinationDirOverride ?: resolveDestinationDir(item, context)
+            if (!destDir.exists()) destDir.mkdirs()
+>>>>>>> Stashed changes
             val mergeAudioFiles = buildList {
                 resObj.optJSONArray("merge_audio_files")?.let { arr ->
                     for (i in 0 until arr.length()) {

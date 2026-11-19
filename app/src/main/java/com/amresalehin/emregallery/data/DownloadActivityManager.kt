@@ -58,7 +58,9 @@ data class DownloadActivityItem(
     val sourceDomain: String? = null,
     val sourceUrl: String? = null,
     val isSpeedBoostActive: Boolean = false,
-    val activeConnections: Int = 1
+    val activeConnections: Int = 1,
+    /** Explicit per-download media mode; retained so retries preserve Audio/Video choices. */
+    val mediaModeOverride: String? = null
 ) {
     val isFailed: Boolean get() = status == DownloadActivityStatus.FAILED
     val isDownloading: Boolean get() = status == DownloadActivityStatus.DOWNLOADING
@@ -184,6 +186,7 @@ object DownloadActivityManager {
                     put("stackTitle", item.stackTitle ?: "")
                     put("sourceDomain", item.sourceDomain ?: "")
                     put("sourceUrl", item.sourceUrl ?: "")
+                    put("mediaModeOverride", item.mediaModeOverride ?: "")
                 }
                 jsonArray.put(obj)
             }
@@ -248,7 +251,9 @@ object DownloadActivityManager {
                             stackId = obj.optString("stackId").takeIf { it.isNotBlank() },
                             stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
                             sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
-                            sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() }
+                            sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() },
+                            mediaModeOverride = obj.optString("mediaModeOverride").trim().lowercase()
+                                .takeIf { it in setOf("audio", "video", "video_only") }
                         )
                     )
                 } catch (e: Exception) {
@@ -458,7 +463,8 @@ object DownloadActivityManager {
         stackId: String? = null,
         stackTitle: String? = null,
         sourceDomain: String? = null,
-        sourceUrl: String? = null
+        sourceUrl: String? = null,
+        mediaModeOverride: String? = null
     ) {
         val current = _activities.value.toMutableList()
         val existing = current.firstOrNull { it.id == id }
@@ -485,7 +491,10 @@ object DownloadActivityManager {
                 stackId = stackId ?: existing?.stackId,
                 stackTitle = stackTitle ?: existing?.stackTitle,
                 sourceDomain = sourceDomain ?: existing?.sourceDomain,
-                sourceUrl = sourceUrl ?: existing?.sourceUrl
+                sourceUrl = sourceUrl ?: existing?.sourceUrl,
+                mediaModeOverride = mediaModeOverride?.trim()?.lowercase()
+                    ?.takeIf { it in setOf("audio", "video", "video_only") }
+                    ?: existing?.mediaModeOverride
             )
         )
         _activities.value = current
@@ -737,7 +746,8 @@ object DownloadActivityManager {
             stackTitle = item.stackTitle,
             sourceDomain = item.sourceDomain,
             sourceUrl = item.sourceUrl,
-            isRetry = true
+            isRetry = true,
+            mediaModeOverride = item.mediaModeOverride
         )
         val reloaded = _activities.value.toMutableList()
         val idx = reloaded.indexOfFirst { it.id == item.id }
@@ -852,7 +862,8 @@ object DownloadActivityManager {
                 stackTitle = item.stackTitle,
                 sourceDomain = item.sourceDomain,
                 sourceUrl = item.sourceUrl,
-                isRetry = true
+                isRetry = true,
+                mediaModeOverride = item.mediaModeOverride
             )
             current[index] = item.copy(
                 status = DownloadActivityStatus.DOWNLOADING,

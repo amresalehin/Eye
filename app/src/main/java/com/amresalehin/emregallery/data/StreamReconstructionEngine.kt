@@ -108,6 +108,45 @@ object StreamReconstructionEngine {
         return content.contains("#EXT-X-STREAM-INF", ignoreCase = true)
     }
 
+    /**
+     * Returns true when the master playlist declares a separate audio rendition.
+     * The lightweight reconstructor currently downloads only one media playlist,
+     * so handling such a master here would silently produce a video-only file.
+     */
+    fun hasExternalHlsAudioRendition(content: String): Boolean = content.lineSequence()
+        .map { it.trim() }
+        .filter { it.startsWith("#EXT-X-MEDIA:", ignoreCase = true) }
+        .any { line ->
+            val type = Regex("""TYPE\s*=\s*\"([^\"]+)\"""", RegexOption.IGNORE_CASE)
+                .find(line)?.groupValues?.get(1)
+            val uri = Regex("""URI\s*=\s*\"([^\"]+)\"""", RegexOption.IGNORE_CASE)
+                .find(line)?.groupValues?.get(1)
+            type.equals("AUDIO", ignoreCase = true) && !uri.isNullOrBlank()
+        }
+
+    /** SAMPLE-AES and non-identity key formats require a platform-aware decryptor. */
+    fun hasUnsupportedHlsEncryption(content: String): Boolean {
+        val keyLines = content.lineSequence()
+            .map { it.trim() }
+            .filter {
+                it.startsWith("#EXT-X-KEY:", ignoreCase = true) ||
+                    it.startsWith("#EXT-X-SESSION-KEY:", ignoreCase = true)
+            }
+        for (line in keyLines) {
+            val method = Regex("""METHOD=([A-Z0-9-]+)""", RegexOption.IGNORE_CASE)
+                .find(line)?.groupValues?.get(1)?.uppercase(Locale.ROOT) ?: continue
+            if (method !in setOf("NONE", "AES-128")) return true
+            val keyFormat = Regex("""KEYFORMAT=\"([^\"]+)\"""", RegexOption.IGNORE_CASE)
+                .find(line)?.groupValues?.get(1)
+            if (!keyFormat.isNullOrBlank() && !keyFormat.equals("identity", ignoreCase = true)) return true
+        }
+        return false
+    }
+
+    /** A finite snapshot is safe to reconstruct; live/event playlists need a live-aware downloader. */
+    fun isFinalizedHlsMediaPlaylist(content: String): Boolean =
+        content.contains("#EXT-X-ENDLIST", ignoreCase = true)
+
     fun parseHlsMasterPlaylist(content: String, baseUrl: String): List<HlsVariant> {
         val lines = content.lines().map { it.trim() }
         val variants = mutableListOf<HlsVariant>()
@@ -434,7 +473,19 @@ object StreamReconstructionEngine {
             var manifestText = fetchText(activeManifestUrl, referer, headers)
                 ?: return@withContext StreamDownloadResult(null, false, errorMessage = "Failed to fetch HLS manifest")
 
+            if (hasUnsupportedHlsEncryption(manifestText)) {
+                return@withContext StreamDownloadResult(
+                    null, false,
+                    errorMessage = "HLS uses unsupported SAMPLE-AES/DRM key format; retry through yt-dlp"
+                )
+            }
             if (isHlsMasterPlaylist(manifestText)) {
+                if (hasExternalHlsAudioRendition(manifestText)) {
+                    return@withContext StreamDownloadResult(
+                        null, false,
+                        errorMessage = "HLS master has a separate audio rendition; retry through yt-dlp to preserve audio"
+                    )
+                }
                 val variants = parseHlsMasterPlaylist(manifestText, activeManifestUrl)
                 val chosen = selectBestVariant(variants, maxHeight)
                     ?: return@withContext StreamDownloadResult(null, false, errorMessage = "No playable variants found in HLS master playlist")
@@ -443,9 +494,31 @@ object StreamReconstructionEngine {
                     ?: return@withContext StreamDownloadResult(null, false, errorMessage = "Failed to fetch HLS variant playlist")
             }
 
+            if (hasUnsupportedHlsEncryption(manifestText)) {
+                return@withContext StreamDownloadResult(
+                    null, false,
+                    errorMessage = "HLS uses unsupported SAMPLE-AES/DRM key format; retry through yt-dlp"
+                )
+            }
+            if (!isFinalizedHlsMediaPlaylist(manifestText)) {
+                return@withContext StreamDownloadResult(
+                    null, false,
+                    errorMessage = "HLS playlist is live or incomplete; retry through yt-dlp live capture"
+                )
+            }
+
             val segments = parseHlsMediaPlaylist(manifestText, activeManifestUrl)
             if (segments.isEmpty()) {
                 return@withContext StreamDownloadResult(null, false, errorMessage = "HLS playlist contains no media segments")
+            }
+            if (segments.any { it.keyMethod != null && it.keyMethod != "AES-128" }) {
+                return@withContext StreamDownloadResult(
+                    null, false,
+                    errorMessage = "HLS segment encryption is not AES-128; retry through yt-dlp"
+                )
+            }
+            if (segments.any { it.keyMethod == "AES-128" && it.keyUri.isNullOrBlank() }) {
+                return@withContext StreamDownloadResult(null, false, errorMessage = "AES-128 HLS key URI is missing")
             }
 
             val keyCache = ConcurrentHashMap<String, ByteArray>()

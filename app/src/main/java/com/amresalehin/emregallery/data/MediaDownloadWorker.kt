@@ -91,10 +91,24 @@ class MediaDownloadWorker(
             ?: inputData.getString(KEY_MEDIA_URL)?.takeIf { it.isNotBlank() }
             ?: activityItem?.mediaUrl?.takeIf { it.isNotBlank() }
             ?: return@withContext Result.failure()
+<<<<<<< Updated upstream
         val fileName = cachedPayload?.fileName?.takeIf { it.isNotBlank() }
             ?: inputData.getString(KEY_FILE_NAME)?.takeIf { it.isNotBlank() }
             ?: activityItem?.title?.takeIf { it.isNotBlank() }
             ?: "media_${System.currentTimeMillis()}"
+=======
+        val rawFileName = cachedPayload?.fileName?.takeIf { it.isNotBlank() }
+            ?: inputData.getString(KEY_FILE_NAME)?.takeIf { it.isNotBlank() }
+            ?: activityItem?.title?.takeIf { it.isNotBlank() }
+            ?: "media_${System.currentTimeMillis()}"
+        // Imgur GIFV is an HTML5 video (normally MP4/WebM), never a GIF image.
+        // Preserve the video MIME/extension so Android's media scanner and players recognise it.
+        val isGifvSource = mediaUrl.substringBefore('?').substringBefore('#').endsWith(".gifv", ignoreCase = true)
+        val fileName = if (isGifvSource) {
+            val base = rawFileName.substringBeforeLast('.', rawFileName).ifBlank { "media_${System.currentTimeMillis()}" }
+            "$base.mp4"
+        } else rawFileName
+>>>>>>> Stashed changes
         val referer = cachedPayload?.referer ?: inputData.getString(KEY_REFERER)
         val title = (cachedPayload?.title?.takeIf { it.isNotBlank() }
             ?: inputData.getString(KEY_TITLE)?.takeIf { it.isNotBlank() }
@@ -200,11 +214,18 @@ class MediaDownloadWorker(
                 timeoutSeconds = networkTimeout
             )
 
-            val mediaMode = if (isVideo && !isAudio && formatModePref == com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.VIDEO_ONLY) {
-                "video_only"
-            } else {
-                resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
-            }
+            // Honor the global format-mode preference for media discovered from video pages.
+            // Previously AUDIO_ONLY was ignored for discovered videos and silently downloaded video.
+            val requestedModeOverride = (cachedPayload?.mediaModeOverride
+                ?: inputData.getString(KEY_MEDIA_MODE_OVERRIDE))
+                ?.trim()?.lowercase()?.takeIf { it in setOf("audio", "video", "video_only") }
+            val mediaMode = resolvePreferredMediaMode(
+                globalFormatMode = formatModePref,
+                requestedOverride = requestedModeOverride,
+                isVideo = isVideo,
+                isAudio = isAudio,
+                isStream = isStream
+            )
             // Major video platforms often expose separate audio and video representations (skip audio check if user chose Video Only).
             val lowerOrigin = sourceUrl.lowercase()
             val isSplitAudioVideoPlatform = isYouTubeSource || isRedditSource ||
@@ -311,9 +332,59 @@ class MediaDownloadWorker(
                 }
             }
 
-            // Strategy 2: Originating extractor (yt-dlp or gallery-dl) when required or as fallback
+            // Strategy 2: Native YTDLnis path for yt-dlp-backed sources. This is the
+            // unified Android path: yt-dlp selects the best video-only representation,
+            // downloads companion audio separately, and FFmpegKit muxes both in-process.
+            // The normal Python download_media_file path cannot invoke external ffmpeg on Android.
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) &&
+                GalleryDlEngine.isAvailable() && (isVideo || isAudio || isStream)
+            ) {
+                val ytDlpSupport = runCatching { GalleryDlEngine.checkSupport(targetUrl) }.getOrNull()
+                if (ytDlpSupport?.extractorEngine == "yt-dlp") {
+                    setProgress(workDataOf(KEY_PROGRESS to 0.35f, KEY_STATUS to "Selecting best available format and audio tracks..."))
+                    val ytdlItem = com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadItem(
+                        url = targetUrl,
+                        title = title,
+                        type = if (mediaMode == "audio") {
+                            com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadType.AUDIO
+                        } else {
+                            com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadType.VIDEO
+                        },
+                        selectedFormatId = "best",
+                        container = if (mediaMode == "audio") "m4a" else "mp4",
+                        embedMetadata = false,
+                        embedThumbnail = false
+                    )
+                    val nativeResult = com.amresalehin.emregallery.ytdlnis.YtdlnisEngine.downloadAndProcess(
+                        context = applicationContext,
+                        item = ytdlItem,
+                        onStatusUpdate = { progress, status ->
+                            val bounded = (0.35f + progress.coerceIn(0f, 1f) * 0.45f).coerceIn(0.35f, 0.80f)
+                            setProgressAsync(workDataOf(KEY_PROGRESS to bounded, KEY_STATUS to status.take(180)))
+                            DownloadActivityManager.updateProgress(
+                                itemId = itemId,
+                                progress = bounded,
+                                bytesRead = 0L,
+                                totalBytes = 0L,
+                                speedBytesPerSec = 0L
+                            )
+                        },
+                        cookiesOverride = cookieString,
+                        proxyOverride = activeProxy,
+                        maxHeightOverride = maxVideoHeight,
+                        videoOnlyOverride = mediaMode == "video_only" || (isGifvSource && mediaMode != "audio"),
+                        destinationDirOverride = OkHttpDownloader.getTargetStorageDir(applicationContext, effectiveDomain)
+                    )
+                    downloadedFile = nativeResult.outputFiles.firstOrNull { it.exists() && it.length() > 0L }
+                    if (downloadedFile == null && !nativeResult.errorMessage.isNullOrBlank()) {
+                        errorDiagnostic = nativeResult.errorMessage
+                    }
+                }
+            }
+
+            // Strategy 3: Originating extractor (yt-dlp or gallery-dl) for dedicated engines and fallback
             if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.35f, KEY_STATUS to "Downloading via extractor engine: $title..."))
+                setProgress(workDataOf(KEY_PROGRESS to 0.42f, KEY_STATUS to "Downloading via extractor engine: $title..."))
                 downloadedFile = GalleryDlEngine.downloadMedia(
                     context = applicationContext,
                     mediaUrl = targetUrl,
@@ -347,7 +418,7 @@ class MediaDownloadWorker(
                 }
             }
 
-            // Strategy 3: Final fallback to OkHttp for any URL that specialized extractors couldn't capture
+            // Strategy 4: Final fallback to OkHttp for any URL that specialized extractors couldn't capture
             if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && !isDirectHttpAsset) {
                 setProgress(workDataOf(KEY_PROGRESS to 0.5f, KEY_STATUS to "Trying direct download fallback: $title..."))
                 val fallbackResult = OkHttpDownloader.downloadMediaFileDetailed(
@@ -487,6 +558,25 @@ class MediaDownloadWorker(
                     origin.startsWith("https://", ignoreCase = true))
         }
 
+        internal fun resolvePreferredMediaMode(
+            globalFormatMode: com.amresalehin.emregallery.data.preferences.DownloaderFormatMode,
+            requestedOverride: String?,
+            isVideo: Boolean,
+            isAudio: Boolean,
+            isStream: Boolean
+        ): String {
+            val override = requestedOverride?.trim()?.lowercase()
+                ?.takeIf { it in setOf("audio", "video", "video_only") }
+            if (override != null) return override
+            return when {
+                globalFormatMode == com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.AUDIO_ONLY &&
+                    (isVideo || isAudio || isStream) -> "audio"
+                globalFormatMode == com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.VIDEO_ONLY &&
+                    (isVideo || isStream) -> "video_only"
+                else -> resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
+            }
+        }
+
         internal fun resolveMediaMode(isVideo: Boolean, isAudio: Boolean, isStream: Boolean): String {
             return when {
                 isAudio && !isVideo -> "audio"
@@ -544,6 +634,7 @@ class MediaDownloadWorker(
         const val KEY_SOURCE_URL = "source_url"
         const val KEY_SOURCE_ENGINE = "source_engine"
         const val KEY_HEADERS_JSON = "headers_json"
+        const val KEY_MEDIA_MODE_OVERRIDE = "media_mode_override"
 
         const val KEY_PROGRESS = "progress"
         const val KEY_BYTES_READ = "bytes_read"

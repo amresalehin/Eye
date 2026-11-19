@@ -115,6 +115,17 @@ class MediaDownloaderTest {
             DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4?utm_source=one"),
             DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4?utm_source=two")
         )
+        assertNotEquals(
+            "Audio-only and video downloads for the same URL must not alias the same worker",
+            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4", "audio"),
+            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4")
+        )
+        assertEquals(
+            "Retries must not append a duplicate media-mode suffix",
+            "media_audio",
+            DownloadQueueManager.requestItemIdForMode("media_audio", "audio")
+        )
+        assertEquals("media_audio", DownloadQueueManager.requestItemIdForMode("media", "audio"))
     }
 
     @Test
@@ -140,6 +151,26 @@ class MediaDownloaderTest {
         assertEquals("video", MediaDownloadWorker.resolveMediaMode(isVideo = true, isAudio = false, isStream = false))
         assertEquals("best", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = false, isStream = true))
         assertEquals("best", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = false, isStream = false))
+        assertEquals(
+            "audio",
+            MediaDownloadWorker.resolvePreferredMediaMode(
+                globalFormatMode = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.AUDIO_ONLY,
+                requestedOverride = null,
+                isVideo = true,
+                isAudio = false,
+                isStream = false
+            )
+        )
+        assertEquals(
+            "video",
+            MediaDownloadWorker.resolvePreferredMediaMode(
+                globalFormatMode = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.AUDIO_ONLY,
+                requestedOverride = "video",
+                isVideo = true,
+                isAudio = false,
+                isStream = false
+            )
+        )
 
         val videoOnly = FfprobeMediaInfo(
             format = "mp4",
@@ -375,6 +406,16 @@ class MediaDownloaderTest {
         val webp = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/photo.webp")
         assertEquals(com.amresalehin.emregallery.data.MediaCategory.IMAGES, webp.category)
         assertEquals("WEBP", webp.format)
+    }
+
+    @Test
+    fun mediaClassifierTreatsGifvAsVideoNotAnimatedImage() {
+        val gifv = MediaClassifier.classify("https://i.imgur.com/example.gifv")
+        assertEquals(MediaCategory.VIDEOS, gifv.category)
+        assertEquals("MP4", gifv.format)
+        assertTrue(gifv.isVideo)
+        assertFalse(gifv.isAudio)
+        assertFalse(gifv.isStream)
     }
 
     @Test

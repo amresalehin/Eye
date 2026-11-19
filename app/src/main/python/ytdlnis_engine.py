@@ -247,6 +247,12 @@ def render_filename_template(template, metadata_json="{}"):
 
 
 _YOUTUBE_AUTH_COOKIE_KEYS = (
+<<<<<<< Updated upstream
+=======
+    # SID is a Google account session cookie. Netscape exports often contain it
+    # without SAPISID, so treating it as anonymous incorrectly discards valid sessions.
+    "SID",
+>>>>>>> Stashed changes
     "SAPISID",
     "__Secure-3PSID",
     "__Secure-1PSID",
@@ -950,6 +956,8 @@ def build_ytdlp_options(config_dict, output_dir):
     download_type = str(config_dict.get("type") or "video").lower()
     format_id = str(config_dict.get("format_id") or "").strip()
     audio_format_ids = [str(x).strip() for x in (config_dict.get("audio_format_ids") or []) if str(x).strip()]
+    video_only = bool(config_dict.get("video_only", False))
+    max_h = int(config_dict.get("max_height") or 0)
     container = str(config_dict.get("container") or "").strip().lower()
     filename_template = str(config_dict.get("filename_template") or "%(title)s.%(ext)s").strip()
     if "%(ext)s" not in filename_template:
@@ -986,8 +994,9 @@ def build_ytdlp_options(config_dict, output_dir):
             ydl_opts["format"] = f"bestvideo+{joined_audio}/best"
             if len(audio_format_ids) > 1:
                 ydl_opts["allow_multiple_audio_streams"] = True
+        elif video_only:
+            ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best" if max_h > 0 else "bestvideo/best"
         else:
-            max_h = int(config_dict.get("max_height") or 0)
             if max_h > 0:
                 ydl_opts["format"] = f"bestvideo[height<={max_h}]+bestaudio/best[height<={max_h}]/best"
             else:
@@ -1051,7 +1060,11 @@ def _download_direct_http_stream(stream_url, dest_path, timeout=35):
     return os.path.exists(dest_path) and os.path.getsize(dest_path) > 0
 
 
+<<<<<<< Updated upstream
 def _download_youtube_fallback_streams(url, output_dir, download_type, format_id, max_h, logs):
+=======
+def _download_youtube_fallback_streams(url, output_dir, download_type, format_id, max_h, logs, video_only=False):
+>>>>>>> Stashed changes
     vid = extract_youtube_video_id(url)
     if not vid:
         return None, "", []
@@ -1096,12 +1109,27 @@ def _download_youtube_fallback_streams(url, output_dir, download_type, format_id
             capped = [f for f in video_candidates if int(f.get("height") or 0) <= max_h]
             if capped:
                 video_candidates = capped
+<<<<<<< Updated upstream
         # Prefer pre-muxed stream if resolution is >= 360p, otherwise highest resolution video+companion audio
         muxed = [f for f in video_candidates if f.get("acodec") != "none"]
         if muxed:
             chosen_video = sorted(muxed, key=lambda x: (int(x.get("height") or 0), float(x.get("tbr") or 0)))[-1]
         elif video_candidates:
             chosen_video = sorted(video_candidates, key=lambda x: (int(x.get("height") or 0), float(x.get("tbr") or 0)))[-1]
+=======
+        # Prefer the highest resolution representation, not the best muxed
+        # representation; muxing audio is handled in-process by the Android layer.
+        if video_candidates:
+            chosen_video = max(
+                video_candidates,
+                key=lambda x: (
+                    int(x.get("height") or 0),
+                    int(x.get("width") or 0),
+                    float(x.get("tbr") or 0),
+                    int(x.get("filesize") or x.get("filesize_approx") or 0),
+                ),
+            )
+>>>>>>> Stashed changes
 
     if not chosen_video:
         return None, "", []
@@ -1115,7 +1143,11 @@ def _download_youtube_fallback_streams(url, output_dir, download_type, format_id
     info["acodec"] = chosen_video.get("acodec") or "none"
     info["vcodec"] = chosen_video.get("vcodec") or "h264"
 
+<<<<<<< Updated upstream
     if info["acodec"] == "none":
+=======
+    if info["acodec"] == "none" and not video_only:
+>>>>>>> Stashed changes
         audio_candidates = [f for f in fmts if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
         if audio_candidates:
             best_a = sorted(audio_candidates, key=lambda x: float(x.get("abr") or x.get("tbr") or 0))[-1]
@@ -1198,12 +1230,17 @@ def download_item(config_json, output_dir):
         format_id = str(config.get("format_id") or "").strip()
         audio_format_ids = [str(x).strip() for x in (config.get("audio_format_ids") or []) if str(x).strip()]
         max_h = int(config.get("max_height") or 0)
+<<<<<<< Updated upstream
+=======
+        video_only = bool(config.get("video_only", False))
+>>>>>>> Stashed changes
 
         # Because external CLI ffmpeg is not spawned via subprocess on Android (muxing is done
         # in-process by FfmpegKitEngine/AndroidMediaMuxer in YtdlnisEngine.kt), avoid passing `+`
         # to yt-dlp's single-pass format selector so yt-dlp never aborts due to FFmpegMergerPP.
         if download_type != "audio" and "+" in str(ydl_opts.get("format") or ""):
             if format_id and format_id != "best":
+<<<<<<< Updated upstream
                 ydl_opts["format"] = f"{format_id}/best[vcodec!=none][acodec!=none]/best"
             elif audio_format_ids:
                 ydl_opts["format"] = "bestvideo/best[vcodec!=none]/best"
@@ -1215,6 +1252,19 @@ def download_item(config_json, output_dir):
                 )
             else:
                 ydl_opts["format"] = "best[vcodec!=none][acodec!=none]/bestvideo/best"
+=======
+                ydl_opts["format"] = f"{format_id}/bestvideo/best"
+            elif video_only:
+                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best" if max_h > 0 else "bestvideo/best"
+            elif audio_format_ids:
+                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best" if max_h > 0 else "bestvideo/best"
+            elif max_h > 0:
+                # Download the highest video-only rendition under the cap, then fetch
+                # companion audio separately for native muxing in YtdlnisEngine.kt.
+                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best"
+            else:
+                ydl_opts["format"] = "bestvideo/best"
+>>>>>>> Stashed changes
 
         if cookie_path:
             ydl_opts["cookiefile"] = cookie_path
@@ -1278,7 +1328,11 @@ def download_item(config_json, output_dir):
 
             if not primary_file:
                 fb_info, fb_file, fb_audios = _download_youtube_fallback_streams(
+<<<<<<< Updated upstream
                     url, output_dir, download_type, format_id, max_h, logs
+=======
+                    url, output_dir, download_type, format_id, max_h, logs, video_only=video_only
+>>>>>>> Stashed changes
                 )
                 if fb_file:
                     info = fb_info
@@ -1303,6 +1357,10 @@ def download_item(config_json, output_dir):
         info_acodec = (info.get("acodec") or "") if isinstance(info, dict) else ""
         needs_companion_audio = (
             download_type != "audio"
+<<<<<<< Updated upstream
+=======
+            and not video_only
+>>>>>>> Stashed changes
             and bool(primary_file)
             and not merge_audio_files
             and (info_acodec == "none" or bool(audio_format_ids))

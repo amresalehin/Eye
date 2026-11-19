@@ -21,7 +21,11 @@ object ThumbnailUtils {
     fun mediaThumbnailKey(uri: String): String = "${uri}_thumb"
 
     private val REMOTE_NON_IMAGE_EXTENSIONS = setOf(
+<<<<<<< Updated upstream
         "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v",
+=======
+        "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v", "gifv",
+>>>>>>> Stashed changes
         "m3u8", "mpd", "mp3", "m4a", "wav", "flac", "ogg", "opus", "aac",
         "wma", "zip", "rar", "7z", "pdf", "epub", "apk", "vtt", "srt", "ass", "ttml"
     )

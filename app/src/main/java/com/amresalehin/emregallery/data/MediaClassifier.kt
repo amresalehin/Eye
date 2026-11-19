@@ -504,7 +504,7 @@ object MediaClassifier {
 
     val KNOWN_MEDIA_EXTENSIONS = setOf(
         "jpg", "jpeg", "png", "webp", "gif", "svg", "avif", "bmp", "heic", "heif", "ico",
-        "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "mpeg", "mpg", "vob", "m2t", "m2ts", "ogv",
+        "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "gifv", "ts", "mpeg", "mpg", "vob", "m2t", "m2ts", "ogv",
         "m3u8", "mpd", "ism", "isml", "smil",
         "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma", "ac3", "aif", "aiff", "alac", "weba", "oga",
         "vtt", "srt", "ass", "ssa", "ttml", "dfxp",
@@ -1521,6 +1521,18 @@ object MediaClassifier {
         }
 
         // 2. Video formats
+        // Imgur's .gifv is an HTML5 video container (usually MP4/WebM), not an animated GIF.
+        if (cleanPath.endsWith(".gifv")) {
+            val useWebm = mimeLower.contains("video/webm")
+            return ClassificationResult(
+                category = MediaCategory.VIDEOS,
+                format = if (useWebm) "WEBM" else "MP4",
+                mimeType = if (useWebm) "video/webm" else "video/mp4",
+                isVideo = true,
+                isAudio = false,
+                isStream = false
+            )
+        }
         if (lower.contains("/videoplayback") || lower.contains("googlevideo.com")) {
             val isAudioStream = lower.contains("mime=audio") || mimeLower.contains("audio/")
             return if (isAudioStream) {

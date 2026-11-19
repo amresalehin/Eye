@@ -476,7 +476,7 @@ def is_ytdlp_supported(url):
     lower = clean.lower().split("?")[0].split("#")[0]
     media_exts = (
         ".mp4", ".mkv", ".webm", ".m3u8", ".mpd", ".mov", ".flv", ".avi",
-        ".ts", ".m4v", ".3gp", ".mp3", ".m4a", ".aac", ".ogg", ".opus",
+        ".ts", ".m4v", ".3gp", ".gifv", ".mp3", ".m4a", ".aac", ".ogg", ".opus",
         ".wav", ".flac"
     )
     return any(lower.endswith(ext) for ext in media_exts)
@@ -823,10 +823,61 @@ def extract_gallery_dl(url, options_json="{}"):
         "items": items
     })
 
+
+def _extract_page_preview_url(page_url, headers=None, timeout=8):
+    """Best-effort poster lookup for extractors that return a video but no thumbnail."""
+    if not page_url or not str(page_url).lower().startswith(("http://", "https://")):
+        return None
+    try:
+        import html as html_lib
+        import re
+        from urllib.parse import urljoin, urlparse
+        from urllib.request import Request, urlopen
+
+        request_headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        }
+        if isinstance(headers, dict):
+            request_headers.update({str(k): str(v) for k, v in headers.items() if v})
+        request = Request(str(page_url), headers=request_headers)
+        with urlopen(request, timeout=max(2, min(int(timeout or 8), 10))) as response:
+            final_url = response.geturl() if hasattr(response, "geturl") else str(page_url)
+            raw = response.read(512 * 1024)
+        document = raw.decode("utf-8", errors="replace")
+
+        # Check metadata tags first; their attribute ordering varies across sites.
+        for tag in re.findall(r"<meta\b[^>]*>", document, flags=re.IGNORECASE):
+            attrs = {
+                key.lower(): html_lib.unescape(value).strip()
+                for key, _, value in re.findall(
+                    r"([\w:-]+)\s*=\s*(['\"])(.*?)\2", tag, flags=re.IGNORECASE
+                )
+            }
+            marker = (attrs.get("property") or attrs.get("name") or "").lower()
+            if marker in ("og:image", "og:image:url", "twitter:image", "twitter:image:src"):
+                candidate = attrs.get("content")
+                if candidate:
+                    resolved = urljoin(final_url, candidate)
+                    if urlparse(resolved).scheme in ("http", "https"):
+                        return resolved
+
+        # Some pages expose a poster directly on the video element instead of Open Graph.
+        for tag in re.findall(r"<video\b[^>]*>", document, flags=re.IGNORECASE):
+            match = re.search(r"\bposter\s*=\s*(['\"])(.*?)\1", tag, flags=re.IGNORECASE)
+            if match:
+                resolved = urljoin(final_url, html_lib.unescape(match.group(2)).strip())
+                if urlparse(resolved).scheme in ("http", "https"):
+                    return resolved
+    except Exception:
+        return None
+    return None
+
 def extract_yt_dlp(url, options_json="{}"):
     """
     Extracts media items using yt-dlp exclusively.
-    Selects single pre-muxed format and preserves page URL for resilient save-time downloads.
+    Prefers the highest video representation (including video-only 4K/8K streams),
+    exposes companion audio choices, and preserves the page URL for native save-time muxing.
     """
     clean_url = url.strip() if url else ""
     if not clean_url or not YTDLP_AVAILABLE:
@@ -886,7 +937,7 @@ def extract_yt_dlp(url, options_json="{}"):
         elif format_mode == "video_only":
             fmt_selector = f"bestvideo{height_filter}/bestvideo/best"
         else:
-            fmt_selector = f"b{height_filter}[vcodec!=none][acodec!=none]/best{height_filter}[vcodec!=none][acodec!=none]/bestvideo{height_filter}+bestaudio/best"
+            fmt_selector = f"bestvideo{height_filter}+bestaudio/best{height_filter}/best"
 
         ydl_opts = {
             "quiet": True,
@@ -959,25 +1010,32 @@ def extract_yt_dlp(url, options_json="{}"):
                     formats = entry.get("formats") or []
                     best_fmt = None
                     if not direct_url and formats:
-                        # 1. Prefer pre-muxed video+audio format (itag 18, 22, etc.)
-                        muxed = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none"]
-                        if muxed:
-                            best_fmt = muxed[-1]
+                        # Pick the highest video representation even when it is video-only.
+                        # Choosing a lower-resolution muxed format here hid 4K/8K options.
+                        video_fmts = [
+                            f for f in formats
+                            if f.get("url") and f.get("vcodec") not in (None, "none")
+                        ]
+                        if video_fmts:
+                            best_fmt = max(
+                                video_fmts,
+                                key=lambda f: (
+                                    int(f.get("height") or 0),
+                                    int(f.get("width") or 0),
+                                    float(f.get("tbr") or 0),
+                                    int(f.get("filesize") or f.get("filesize_approx") or 0),
+                                ),
+                            )
+                        else:
+                            valid_fmts = [f for f in formats if f.get("url")]
+                            if valid_fmts:
+                                best_fmt = max(
+                                    valid_fmts,
+                                    key=lambda f: (float(f.get("abr") or f.get("tbr") or 0), int(f.get("filesize") or 0)),
+                                )
+                        if best_fmt:
                             direct_url = best_fmt.get("url")
                             v_ext = best_fmt.get("ext") or v_ext
-                        else:
-                            # 2. Prefer any video format with a url
-                            video_fmts = [f for f in formats if f.get("url") and f.get("vcodec") != "none"]
-                            if video_fmts:
-                                best_fmt = video_fmts[-1]
-                                direct_url = best_fmt.get("url")
-                                v_ext = best_fmt.get("ext") or v_ext
-                            else:
-                                valid_fmts = [f for f in formats if f.get("url")]
-                                if valid_fmts:
-                                    best_fmt = valid_fmts[-1]
-                                    direct_url = best_fmt.get("url")
-                                    v_ext = best_fmt.get("ext") or v_ext
 
                     # Never emit an HTML webpage URL as a fake downloadable video item.
                     if not direct_url or direct_url == page_url or direct_url in seen_urls:
@@ -999,7 +1057,14 @@ def extract_yt_dlp(url, options_json="{}"):
                     width = entry.get("width") or (best_fmt.get("width") if best_fmt else None)
                     height = entry.get("height") or (best_fmt.get("height") if best_fmt else None)
                     resolution_hint = f"{width}x{height}" if width and height else None
-                    thumb = entry.get("thumbnail")
+                    thumb = entry.get("thumbnail") or page_thumbnail or info.get("thumbnail")
+                    if not thumb:
+                        thumbnail_candidates = entry.get("thumbnails") or info.get("thumbnails") or []
+                        valid_thumbnails = [t for t in thumbnail_candidates if isinstance(t, dict) and t.get("url")]
+                        if valid_thumbnails:
+                            thumb = valid_thumbnails[-1].get("url")
+                    if not thumb and is_yt and entry.get("id"):
+                        thumb = f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg"
                     filesize = entry.get("filesize") or entry.get("filesize_approx") or (best_fmt.get("filesize") if best_fmt else None)
 
                     is_audio_only = entry.get("vcodec") == "none" or v_ext in ["mp3", "m4a", "opus", "aac"]
@@ -1029,7 +1094,13 @@ def extract_yt_dlp(url, options_json="{}"):
                     # Also provide the best standalone audio track if formats are present
                     audio_fmts = [f for f in formats if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
                     if audio_fmts and not is_audio_only:
-                        best_audio = audio_fmts[-1]
+                        best_audio = max(
+                            audio_fmts,
+                            key=lambda f: (
+                                float(f.get("abr") or f.get("tbr") or 0),
+                                int(f.get("filesize") or f.get("filesize_approx") or 0),
+                            ),
+                        )
                         a_url = best_audio.get("url")
                         if a_url and a_url not in seen_urls:
                             seen_urls.add(a_url)
@@ -1090,6 +1161,16 @@ def extract_yt_dlp(url, options_json="{}"):
                                     "pageUrl": page_url,
                                     "metadata": {"subtitle_lang": lang, "auto_generated": str(is_auto).lower()}
                                 })
+
+        # Extractors occasionally return valid video URLs without any poster metadata.
+        # Query the originating HTML page only in that case and reuse its declared poster.
+        if any(item.get("isVideo") and not item.get("thumbnailUrl") for item in items):
+            html_preview = _extract_page_preview_url(clean_url, http_headers)
+            if html_preview:
+                page_thumbnail = page_thumbnail or html_preview
+                for item in items:
+                    if item.get("isVideo") and not item.get("thumbnailUrl"):
+                        item["thumbnailUrl"] = html_preview
     except Exception as e:
         return json.dumps({
             "success": False,
@@ -1147,7 +1228,18 @@ def extract_media(url, options_json="{}"):
         except Exception:
             pass
 
-    # Step 0c: Dedicated MSC72m/media_downloader paths (Spotify, RadioJavan, X Spaces)
+    # Step 0c: Dedicated Pinterest path. Support detection alone is not enough: route
+    # actual extraction through pinterest-dl before generic yt-dlp/gallery-dl fallbacks.
+    if PINTEREST_DL_AVAILABLE and _pinterest_extractor is not None and _pinterest_extractor.is_pinterest_url(clean_url):
+        pin_res_str = extract_pinterest(clean_url, options_json)
+        try:
+            pin_res = json.loads(pin_res_str)
+            if pin_res.get("success") and len(pin_res.get("items", [])) > 0:
+                return pin_res_str
+        except Exception:
+            pass
+
+    # Step 0d: Dedicated MSC72m/media_downloader paths (Spotify, RadioJavan, X Spaces)
     if MEDIA_DL_AVAILABLE and _media_dl_extractor is not None:
         if _media_dl_extractor.is_spotify_url(clean_url):
             return extract_spotify(clean_url, options_json)

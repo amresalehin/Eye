@@ -67,6 +67,20 @@ class TestYtdlnisEngine(unittest.TestCase):
         self.assertEqual(opts["extractor_args"]["youtube"]["po_token"], ["web+abc123token"])
         self.assertEqual(opts["sponsorblock_action"], "remove")
 
+    def test_build_ytdlp_options_video_only_respects_8k_cap(self):
+        opts = ytdlnis_engine.build_ytdlp_options(
+            {"type": "video", "format_id": "best", "video_only": True, "max_height": 4320},
+            "/tmp/video-only",
+        )
+        self.assertEqual(opts["format"], "bestvideo[height<=4320]/bestvideo/best")
+
+    def test_build_ytdlp_options_prefers_separate_high_resolution_video_and_audio(self):
+        opts = ytdlnis_engine.build_ytdlp_options(
+            {"type": "video", "format_id": "best", "max_height": 4320},
+            "/tmp/video-audio",
+        )
+        self.assertEqual(opts["format"], "bestvideo[height<=4320]+bestaudio/best[height<=4320]/best")
+
     def test_build_ytdlp_options_audio_mode(self):
         cfg = {
             "type": "audio",

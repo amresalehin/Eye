@@ -162,6 +162,18 @@ object GalleryDlEngine {
         }
     }
 
+    fun isPinterestDlAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_pinterest_dl_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking pinterest-dl availability", e)
+            false
+        }
+    }
+
     fun isMediaDownloaderAvailable(): Boolean {
         if (!isPythonStarted()) return false
         return try {
@@ -187,7 +199,7 @@ object GalleryDlEngine {
     }
 
     fun isAvailable(): Boolean {
-        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isMediaDownloaderAvailable() || isMediaScraperAvailable())
+        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isPinterestDlAvailable() || isMediaDownloaderAvailable() || isMediaScraperAvailable())
     }
 
     /**
@@ -345,6 +357,9 @@ object GalleryDlEngine {
 
     private fun parseExtractedItems(root: JSONObject, pageUrl: String): Pair<String, List<ScrapedMediaItem>> {
         val pageTitle = root.optString("pageTitle", "")
+        // Some extractors expose the page poster only at the response level. Reuse it
+        // when an individual video item has no thumbnail, rather than rendering a blank tile.
+        val responsePreview = root.optString("previewImageUrl", "").takeIf { it.isNotBlank() }
         val itemsArray = root.optJSONArray("items") ?: JSONArray()
         val itemsList = mutableListOf<ScrapedMediaItem>()
 
@@ -397,7 +412,7 @@ object GalleryDlEngine {
                 category = mediaCategory,
                 format = obj.optString("format", "IMAGE"),
                 mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
-                thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
+                thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() } ?: responsePreview,
                 source = obj.optString("source", "yt-dlp"),
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
@@ -525,6 +540,9 @@ object GalleryDlEngine {
 
     suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_reddit", url, options)
+
+    suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_pinterest", url, options)
 
     suspend fun extractSpotify(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_spotify", url, options)

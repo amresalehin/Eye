@@ -246,6 +246,27 @@ class TestPinterestLibraryAndRunnerIntegration(unittest.TestCase):
             self.assertEqual(res["items"][0]["format"], "M3U8")
             self.assertIn("/originals/aa/bb/cc/", res["items"][0]["thumbnailUrl"])
 
+    def test_unified_extract_media_dispatches_to_pinterest_extractor(self):
+        expected = {
+            "success": True,
+            "engine": "pinterest-dl",
+            "items": [{"url": "https://v1.pinimg.com/video.mp4", "isVideo": True}],
+        }
+
+        class FakePinterestRouter:
+            @staticmethod
+            def is_pinterest_url(url):
+                return "pinterest.com" in url or "pin.it" in url
+
+        with mock.patch.object(gallery_dl_runner, "PINTEREST_DL_AVAILABLE", True), \
+             mock.patch.object(gallery_dl_runner, "_pinterest_extractor", FakePinterestRouter), \
+             mock.patch.object(gallery_dl_runner, "extract_pinterest", return_value=json.dumps(expected)) as extract:
+            result = json.loads(gallery_dl_runner.extract_media("https://www.pinterest.com/pin/12345/"))
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["engine"], "pinterest-dl")
+        extract.assert_called_once()
+
     def test_gallery_dl_runner_wiring(self):
         self.assertTrue(gallery_dl_runner.is_pinterest_dl_available())
         status = json.loads(gallery_dl_runner.get_engine_status())

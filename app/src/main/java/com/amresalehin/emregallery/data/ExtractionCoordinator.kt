@@ -53,6 +53,10 @@ class ExtractionCoordinator(private val context: Context) {
         val expectation: TargetMediaExpectation,
         val isRedditTarget: Boolean,
         val isInstagramTarget: Boolean,
+<<<<<<< Updated upstream
+=======
+        val isPinterestTarget: Boolean,
+>>>>>>> Stashed changes
         val isYouTubeTarget: Boolean,
         val itemsMap: LinkedHashMap<String, ScrapedMediaItem> = LinkedHashMap(),
         val itemsMutex: Mutex = Mutex()
@@ -96,6 +100,10 @@ class ExtractionCoordinator(private val context: Context) {
                 lowerUrl.contains("redd.it") ||
                 lowerUrl.contains("redgifs.com"),
             isInstagramTarget = lowerUrl.contains("instagram.com") || lowerUrl.contains("instagr.am"),
+<<<<<<< Updated upstream
+=======
+            isPinterestTarget = lowerUrl.contains("pinterest.") || lowerUrl.contains("pin.it") || lowerUrl.contains("pinimg.com"),
+>>>>>>> Stashed changes
             isYouTubeTarget = GalleryDlEngine.isYouTubeUrl(requestContext.url)
         )
 
@@ -291,6 +299,16 @@ class ExtractionCoordinator(private val context: Context) {
                 }
             }
         }
+<<<<<<< Updated upstream
+=======
+        if (session.isPinterestTarget) {
+            fastJobs += launch(Dispatchers.IO) {
+                runPythonChannel(session, "Pinterest-DL", GalleryDlEngine.isPinterestDlAvailable()) {
+                    GalleryDlEngine.extractPinterest(url, options)
+                }
+            }
+        }
+>>>>>>> Stashed changes
         if (isSpotifyTarget) {
             fastJobs += launch(Dispatchers.IO) {
                 runPythonChannel(session, "Spotify", GalleryDlEngine.isMediaDownloaderAvailable()) {
@@ -602,6 +620,19 @@ class ExtractionCoordinator(private val context: Context) {
             }
         }
 
+<<<<<<< Updated upstream
+=======
+        if (session.isPinterestTarget && GalleryDlEngine.isPinterestDlAvailable()) {
+            val retryPinterest = withContext(Dispatchers.IO) {
+                runCatching { GalleryDlEngine.extractPinterest(url, updatedOptions) }
+                    .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }
+            }
+            if (retryPinterest.success && retryPinterest.items.isNotEmpty()) {
+                updateItems(session, retryPinterest.items, title = retryPinterest.pageTitle)
+            }
+        }
+
+>>>>>>> Stashed changes
         val retryYt = withContext(Dispatchers.IO) {
             runCatching { GalleryDlEngine.extractYtDlp(url, updatedOptions) }
                 .getOrElse { GalleryDlExtractResult(success = false, errorMessage = it.localizedMessage) }

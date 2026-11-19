@@ -49,10 +49,19 @@ object DownloadQueueManager {
      * A collision-resistant, deterministic WorkManager key. Keep the full digest: a 32-bit
      * String.hashCode() can collide and abs(Int.MIN_VALUE) remains negative.
      */
-    internal fun uniqueWorkNameForUrl(url: String): String {
+    internal fun requestItemIdForMode(itemId: String, mediaModeOverride: String): String {
+        val mode = mediaModeOverride.trim().lowercase()
+        if (mode !in setOf("audio", "video", "video_only")) return itemId
+        val suffix = "_$mode"
+        return if (itemId.endsWith(suffix, ignoreCase = true)) itemId else "$itemId$suffix"
+    }
+
+    internal fun uniqueWorkNameForUrl(url: String, mediaModeOverride: String? = null): String {
         val canonical = MediaClassifier.deduplicationKey(url).ifBlank { url.trim() }
+        val mode = mediaModeOverride?.trim()?.lowercase()?.takeIf { it in setOf("audio", "video", "video_only") }
+        val identity = if (mode == null) canonical else "$canonical\nmode=$mode"
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(canonical.toByteArray(Charsets.UTF_8))
+            .digest(identity.toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte) }
         return "download_$digest"
     }
@@ -149,7 +158,12 @@ object DownloadQueueManager {
         val sourceDomain: String,
         val sourceUrl: String,
         val sourceEngine: String,
+<<<<<<< Updated upstream
         val downloadHeaders: Map<String, String>
+=======
+        val downloadHeaders: Map<String, String>,
+        val mediaModeOverride: String? = null
+>>>>>>> Stashed changes
     )
 
     private val payloadCache = ConcurrentHashMap<String, QueuedDownloadPayload>()
@@ -194,6 +208,10 @@ object DownloadQueueManager {
                 put("sourceDomain", payload.sourceDomain)
                 put("sourceUrl", payload.sourceUrl)
                 put("sourceEngine", payload.sourceEngine)
+<<<<<<< Updated upstream
+=======
+                put("mediaModeOverride", payload.mediaModeOverride ?: "")
+>>>>>>> Stashed changes
                 put("headers", headersObj)
             }
             payloadFileFor(context, payload.itemId).writeText(root.toString(), Charsets.UTF_8)
@@ -229,7 +247,12 @@ object DownloadQueueManager {
                 sourceDomain = root.optString("sourceDomain", ""),
                 sourceUrl = root.optString("sourceUrl", ""),
                 sourceEngine = root.optString("sourceEngine", ""),
+<<<<<<< Updated upstream
                 downloadHeaders = headersMap
+=======
+                downloadHeaders = headersMap,
+                mediaModeOverride = root.optString("mediaModeOverride", "").takeIf { it.isNotBlank() }
+>>>>>>> Stashed changes
             ).also {
                 payloadCache[itemId] = it
             }
@@ -261,7 +284,8 @@ object DownloadQueueManager {
         stackId: String,
         stackTitle: String,
         sourceDomain: String,
-        sourceUrl: String
+        sourceUrl: String,
+        mediaModeOverride: String? = null
     ): androidx.work.OneTimeWorkRequest {
         val payload = QueuedDownloadPayload(
             itemId = item.id,
@@ -278,7 +302,12 @@ object DownloadQueueManager {
             sourceDomain = sourceDomain,
             sourceUrl = sourceUrl,
             sourceEngine = item.provenance.extractorEngine,
+<<<<<<< Updated upstream
             downloadHeaders = item.downloadHeaders
+=======
+            downloadHeaders = item.downloadHeaders,
+            mediaModeOverride = mediaModeOverride?.trim()?.lowercase()?.takeIf { it in setOf("audio", "video", "video_only") }
+>>>>>>> Stashed changes
         )
         payloadCache[item.id] = payload
 
@@ -305,6 +334,10 @@ object DownloadQueueManager {
             .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, sourceDomain.takeUtf8Bytes(200))
             .putString(MediaDownloadWorker.KEY_SOURCE_URL, inlineSourceUrl)
             .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine.takeUtf8Bytes(128))
+<<<<<<< Updated upstream
+=======
+            .putString(MediaDownloadWorker.KEY_MEDIA_MODE_OVERRIDE, payload.mediaModeOverride)
+>>>>>>> Stashed changes
             .apply {
                 if (!headersJson.isNullOrBlank()) {
                     putString(MediaDownloadWorker.KEY_HEADERS_JSON, headersJson)
@@ -328,7 +361,8 @@ object DownloadQueueManager {
         stackTitle: String? = null,
         sourceDomain: String? = null,
         sourceUrl: String? = null,
-        isRetry: Boolean = false
+        isRetry: Boolean = false,
+        mediaModeOverride: String? = null
     ): UUID {
         val sId = stackId ?: "stack_${System.currentTimeMillis()}"
         val sTitle = stackTitle ?: sourceDomain ?: "Discovered Media"
@@ -337,7 +371,13 @@ object DownloadQueueManager {
 
         DownloadActivityManager.initialize(context)
         val workManager = WorkManager.getInstance(context)
-        val uniqueWorkName = uniqueWorkNameForUrl(item.url)
+        val normalizedModeOverride = mediaModeOverride?.trim()?.lowercase()?.takeIf { it in setOf("audio", "video", "video_only") }
+        // The same discovered item can be queued once as video and once as audio.
+        // Keep the mode suffix idempotent because retries pass the already-suffixed activity ID.
+        val requestItem = if (normalizedModeOverride == null) item else item.copy(
+            id = requestItemIdForMode(item.id, normalizedModeOverride)
+        )
+        val uniqueWorkName = uniqueWorkNameForUrl(requestItem.url, normalizedModeOverride)
         val lock = uniqueWorkLocks[(uniqueWorkName.hashCode() and Int.MAX_VALUE) % uniqueWorkLocks.size]
 
         return synchronized(lock) {
@@ -348,7 +388,7 @@ object DownloadQueueManager {
             if (activeBefore != null) {
                 // This request aliases the existing file download. Do not create a second
                 // activity row: the existing WorkManager worker owns progress and completion.
-                registerActiveWork(activeBefore.id, item.id)
+                registerActiveWork(activeBefore.id, requestItem.id)
 
                 // Work may complete between the unique-work query and alias registration.
                 // Re-check its individual ID so a late alias cannot leave a phantom active count.
@@ -364,6 +404,7 @@ object DownloadQueueManager {
                 unregisterActiveWork(activeBefore.id)
             }
 
+<<<<<<< Updated upstream
             val request = buildRequest(item, referer, sId, sTitle, domain, url)
             payloadCache[item.id]?.let { persistPayloadToDisk(context, it) }
 
@@ -371,12 +412,22 @@ object DownloadQueueManager {
                 it.isNotBlank() && !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
             } ?: item.url.takeIf {
                 !item.isVideo && !item.isAudio && !item.isStream &&
+=======
+            val request = buildRequest(requestItem, referer, sId, sTitle, domain, url, normalizedModeOverride)
+            payloadCache[requestItem.id]?.let { persistPayloadToDisk(context, it) }
+
+            val safeThumbnailUrl = requestItem.thumbnailUrl?.takeIf {
+                it.isNotBlank() && !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
+            } ?: requestItem.url.takeIf {
+                !requestItem.isVideo && !requestItem.isAudio && !requestItem.isStream &&
+>>>>>>> Stashed changes
                     !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
             }
 
             // Record the owning activity before enqueueing so a fast worker cannot finish
             // before its activity is created.
             DownloadActivityManager.recordQueued(
+<<<<<<< Updated upstream
                 id = item.id,
                 title = item.title,
                 mediaUrl = item.url,
@@ -385,14 +436,25 @@ object DownloadQueueManager {
                 isAudio = item.isAudio,
                 isStream = item.isStream,
                 format = item.format,
+=======
+                id = requestItem.id,
+                title = requestItem.title,
+                mediaUrl = requestItem.url,
+                thumbnailUrl = safeThumbnailUrl,
+                isVideo = requestItem.isVideo,
+                isAudio = requestItem.isAudio,
+                isStream = requestItem.isStream,
+                format = requestItem.format,
+>>>>>>> Stashed changes
                 workId = request.id.toString(),
                 isRetry = isRetry,
                 stackId = sId,
                 stackTitle = sTitle,
                 sourceDomain = domain,
-                sourceUrl = url
+                sourceUrl = url,
+                mediaModeOverride = normalizedModeOverride
             )
-            registerActiveWork(request.id, item.id)
+            registerActiveWork(request.id, requestItem.id)
 
             try {
                 // KEEP never cancels an unfinished worker. A completed/failed unique-work
@@ -408,8 +470,8 @@ object DownloadQueueManager {
                     // Another process/request won the WorkManager race. Keep the canonical
                     // worker as owner and remove the transient activity row for this request.
                     unregisterActiveWork(request.id)
-                    registerActiveWork(actualWork.id, item.id)
-                    DownloadActivityManager.deleteActivity(item.id)
+                    registerActiveWork(actualWork.id, requestItem.id)
+                    DownloadActivityManager.deleteActivity(requestItem.id)
                     actualWork.id
                 } else {
                     if (actualWork == null) unregisterActiveWork(request.id)
@@ -417,7 +479,7 @@ object DownloadQueueManager {
                 }
             } catch (e: Exception) {
                 unregisterActiveWork(request.id)
-                DownloadActivityManager.markFailed(item.id, e.message ?: "Could not enqueue download")
+                DownloadActivityManager.markFailed(requestItem.id, e.message ?: "Could not enqueue download")
                 throw e
             }
         }

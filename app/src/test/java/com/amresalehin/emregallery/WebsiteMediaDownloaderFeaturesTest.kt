@@ -66,6 +66,44 @@ class WebsiteMediaDownloaderFeaturesTest {
     }
 
     @Test
+    fun hlsDetectsSeparateAudioUnsupportedEncryptionAndLivePlaylists() {
+        val alternateAudioMaster = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE="AUDIO",GROUP-ID="audio",NAME="English",URI="audio/eng.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,AUDIO="audio"
+            video/1080p.m3u8
+        """.trimIndent()
+        assertTrue(StreamReconstructionEngine.hasExternalHlsAudioRendition(alternateAudioMaster))
+
+        val sampleAes = """
+            #EXTM3U
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://content-key"
+            #EXTINF:4.0,
+            seg0.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        assertTrue(StreamReconstructionEngine.hasUnsupportedHlsEncryption(sampleAes))
+        val sessionKey = """
+            #EXTM3U
+            #EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,URI="skd://content-key"
+            #EXT-X-STREAM-INF:BANDWIDTH=3000000
+            video/1080p.m3u8
+        """.trimIndent()
+        assertTrue(StreamReconstructionEngine.hasUnsupportedHlsEncryption(sessionKey))
+
+        val aes128 = """
+            #EXTM3U
+            #EXT-X-KEY:METHOD=AES-128,URI="key.bin"
+            #EXTINF:4.0,
+            seg0.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        assertFalse(StreamReconstructionEngine.hasUnsupportedHlsEncryption(aes128))
+        assertTrue(StreamReconstructionEngine.isFinalizedHlsMediaPlaylist(aes128))
+        assertFalse(StreamReconstructionEngine.isFinalizedHlsMediaPlaylist(aes128.replace("#EXT-X-ENDLIST", "")))
+    }
+
+    @Test
     fun hlsMediaPlaylistParsesSegmentsAndDecryptsAes128() {
         val media = """
             #EXTM3U

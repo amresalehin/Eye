@@ -21,6 +21,25 @@
 -keepclassmembers class androidx.media3.exoplayer.** { *; }
 -dontwarn androidx.media3.**
 
+# FFmpegKit JNI callbacks (critical for release APKs)
+-keep class com.arthenica.ffmpegkit.** { *; }
+-dontwarn com.arthenica.ffmpegkit.**
+
+# Chaquopy Python JNI bridge
+-keep class com.chaquo.python.** { *; }
+-dontwarn com.chaquo.python.**
+
+# WebView @JavascriptInterface bridges (media capture & deep scan)
+-keepattributes *Annotation*
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# ML Kit & WorkManager workers
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
+-keep class * extends androidx.work.ListenableWorker { *; }
+
 # R8 Optimization flags
 -allowaccessmodification
 -repackageclasses ''

@@ -90,9 +90,12 @@ object RamGovernor {
             }
         }
 
-        // 2. Clear face thumbnail caches
+        // 2. Clear face thumbnail caches & cached native Tesseract engine
         try {
             com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
+        } catch (_: Throwable) {}
+        try {
+            com.amresalehin.emregallery.ocr.TesseractOcr.releaseCachedEngine()
         } catch (_: Throwable) {}
 
         // 3. Clear Chromium in-memory RAM cache (without deleting persistent local storage/cookies)

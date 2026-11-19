@@ -205,9 +205,10 @@ class SearchEngine(private val context: Context) {
     ): DiscoveryData = withContext(Dispatchers.IO) {
         val nonTrashMedia = media.filterNot { it.isTrashed }
 
-        // 1. Confirmed / Recognized People from FaceClusterStore + customPeopleMap
+        // 1. Confirmed / Recognized People from active face engine (Buffalo_L or Ente) + customPeopleMap
+        val activeEngineId = com.amresalehin.emregallery.face.FaceRecognitionSettings.getActiveEngine(context)
         val personSummaries = runCatching {
-            faceStore.personSummaries(includeHidden = false, engineId = BuffaloLFaceEngine.ENGINE_ID)
+            faceStore.personSummaries(includeHidden = false, engineId = activeEngineId)
         }.getOrDefault(emptyList()).filter { it.faceCount > 0 && it.sampleUri != null }
 
         val peopleItems = mutableListOf<DiscoveryEntityItem>()
@@ -363,9 +364,9 @@ class SearchEngine(private val context: Context) {
             )
         }
 
-        // Documents: items with cached OCR text
+        // Documents: items with actual non-empty cached OCR text
         val documentItems = nonTrashMedia.filter {
-            TesseractOcr.hasCachedResult(context, Uri.parse(it.uri))
+            !it.isVideo && TesseractOcr.hasCachedNonEmptyText(context, Uri.parse(it.uri))
         }
         if (documentItems.isNotEmpty()) {
             categories.add(
@@ -434,9 +435,10 @@ class SearchEngine(private val context: Context) {
             )
         }
 
-        // 2. Matching People (from FaceClusterStore & customPeopleMap)
+        // 2. Matching People from active face engine (Buffalo_L or Ente) + customPeopleMap
+        val activeEngineId = com.amresalehin.emregallery.face.FaceRecognitionSettings.getActiveEngine(context)
         val personSummaries = runCatching {
-            faceStore.personSummaries(includeHidden = false, engineId = BuffaloLFaceEngine.ENGINE_ID)
+            faceStore.personSummaries(includeHidden = false, engineId = activeEngineId)
         }.getOrDefault(emptyList())
         val matchingPeople = personSummaries.filter {
             it.displayName.isNotBlank() && it.displayName.contains(q, ignoreCase = true) && it.faceCount > 0

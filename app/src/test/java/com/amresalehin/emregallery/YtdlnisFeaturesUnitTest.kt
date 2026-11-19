@@ -1,5 +1,8 @@
 package com.amresalehin.emregallery
 
+import com.amresalehin.emregallery.data.DownloadActivityItem
+import com.amresalehin.emregallery.data.DownloadActivityStatus
+import com.amresalehin.emregallery.ui.ytdlnis.*
 import com.amresalehin.emregallery.ytdlnis.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -104,8 +107,97 @@ class YtdlnisFeaturesUnitTest {
 
     @Test
     fun downloaderCanvasMode_usesSearchAsHomeTab() {
-        val modes = com.amresalehin.emregallery.ui.ytdlnis.DownloaderCanvasMode.entries.map { it.name }
+        val modes = DownloaderCanvasMode.entries.map { it.name }
         assertEquals(listOf("SEARCH", "QUEUE", "SETTINGS"), modes)
         assertFalse("Grid is a media layout, not a canvas mode tab", modes.contains("GRID"))
+    }
+
+    @Test
+    fun getSearchHomeHistoryPreview_capsPastDownloadsAtFiveMostRecent() {
+        val allDownloads = (1..20).map { idx ->
+            DownloadActivityItem(
+                id = "dl-$idx",
+                title = "Media File $idx",
+                mediaUrl = "https://example.com/file_$idx.mp4",
+                isVideo = true,
+                format = "MP4",
+                status = DownloadActivityStatus.FINISHED,
+                timestampMillis = idx * 1000L
+            )
+        }
+        val preview = getSearchHomeHistoryPreview(allDownloads)
+        assertEquals(MAX_SEARCH_HOME_HISTORY_PREVIEW, preview.size)
+        assertEquals(listOf("dl-20", "dl-19", "dl-18", "dl-17", "dl-16"), preview.map { it.id })
+    }
+
+    @Test
+    fun queueFormatAndKindResolution_correctlyClassifiesMediaKindsAndFileTypes() {
+        val videoItem = DownloadActivityItem(
+            id = "v1",
+            title = "Trailer.mp4",
+            mediaUrl = "https://cdn.example.com/trailer.mp4",
+            isVideo = true,
+            format = "MP4"
+        )
+        assertEquals("MP4", resolveQueueItemFormat(videoItem))
+        assertEquals(QueueMediaKindFilter.VIDEO, resolveQueueItemKind(videoItem))
+
+        val audioItem = DownloadActivityItem(
+            id = "a1",
+            title = "Podcast Episode",
+            mediaUrl = "https://cdn.example.com/ep1.m4a",
+            isAudio = true,
+            format = "M4A"
+        )
+        assertEquals("M4A", resolveQueueItemFormat(audioItem))
+        assertEquals(QueueMediaKindFilter.AUDIO, resolveQueueItemKind(audioItem))
+
+        val imageItem = DownloadActivityItem(
+            id = "i1",
+            title = "Wallpaper",
+            mediaUrl = "https://cdn.example.com/wall.webp",
+            isVideo = false,
+            isAudio = false,
+            format = "WEBP"
+        )
+        assertEquals("WEBP", resolveQueueItemFormat(imageItem))
+        assertEquals(QueueMediaKindFilter.IMAGE, resolveQueueItemKind(imageItem))
+
+        val streamItem = DownloadActivityItem(
+            id = "s1",
+            title = "Live Stream",
+            mediaUrl = "https://cdn.example.com/master.m3u8",
+            isVideo = true,
+            isStream = true,
+            format = "HLS"
+        )
+        assertEquals("HLS", resolveQueueItemFormat(streamItem))
+        assertEquals(QueueMediaKindFilter.STREAM, resolveQueueItemKind(streamItem))
+    }
+
+    @Test
+    fun matchesQueueSearch_filtersByTitleDomainFormatAndAuthor() {
+        val item = DownloadActivityItem(
+            id = "q1",
+            title = "Synthwave Night Drive",
+            mediaUrl = "https://media.example.org/synthwave.mp3",
+            isAudio = true,
+            format = "MP3",
+            sourceDomain = "soundcloud.com",
+            status = DownloadActivityStatus.FINISHED
+        )
+        val linkedYt = YtdlnisDownloadItem(
+            url = item.mediaUrl,
+            title = item.title,
+            author = "RetroWaveOfficial",
+            type = YtdlnisDownloadType.AUDIO,
+            container = "mp3"
+        )
+
+        assertTrue(matchesQueueActivitySearch(item, linkedYt, "synthwave"))
+        assertTrue(matchesQueueActivitySearch(item, linkedYt, "soundcloud"))
+        assertTrue(matchesQueueActivitySearch(item, linkedYt, "mp3"))
+        assertTrue(matchesQueueActivitySearch(item, linkedYt, "retrowave"))
+        assertFalse(matchesQueueActivitySearch(item, linkedYt, "unrelated_query_xyz"))
     }
 }

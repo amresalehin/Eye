@@ -153,9 +153,10 @@ class ExtractionCoordinator(private val context: Context) {
                 }
 
                 // Step 2: Inconclusive / Not direct media -> Concurrent Multi-Engine Discovery
-                updateStatus("Initiating concurrent discovery (yt-dlp, gallery-dl, Browser Session)...", ExtractionPhase.YT_DLP)
+                updateStatus("Initiating concurrent discovery (yt-dlp, gallery-dl, Static Scraper, Browser)...", ExtractionPhase.YT_DLP)
 
                 val supportInfo = withContext(Dispatchers.IO) {
+                    GalleryDlEngine.init(context)
                     GalleryDlEngine.checkSupport(requestContext.url)
                 }
 
@@ -205,6 +206,35 @@ class ExtractionCoordinator(private val context: Context) {
                 val recursiveCrawlEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isRecursiveCrawlEnabledSync(context)
                 val recursiveCrawlConfig = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getRecursiveCrawlConfigSync(context)
                 var captchaChallengeUrl: String? = null
+
+                // Fast-path Pure-Kotlin OkHttp Static HTML/JSON/OpenGraph/srcset scraper (~200ms)
+                val staticScraperJob = launch(Dispatchers.IO) {
+                    try {
+                        val staticRes = StaticMediaScraper().scrape(requestContext.url)
+                        if (staticRes.items.isNotEmpty()) {
+                            // For VIDEO_OR_STREAM targets, only merge non-poster video/audio/stream items from static HTML
+                            // so static og:image posters don't clutter a single-video target.
+                            val filteredStatic = if (expectation == TargetMediaExpectation.VIDEO_OR_STREAM) {
+                                staticRes.items.filter { it.isVideo || it.isAudio || it.isStream }
+                            } else {
+                                staticRes.items
+                            }
+                            if (filteredStatic.isNotEmpty()) {
+                                updateItems(
+                                    filteredStatic,
+                                    title = staticRes.pageTitle,
+                                    msg = "Discovered ${filteredStatic.size} item(s) via fast HTML scraper"
+                                )
+                            } else if (staticRes.pageTitle.isNotBlank()) {
+                                updateItems(emptyList(), title = staticRes.pageTitle)
+                            }
+                        } else if (!staticRes.errorMessage.isNullOrBlank() && lastDiagnosticError == null) {
+                            lastDiagnosticError = staticRes.errorMessage
+                        }
+                    } catch (e: Exception) {
+                        Log.w("ExtractionCoordinator", "Concurrent StaticMediaScraper error", e)
+                    }
+                }
 
                 val redditDlJob = if (isRedditTarget) {
                     launch(Dispatchers.IO) {
@@ -420,25 +450,38 @@ class ExtractionCoordinator(private val context: Context) {
                     }
                 }
 
-                val browserJob = launch(Dispatchers.Main) {
+                val browserJob = launch(Dispatchers.IO) {
                     try {
-                        val browserRes = BrowserSession.extractHeadless(
-                            context = context,
-                            targetUrl = requestContext.url,
-                            onStatusUpdate = { s -> launch { updateStatus(s, ExtractionPhase.BROWSER_INTERCEPTING) } },
-                            onMediaDiscovered = { item -> launch { updateItems(listOf(item)) } }
-                        )
+                        // Brief 350ms head-start for fast OkHttp/Python extractors so we don't spin up a heavy
+                        // main-thread WebView if fast extractors already satisfy the media expectation.
+                        kotlinx.coroutines.delay(350L)
+                        val alreadySufficient = itemsMutex.withLock {
+                            isExtractionSufficient(expectation, itemsMap.values)
+                        }
+                        if (alreadySufficient) return@launch
+
+                        val browserRes = withContext(Dispatchers.Main) {
+                            BrowserSession.extractHeadless(
+                                context = context,
+                                targetUrl = requestContext.url,
+                                onStatusUpdate = { s -> launch { updateStatus(s, ExtractionPhase.BROWSER_INTERCEPTING) } },
+                                onMediaDiscovered = { item -> launch { updateItems(listOf(item)) } }
+                            )
+                        }
                         if (browserRes.items.isNotEmpty()) {
                             updateItems(browserRes.items, title = browserRes.pageTitle)
                         } else if (lastDiagnosticError == null) {
                             lastDiagnosticError = browserRes.errorMessage
                         }
+                    } catch (_: CancellationException) {
+                        // Fast extractors succeeded and cancelled headless browser early
                     } catch (e: Exception) {
                         Log.w("ExtractionCoordinator", "Concurrent BrowserSession error", e)
                     }
                 }
 
-                // Await all concurrent discovery channels
+                // Await all fast HTTP and Python discovery channels first
+                staticScraperJob.join()
                 redditDlJob?.join()
                 instaloaderJob?.join()
                 spotifyJob?.join()
@@ -451,6 +494,19 @@ class ExtractionCoordinator(private val context: Context) {
                 recursiveCrawlJob?.join()
                 ytdlpJob.join()
                 galleryDlJob.join()
+
+                // If fast HTTP/Python extractors already satisfied the media expectation,
+                // cancel the slow headless WebView immediately instead of waiting 5-16 seconds!
+                val fastExtractorsSufficient = itemsMutex.withLock {
+                    isExtractionSufficient(expectation, itemsMap.values)
+                }
+                if (fastExtractorsSufficient) {
+                    browserJob.cancel()
+                    finishSuccess(itemsMap.size)
+                    return@launch
+                }
+
+                // Otherwise wait for headless Chromium browser fallback to finish intercepting dynamic DOM/network media
                 browserJob.join()
 
                 // Check bot challenges or login requirement if candidates are still empty

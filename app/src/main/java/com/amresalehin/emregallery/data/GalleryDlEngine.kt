@@ -255,6 +255,10 @@ object GalleryDlEngine {
             return GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
         }
 
+        if (!isInitialized) {
+            appContext?.let { init(it) }
+        }
+
         if (!isAvailable()) {
             val lower = url.lowercase()
             for (site in defaultPopularSites()) {
@@ -297,6 +301,10 @@ object GalleryDlEngine {
     fun checkGalleryDlSupport(url: String): GalleryDlSupportInfo {
         if (url.isBlank()) {
             return GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
+        }
+
+        if (!isInitialized) {
+            appContext?.let { init(it) }
         }
 
         if (!isAvailable()) {
@@ -412,9 +420,13 @@ object GalleryDlEngine {
         url: String,
         options: GalleryDlOptions
     ): GalleryDlExtractResult = withContext(Dispatchers.IO) {
+        if (!isInitialized) {
+            appContext?.let { init(it) }
+        }
         if (!isAvailable()) {
             var waitCount = 0
-            while (!isAvailable() && waitCount < 10) {
+            while (!isAvailable() && waitCount < 15) {
+                appContext?.let { init(it) }
                 kotlinx.coroutines.delay(100L)
                 waitCount++
             }

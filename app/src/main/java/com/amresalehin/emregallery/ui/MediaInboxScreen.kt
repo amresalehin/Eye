@@ -80,9 +80,11 @@ fun MediaInboxScreen(
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
-        DownloadActivityManager.initialize(context)
-        DownloadActivityManager.syncWithStorageDir(context)
-        DownloadActivityManager.syncWithInboxRepository()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            DownloadActivityManager.initialize(context)
+            DownloadActivityManager.syncWithStorageDir(context)
+            DownloadActivityManager.syncWithInboxRepository()
+        }
     }
 
     var viewMode by remember(initialViewMode) {

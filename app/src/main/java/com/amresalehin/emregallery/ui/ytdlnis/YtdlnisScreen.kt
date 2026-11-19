@@ -234,10 +234,12 @@ fun YtdlnisScreen(
     val extractionCoordinator = remember { ExtractionCoordinator(context) }
 
     LaunchedEffect(Unit) {
-        DownloadActivityManager.initialize(context)
-        DownloadActivityManager.syncWithStorageDir(context)
-        DownloadActivityManager.syncWithInboxRepository()
-        GalleryDlEngine.init(context)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            DownloadActivityManager.initialize(context)
+            DownloadActivityManager.syncWithStorageDir(context)
+            DownloadActivityManager.syncWithInboxRepository()
+            GalleryDlEngine.init(context)
+        }
     }
 
     DisposableEffect(Unit) {
@@ -900,7 +902,10 @@ fun YtdlnisScreen(
                         }
                     }
 
-                    if (canvasMode == DownloaderCanvasMode.SEARCH && !fetchError.isNullOrBlank()) {
+                    val combinedSearchError = fetchError?.takeIf { it.isNotBlank() }
+                        ?: extractionState.errorMessage?.takeIf { it.isNotBlank() && !extractionState.isRunning && discoveredItems.isEmpty() }
+
+                    if (canvasMode == DownloaderCanvasMode.SEARCH && !combinedSearchError.isNullOrBlank()) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -908,27 +913,36 @@ fun YtdlnisScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = fetchError.orEmpty(),
+                                    text = combinedSearchError,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text(
-                                    text = "Scan Media →",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .padding(start = 8.dp)
-                                        .clickable { triggerMultiEngineGridScan(urlInput) }
-                                )
+                                if (urlInput.isNotBlank()) {
+                                    Text(
+                                        text = "Studio",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { triggerStudioFetch(urlInput) }
+                                    )
+                                    if (onOpenBrowser != null) {
+                                        Text(
+                                            text = "Browser →",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable { onOpenBrowser(urlInput) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

@@ -96,5 +96,39 @@ class TestYtdlnisEngine(unittest.TestCase):
         self.assertIn("engine_version", res_status["output"])
 
 
+
+    def test_tls_enabled_and_continuedl_resume(self):
+        opts = ytdlnis_engine.build_ytdlp_options(
+            {"type": "video", "retries": 5},
+            output_dir="/tmp/out"
+        )
+        self.assertNotIn("nocheckcertificate", opts)
+        self.assertTrue(opts.get("continuedl"))
+        self.assertLessEqual(opts.get("retries", 99), 2)
+
+    def test_cookiefile_normalizes_youtube_domains_and_preserves_netscape(self):
+        import os
+        import gallery_dl_runner
+        path = gallery_dl_runner._prepare_cookiefile("SID=abc; SAPISID=xyz", "https://youtu.be/dQw4w9WgXcQ")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertIn(".youtube.com\tTRUE\t/\tTRUE", content)
+            self.assertNotIn(".youtu.be", content)
+        finally:
+            if path and os.path.exists(path):
+                os.unlink(path)
+
+        netscape_in = "# Netscape HTTP Cookie File\n.google.com\tTRUE\t/\tTRUE\t2147483647\tSID\t123"
+        path2 = gallery_dl_runner._prepare_cookiefile(netscape_in, "https://www.youtube.com/watch?v=123")
+        try:
+            with open(path2, encoding="utf-8") as fh2:
+                content2 = fh2.read()
+            self.assertIn(".google.com\tTRUE\t/\tTRUE\t2147483647\tSID\t123", content2)
+        finally:
+            if path2 and os.path.exists(path2):
+                os.unlink(path2)
+
+
 if __name__ == "__main__":
     unittest.main()

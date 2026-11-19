@@ -34,7 +34,7 @@ object LinkMetadataFetcher {
     /**
      * Fetches metadata and all media items from a web URL asynchronously.
      */
-    suspend fun fetch(rawUrl: String): LinkMetadata = withContext(Dispatchers.IO) {
+    suspend fun fetch(rawUrl: String, includeHeavyExtraction: Boolean = false): LinkMetadata = withContext(Dispatchers.IO) {
         val trimmed = rawUrl.trim()
         if (trimmed.isBlank()) {
             return@withContext LinkMetadata(url = rawUrl)
@@ -55,8 +55,8 @@ object LinkMetadataFetcher {
             "https://www.google.com/s2/favicons?domain=$domain&sz=256"
         } else ""
 
-        // 1. Specialized Extractor Engine (yt-dlp primary, gallery-dl secondary)
-        if (GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(normalizedUrl).isSupported) {
+        // 1. Specialized Extractor Engine (opt-in only; keeps bookmark metadata fetch fast and avoids excess YouTube/site requests)
+        if (includeHeavyExtraction && GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(normalizedUrl).isSupported) {
             try {
                 val gdlRes = GalleryDlEngine.extractMedia(normalizedUrl)
                 if (gdlRes.success && gdlRes.items.isNotEmpty()) {
@@ -164,7 +164,7 @@ object LinkMetadataFetcher {
             }
 
             if (!response.isSuccessful || response.bodyString.isNullOrBlank()) {
-                if (GalleryDlEngine.isAvailable()) {
+                if (includeHeavyExtraction && GalleryDlEngine.isAvailable()) {
                     val gdlRes = runCatching { GalleryDlEngine.extractMedia(finalUrl) }.getOrNull()
                     if (gdlRes != null && gdlRes.success && gdlRes.items.isNotEmpty()) {
                         val mediaItems = gdlRes.items.map { item ->
@@ -269,6 +269,18 @@ object LinkMetadataFetcher {
      */
     private fun parseJsonLd(doc: Document): JsonLdMetadata {
         val scripts = doc.select("script[type='application/ld+json']")
+        var bestTitle = ""
+        var bestDesc = ""
+        var bestImage = ""
+        var bestSite = ""
+
+        fun merge(parsed: JsonLdMetadata) {
+            if (bestTitle.isBlank() && parsed.title.isNotBlank()) bestTitle = parsed.title
+            if (bestDesc.isBlank() && parsed.description.isNotBlank()) bestDesc = parsed.description
+            if (bestImage.isBlank() && parsed.imageUrl.isNotBlank()) bestImage = parsed.imageUrl
+            if (bestSite.isBlank() && parsed.siteName.isNotBlank()) bestSite = parsed.siteName
+        }
+
         for (script in scripts) {
             val raw = script.data().trim().ifBlank { script.html().trim() }
             if (raw.isBlank()) continue
@@ -277,33 +289,36 @@ object LinkMetadataFetcher {
                 if (raw.startsWith("[")) {
                     val arr = JSONArray(raw)
                     for (i in 0 until arr.length()) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        val parsed = extractFromJsonLdObject(obj)
-                        if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                        arr.optJSONObject(i)?.let { merge(extractFromJsonLdObject(it)) }
                     }
                 } else if (raw.startsWith("{")) {
                     val obj = JSONObject(raw)
                     val graph = obj.optJSONArray("@graph")
                     if (graph != null) {
                         for (i in 0 until graph.length()) {
-                            val item = graph.optJSONObject(i) ?: continue
-                            val parsed = extractFromJsonLdObject(item)
-                            if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                            graph.optJSONObject(i)?.let { merge(extractFromJsonLdObject(it)) }
                         }
                     } else {
-                        val parsed = extractFromJsonLdObject(obj)
-                        if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                        merge(extractFromJsonLdObject(obj))
                     }
                 }
             } catch (_: Exception) {}
         }
-        return JsonLdMetadata()
+        return JsonLdMetadata(
+            title = bestTitle,
+            description = bestDesc,
+            imageUrl = bestImage,
+            siteName = bestSite
+        )
     }
 
     private fun extractFromJsonLdObject(obj: JSONObject): JsonLdMetadata {
         val type = obj.optString("@type", "")
-        val isRelevant = type in listOf("WebPage", "WebSite", "Article", "NewsArticle", "BlogPosting", "Organization", "SoftwareApplication", "Product", "") ||
-                obj.has("headline") || obj.has("name")
+        val isRelevant = type in listOf(
+            "WebPage", "WebSite", "Article", "NewsArticle", "BlogPosting",
+            "Organization", "SoftwareApplication", "Product",
+            "VideoObject", "ImageObject", "MediaObject", "AudioObject", "SocialMediaPosting", ""
+        ) || obj.has("headline") || obj.has("name") || obj.has("contentUrl")
 
         if (!isRelevant) return JsonLdMetadata()
 
@@ -311,23 +326,30 @@ object LinkMetadataFetcher {
         val description = obj.optString("description", "")
         var image = ""
 
-        val rawImg = obj.opt("image")
-        if (rawImg is String && rawImg.isNotBlank()) {
-            image = rawImg
-        } else if (rawImg is JSONObject) {
-            image = rawImg.optString("url", "")
-        } else if (rawImg is JSONArray && rawImg.length() > 0) {
-            val first = rawImg.opt(0)
-            if (first is String) image = first
-            else if (first is JSONObject) image = first.optString("url", "")
+        fun extractUrlFromAny(rawVal: Any?): String {
+            return when (rawVal) {
+                is String -> rawVal.trim()
+                is JSONObject -> rawVal.optString("url", "").ifBlank { rawVal.optString("contentUrl", "") }.trim()
+                is JSONArray -> {
+                    for (i in 0 until rawVal.length()) {
+                        val candidate = extractUrlFromAny(rawVal.opt(i))
+                        if (candidate.isNotBlank()) return candidate
+                    }
+                    ""
+                }
+                else -> ""
+            }
         }
 
-        if (image.isBlank()) {
-            image = obj.optString("thumbnailUrl", "").ifBlank { obj.optString("logo", "") }
-        }
+        image = extractUrlFromAny(obj.opt("image"))
+        if (image.isBlank()) image = extractUrlFromAny(obj.opt("thumbnailUrl"))
+        if (image.isBlank() && type == "ImageObject") image = extractUrlFromAny(obj.opt("contentUrl"))
+        if (image.isBlank()) image = extractUrlFromAny(obj.opt("logo"))
 
         val publisher = obj.optJSONObject("publisher")
-        val siteName = publisher?.optString("name", "") ?: ""
+        val author = obj.optJSONObject("author")
+        val siteName = publisher?.optString("name", "").orEmpty()
+            .ifBlank { author?.optString("name", "").orEmpty() }
 
         return JsonLdMetadata(
             title = title,

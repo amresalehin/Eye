@@ -4,6 +4,9 @@ import android.content.Context
 import android.os.Environment
 import android.util.Log
 import com.amresalehin.emregallery.data.GalleryDlEngine
+import com.amresalehin.emregallery.data.HostRateLimiter
+import com.amresalehin.emregallery.data.MediaDownloadWorker
+import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
 import com.chaquo.python.Python
@@ -33,9 +36,16 @@ object YtdlnisEngine {
         context: Context,
         urlOrQuery: String,
         allowPlaylist: Boolean = true,
-        flatPlaylist: Boolean = false
+        flatPlaylist: Boolean = true
     ): YtdlnisFetchResult = withContext(Dispatchers.IO) {
         GalleryDlEngine.init(context)
+        if (urlOrQuery.startsWith("http", ignoreCase = true) && !HostRateLimiter.acquire(urlOrQuery)) {
+            val waitSec = (HostRateLimiter.remainingCooldownMs(urlOrQuery) / 1000L).coerceAtLeast(1L)
+            return@withContext YtdlnisFetchResult(
+                success = false,
+                errorMessage = "Rate-limit cooldown active for host (${waitSec}s remaining)"
+            )
+        }
         if (!GalleryDlEngine.isPythonStarted()) {
             return@withContext YtdlnisFetchResult(
                 success = false,
@@ -56,7 +66,15 @@ object YtdlnisEngine {
             val py = Python.getInstance()
             val mod = py.getModule("ytdlnis_engine")
             val raw = mod.callAttr("fetch_video_info", urlOrQuery, options.toString()).toString()
-            parseFetchResultJson(raw)
+            val parsed = parseFetchResultJson(raw)
+            if (urlOrQuery.startsWith("http", ignoreCase = true)) {
+                if (parsed.success) {
+                    HostRateLimiter.recordSuccess(urlOrQuery)
+                } else if (HostRateLimiter.classifyError(errorMessage = parsed.errorMessage) == HostRateLimiter.ErrorCategory.RATE_LIMITED) {
+                    HostRateLimiter.recordRateLimitOrBotChallenge(urlOrQuery)
+                }
+            }
+            parsed
         } catch (t: Throwable) {
             Log.e(TAG, "fetchInfo failed", t)
             YtdlnisFetchResult(success = false, errorMessage = t.message ?: "Failed to fetch media info")
@@ -205,8 +223,8 @@ object YtdlnisEngine {
         return (if (cleaned.isBlank()) "untitled" else cleaned).take(maxLen)
     }
 
-    fun resolveDestinationDir(item: YtdlnisDownloadItem): File {
-        val base = File(
+    fun resolveDestinationDir(item: YtdlnisDownloadItem, context: Context? = null): File {
+        val publicBase = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Emre Gallery/YTDLnis"
         )
@@ -216,9 +234,21 @@ object YtdlnisEngine {
             YtdlnisSubfolderMode.BY_PLAYLIST -> sanitizeFileName(item.playlistTitle.ifBlank { "Single" }, 48)
             YtdlnisSubfolderMode.BY_TYPE -> item.type.label
         }
-        val target = if (sub != null) File(base, sub) else base
-        if (!target.exists()) target.mkdirs()
-        return target
+        val publicTarget = if (sub != null) File(publicBase, sub) else publicBase
+        val publicWritable = runCatching {
+            if (!publicTarget.exists()) publicTarget.mkdirs()
+            publicTarget.exists() && publicTarget.isDirectory && publicTarget.canWrite()
+        }.getOrDefault(false)
+        if (publicWritable || context == null) {
+            return publicTarget
+        }
+        val appExternalBase = File(
+            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
+            "Emre Gallery/YTDLnis"
+        )
+        val fallbackTarget = if (sub != null) File(appExternalBase, sub) else appExternalBase
+        if (!fallbackTarget.exists()) fallbackTarget.mkdirs()
+        return fallbackTarget
     }
 
     suspend fun downloadAndProcess(
@@ -231,10 +261,26 @@ object YtdlnisEngine {
             return@withContext YtdlnisExecutionOutput(false, errorMessage = "Python runtime unavailable")
         }
 
+        if (!HostRateLimiter.acquire(item.url)) {
+            val waitSec = (HostRateLimiter.remainingCooldownMs(item.url) / 1000L).coerceAtLeast(1L)
+            return@withContext YtdlnisExecutionOutput(
+                success = false,
+                errorMessage = "Host rate-limit cooldown active (${waitSec}s remaining)"
+            )
+        }
         val repo = YtdlnisRepository.getInstance(context)
+        // Purge stale abandoned temp directories (>24h) while preserving active .part files for resume
+        runCatching {
+            val cutoff = System.currentTimeMillis() - 86_400_000L
+            repo.getTempWorkDir().listFiles()?.forEach { f ->
+                if (f.isDirectory && f.name != "job_${item.id}" && f.lastModified() < cutoff) {
+                    f.deleteRecursively()
+                }
+            }
+        }
         val workDir = File(repo.getTempWorkDir(), "job_${item.id}")
-        if (workDir.exists()) workDir.deleteRecursively()
-        workDir.mkdirs()
+        if (!workDir.exists()) workDir.mkdirs()
+        var succeeded = false
 
         val logBuilder = StringBuilder()
         onStatusUpdate?.invoke(0.1f, "Starting yt-dlp download...")
@@ -290,7 +336,7 @@ object YtdlnisEngine {
                 )
             }
 
-            val destDir = resolveDestinationDir(item)
+            val destDir = resolveDestinationDir(item, context)
             val subtitleFiles = buildList {
                 resObj.optJSONArray("subtitle_files")?.let { arr ->
                     for (i in 0 until arr.length()) {
@@ -379,43 +425,106 @@ object YtdlnisEngine {
                     item = item,
                     subtitleFile = subtitleFiles.firstOrNull()
                 )
+                var savedDest: File? = null
                 if (postCmd != null && FfmpegKitEngine.getStatus().isAvailable) {
                     val res = FfmpegKitEngine.executeCommand(postCmd)
                     logBuilder.appendLine("[FFmpeg PostProcess] rc=${res.returnCode}")
                     if (res.isSuccess && finalDest.exists() && finalDest.length() > 0L) {
-                        finalOutputs.add(finalDest)
+                        savedDest = finalDest
                     } else {
-                        currentFile.copyTo(finalDest, overwrite = true)
-                        finalOutputs.add(finalDest)
+                        runCatching { if (finalDest.exists()) finalDest.delete() }
+                        val requiresTransform = item.cropConfig.toFfmpegFilter() != null ||
+                            item.burnSubtitles || item.compatibleMode ||
+                            (item.type == YtdlnisDownloadType.AUDIO && !currentFile.extension.equals(targetExt, ignoreCase = true))
+                        if (requiresTransform) {
+                            return@withContext YtdlnisExecutionOutput(
+                                success = false,
+                                logs = logBuilder.toString(),
+                                errorMessage = "FFmpeg post-processing failed (exit code ${res.returnCode})"
+                            )
+                        }
+                        val actualExt = currentFile.extension.ifBlank { targetExt }
+                        val safeDest = uniqueDestFile(destDir, "${finalDest.nameWithoutExtension}.$actualExt")
+                        currentFile.copyTo(safeDest, overwrite = true)
+                        logBuilder.appendLine("[FFmpeg Fallback] Preserved original .$actualExt container at ${safeDest.name}")
+                        savedDest = safeDest
                     }
                 } else {
-                    currentFile.copyTo(finalDest, overwrite = true)
-                    finalOutputs.add(finalDest)
+                    val actualExt = currentFile.extension.ifBlank { targetExt }
+                    val safeDest = if (actualExt.equals(targetExt, ignoreCase = true)) {
+                        finalDest
+                    } else {
+                        uniqueDestFile(destDir, "${finalDest.nameWithoutExtension}.$actualExt")
+                    }
+                    currentFile.copyTo(safeDest, overwrite = true)
+                    savedDest = safeDest
                 }
 
-                // Save companion .lrc lyrics file if requested
-                if (item.saveLrcFile && item.lyricsText.isNotBlank()) {
-                    val lrcFile = File(destDir, "${finalDest.nameWithoutExtension}.lrc")
-                    lrcFile.writeText(item.lyricsText)
-                    logBuilder.appendLine("[Lyrics] Saved ${lrcFile.name}")
+                // Validate playable audio/video tracks via FFprobe before marking success
+                if (savedDest != null && savedDest.exists() && savedDest.length() > 0L && FfmpegKitEngine.getStatus().isAvailable) {
+                    val mediaInfo = FfmpegKitEngine.probeMedia(savedDest.absolutePath, context = context)
+                    val isVideoOut = item.type == YtdlnisDownloadType.VIDEO
+                    val isAudioOut = item.type == YtdlnisDownloadType.AUDIO
+                    val validationErr = MediaDownloadWorker.validateMediaStreams(
+                        isVideo = isVideoOut,
+                        isAudio = isAudioOut,
+                        isStream = false,
+                        requireAudioWithVideo = isVideoOut && item.selectedAudioFormatIds.isNotEmpty(),
+                        mediaInfo = mediaInfo
+                    )
+                    if (validationErr != null) {
+                        logBuilder.appendLine("[Validation Failed] $validationErr")
+                        runCatching { savedDest.delete() }
+                        return@withContext YtdlnisExecutionOutput(
+                            success = false,
+                            logs = logBuilder.toString(),
+                            errorMessage = validationErr
+                        )
+                    }
+                }
+
+                if (savedDest != null) {
+                    val mime = if (item.type == YtdlnisDownloadType.AUDIO) "audio/*" else "video/*"
+                    OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(
+                        context = context,
+                        file = savedDest,
+                        mimeType = mime,
+                        domain = "YTDLnis"
+                    )
+                    finalOutputs.add(savedDest)
+
+                    if (item.saveLrcFile && item.lyricsText.isNotBlank()) {
+                        val lrcFile = File(destDir, "${savedDest.nameWithoutExtension}.lrc")
+                        lrcFile.writeText(item.lyricsText)
+                        logBuilder.appendLine("[Lyrics] Saved ${lrcFile.name}")
+                    }
                 }
             }
 
+            succeeded = finalOutputs.isNotEmpty()
+            if (succeeded) {
+                HostRateLimiter.recordSuccess(item.url)
+            }
             onStatusUpdate?.invoke(1.0f, "Completed")
             YtdlnisExecutionOutput(
-                success = finalOutputs.isNotEmpty(),
+                success = succeeded,
                 outputFiles = finalOutputs,
                 logs = logBuilder.toString()
             )
         } catch (t: Throwable) {
             Log.e(TAG, "downloadAndProcess failed", t)
+            if (HostRateLimiter.classifyError(errorMessage = t.message) == HostRateLimiter.ErrorCategory.RATE_LIMITED) {
+                HostRateLimiter.recordRateLimitOrBotChallenge(item.url)
+            }
             YtdlnisExecutionOutput(
                 success = false,
                 logs = logBuilder.toString(),
                 errorMessage = t.message ?: "Download failed"
             )
         } finally {
-            workDir.deleteRecursively()
+            if (succeeded) {
+                workDir.deleteRecursively()
+            }
         }
     }
 

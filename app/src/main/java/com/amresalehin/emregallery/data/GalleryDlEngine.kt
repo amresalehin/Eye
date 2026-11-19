@@ -82,9 +82,12 @@ object GalleryDlEngine {
     private const val TAG = "GalleryDlEngine"
     @Volatile
     private var isInitialized = false
+    @Volatile
+    private var appContext: Context? = null
     private val initLock = Any()
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (isInitialized) return
         synchronized(initLock) {
             if (isInitialized) return
@@ -426,6 +429,9 @@ object GalleryDlEngine {
 
             val effectiveUa = options.userAgent ?: BotDetectionMitigator.STEALTH_USER_AGENT
             val effectiveCookies = options.cookies
+                ?: appContext?.let { ctx ->
+                    runCatching { com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(ctx).findCookiesForUrl(url.trim()) }.getOrNull()
+                }
                 ?: runCatching { android.webkit.CookieManager.getInstance().getCookie(url.trim()) }.getOrNull()
 
             val optsJson = JSONObject().apply {

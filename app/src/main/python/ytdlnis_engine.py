@@ -278,7 +278,7 @@ def fetch_video_info(url_or_query, options_json="{}"):
             "no_warnings": True,
             "skip_download": True,
             "ignoreerrors": True,
-            "extract_flat": "in_playlist" if opts.get("flat_playlist", False) else False,
+            "extract_flat": "in_playlist" if opts.get("flat_playlist", True) else False,
             "socket_timeout": int(opts.get("timeout", 30)),
             "retries": int(opts.get("retries", 3)),
         }
@@ -356,9 +356,9 @@ def build_ytdlp_options(config_dict, output_dir):
         "outtmpl": outtmpl,
         "noplaylist": not bool(config_dict.get("allow_playlist", False)),
         "socket_timeout": int(config_dict.get("timeout", 35)),
-        "retries": int(config_dict.get("retries", 3)),
-        "fragment_retries": int(config_dict.get("retries", 3)),
-        "nocheckcertificate": True,
+        "retries": min(int(config_dict.get("retries", 3)), 2),
+        "fragment_retries": min(int(config_dict.get("retries", 3)), 3),
+        "continuedl": True,
         "geo_bypass": True,
     }
 

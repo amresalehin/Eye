@@ -334,7 +334,10 @@ class BrowserMediaExtractor(private val context: Context) {
                         handler: SslErrorHandler?,
                         error: SslError?
                     ) {
-                        handler?.proceed()
+                        Log.w("BrowserMediaExtractor", "Blocked untrusted SSL/TLS certificate (primaryError=${error?.primaryError})")
+                        detectedProtectionReason = "Untrusted SSL/TLS certificate blocked"
+                        onStatusUpdate("Blocked untrusted SSL/TLS certificate")
+                        handler?.cancel()
                     }
 
                     override fun onRenderProcessGone(

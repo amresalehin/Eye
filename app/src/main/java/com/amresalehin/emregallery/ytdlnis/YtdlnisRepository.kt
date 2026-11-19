@@ -243,7 +243,7 @@ class YtdlnisRepository private constructor(private val appContext: Context) {
 
     // Cookies management (manual Netscape format + import from in-app browser WebView)
     fun upsertCookie(domain: String, cookiesNetscape: String) {
-        val cleanDomain = domain.trim().lowercase().removePrefix("www.")
+        val cleanDomain = com.amresalehin.emregallery.data.HostRateLimiter.canonicalHost(domain)
         if (cleanDomain.isBlank() || cookiesNetscape.isBlank()) return
         val current = _cookies.value.toMutableList()
         val idx = current.indexOfFirst { it.domain.equals(cleanDomain, ignoreCase = true) }
@@ -269,31 +269,71 @@ class YtdlnisRepository private constructor(private val appContext: Context) {
      * them into Netscape cookies.txt format for yt-dlp.
      */
     fun importCookiesFromWebView(url: String): Boolean {
-        val host = extractHost(url) ?: return false
-        val rawCookieHeader = runCatching {
-            CookieManager.getInstance().getCookie(url)
-        }.getOrNull().orEmpty()
-        if (rawCookieHeader.isBlank()) return false
+        val rawHost = extractHost(url) ?: return false
+        val canonical = com.amresalehin.emregallery.data.HostRateLimiter.canonicalHost(rawHost)
+        val cm = runCatching { CookieManager.getInstance() }.getOrNull() ?: return false
 
+        val domainUrls = if (canonical == "youtube.com") {
+            listOf(
+                url to ".youtube.com",
+                "https://www.youtube.com" to ".youtube.com",
+                "https://youtube.com" to ".youtube.com",
+                "https://accounts.google.com" to ".google.com",
+                "https://google.com" to ".google.com"
+            )
+        } else {
+            listOf(url to ".$canonical", "https://$canonical" to ".$canonical")
+        }
+
+        val seenKeys = LinkedHashSet<String>()
         val expiry = (System.currentTimeMillis() / 1000L) + 86400L * 30L
-        val netscape = buildString {
-            appendLine("# Netscape HTTP Cookie File")
-            rawCookieHeader.split(";").forEach { pair ->
+        val lines = mutableListOf<String>()
+        for ((targetUrl, netscapeDomain) in domainUrls) {
+            val header = runCatching { cm.getCookie(targetUrl) }.getOrNull().orEmpty()
+            if (header.isBlank()) continue
+            header.split(";").forEach { pair ->
                 val parts = pair.trim().split("=", limit = 2)
                 if (parts.size == 2 && parts[0].isNotBlank()) {
-                    appendLine(".$host\tTRUE\t/\tTRUE\t$expiry\t${parts[0].trim()}\t${parts[1].trim()}")
+                    val name = parts[0].trim()
+                    val value = parts[1].trim()
+                    if (seenKeys.add("$netscapeDomain|$name")) {
+                        lines.add("$netscapeDomain\tTRUE\t/\tTRUE\t$expiry\t$name\t$value")
+                    }
                 }
             }
         }
-        upsertCookie(host, netscape)
+        if (lines.isEmpty()) return false
+
+        val netscape = buildString {
+            appendLine("# Netscape HTTP Cookie File")
+            lines.forEach { appendLine(it) }
+        }
+        upsertCookie(canonical, netscape)
         return true
     }
 
     fun findCookiesForUrl(url: String): String? {
         val host = extractHost(url) ?: return null
-        return _cookies.value.firstOrNull { entry ->
-            host == entry.domain || host.endsWith(".${entry.domain}")
+        val canonical = com.amresalehin.emregallery.data.HostRateLimiter.canonicalHost(host)
+        val stored = _cookies.value.firstOrNull { entry ->
+            val entryCanonical = com.amresalehin.emregallery.data.HostRateLimiter.canonicalHost(entry.domain)
+            canonical == entryCanonical || host == entry.domain || host.endsWith(".${entry.domain}")
         }?.cookiesNetscape
+        if (!stored.isNullOrBlank()) return stored
+
+        // Cross-stack fallback: reuse cookies captured in the general downloader's shared OkHttp cookie jar
+        val jarHeader = com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar.getCookieString(url)
+        if (jarHeader.isBlank()) return null
+        val expiry = (System.currentTimeMillis() / 1000L) + 86400L * 7L
+        return buildString {
+            appendLine("# Netscape HTTP Cookie File")
+            jarHeader.split(";").forEach { pair ->
+                val parts = pair.trim().split("=", limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank()) {
+                    appendLine(".$canonical\tTRUE\t/\tTRUE\t$expiry\t${parts[0].trim()}\t${parts[1].trim()}")
+                }
+            }
+        }
     }
 
     // Full Backup & Restore (YTDLnis feature)

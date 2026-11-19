@@ -324,20 +324,34 @@ def _prepare_cookiefile(cookies_str, url=None):
         return cookies_trimmed
 
     try:
+        import tempfile
+        # Preserve already-formatted Netscape cookies (e.g. from unified YtdlnisRepository) verbatim
+        if cookies_trimmed.startswith("# Netscape HTTP Cookie File") or "\t" in cookies_trimmed:
+            tf = tempfile.NamedTemporaryFile(mode="w", suffix="_cookies.txt", delete=False, encoding="utf-8")
+            if not cookies_trimmed.startswith("# Netscape HTTP Cookie File"):
+                tf.write("# Netscape HTTP Cookie File\n")
+            tf.write(cookies_trimmed + "\n")
+            tf.close()
+            return tf.name
+
         base_domain = ""
         if url:
             from urllib.parse import urlparse
             parsed = urlparse(url)
-            base_domain = parsed.hostname or ""
+            host = (parsed.hostname or "").lower().removeprefix("www.")
+            if host in ("youtu.be", "youtube.com") or host.endswith(".youtube.com"):
+                base_domain = ".youtube.com"
+            elif host in ("twitter.com", "x.com") or host.endswith(".twitter.com") or host.endswith(".x.com"):
+                base_domain = ".x.com"
+            elif host in ("redd.it", "reddit.com") or host.endswith(".reddit.com"):
+                base_domain = ".reddit.com"
+            elif host:
+                base_domain = "." + host if not host.startswith(".") else host
         if not base_domain:
             base_domain = ".youtube.com"
-        if not base_domain.startswith(".") and "." in base_domain:
-            base_domain = "." + base_domain
 
-        import tempfile
-        tf = tempfile.NamedTemporaryFile(mode="w", suffix="_cookies.txt", delete=False)
+        tf = tempfile.NamedTemporaryFile(mode="w", suffix="_cookies.txt", delete=False, encoding="utf-8")
         tf.write("# Netscape HTTP Cookie File\n")
-        
         parts = cookies_trimmed.split(";")
         for part in parts:
             part = part.strip()
@@ -810,6 +824,7 @@ def extract_yt_dlp(url, options_json="{}"):
             "no_warnings": True,
             "skip_download": True,
             "noplaylist": not download_playlist,
+            "extract_flat": "in_playlist" if download_playlist else False,
             "writesubtitles": download_subtitles,
             "writeautomaticsub": download_subtitles and include_auto_subtitles,
             "subtitleslangs": subtitle_langs if download_subtitles else [],
@@ -818,15 +833,15 @@ def extract_yt_dlp(url, options_json="{}"):
             "format": fmt_selector,
             "socket_timeout": timeout,
             "geo_bypass": True,
-            "nocheckcertificate": True,
-            "retries": retries,
-            "fragment_retries": retries,
+            "retries": min(retries, 2),
+            "fragment_retries": min(retries, 3),
             "http_headers": http_headers,
             "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios", "mweb", "web"],
-                    "player_skip": ["webpage", "configs"]
-                },
+                "youtube": (
+                    {"player_client": ["android", "ios", "mweb", "web"]}
+                    if cookie_file
+                    else {"player_client": ["android", "ios", "mweb", "web"], "player_skip": ["webpage", "configs"]}
+                ),
                 "instagram": {
                     "api": ["graphql", "web"]
                 },
@@ -1139,7 +1154,6 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
             "format": format_selector,
             "socket_timeout": int(timeout or 35),
             "geo_bypass": True,
-            "nocheckcertificate": True,
             "retries": int(retries or 3),
             "fragment_retries": int(retries or 3),
             "http_headers": http_headers,

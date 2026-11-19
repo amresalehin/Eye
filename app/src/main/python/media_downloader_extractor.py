@@ -295,7 +295,6 @@ def _search_youtube_audio_matches(query, max_results=3, proxy=None, timeout=25, 
         "extract_flat": False,
         "format": "bestaudio/best",
         "socket_timeout": timeout,
-        "nocheckcertificate": True,
         "geo_bypass": True,
         "retries": 2,
     }
@@ -777,7 +776,6 @@ def extract_x_space(url, options_json="{}"):
                 "no_warnings": True,
                 "skip_download": True,
                 "socket_timeout": timeout,
-                "nocheckcertificate": True,
             }
             if proxy:
                 ydl_opts["proxy"] = proxy

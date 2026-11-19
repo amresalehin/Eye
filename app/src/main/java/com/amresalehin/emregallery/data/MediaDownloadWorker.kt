@@ -186,8 +186,14 @@ class MediaDownloadWorker(
             } else {
                 resolveMediaMode(isVideo = isVideo, isAudio = isAudio, isStream = isStream)
             }
-            // Reddit/YouTube often expose separate audio and video representations (skip audio check if user chose Video Only).
-            val requireAudioTrack = isVideo && (isYouTubeSource || isRedditSource) && mediaMode != "video_only"
+            // Major video platforms often expose separate audio and video representations (skip audio check if user chose Video Only).
+            val lowerOrigin = sourceUrl.lowercase()
+            val isSplitAudioVideoPlatform = isYouTubeSource || isRedditSource ||
+                lowerOrigin.contains("tiktok.com") || lowerOrigin.contains("instagram.com") ||
+                lowerOrigin.contains("vimeo.com") || lowerOrigin.contains("twitter.com") ||
+                lowerOrigin.contains("x.com") || lowerOrigin.contains("dailymotion.com") ||
+                lowerOrigin.contains("bilibili.com")
+            val requireAudioTrack = isVideo && isSplitAudioVideoPlatform && mediaMode != "video_only"
 
             val effectiveDomain = sourceDomain.takeIf { it.isNotBlank() }
                 ?: OkHttpDownloader.extractDomain(sourceUrl.ifBlank { mediaUrl })

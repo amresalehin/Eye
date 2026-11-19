@@ -1,7 +1,9 @@
 package com.amresalehin.emregallery.data
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import android.os.Debug
 import android.util.Log
 import android.webkit.WebView
 import coil.Coil
@@ -46,11 +48,38 @@ object RamGovernor {
      * Enforces the 80% RAM ceiling by clearing Coil in-memory bitmap caches,
      * dropping temporary decoders, and clearing WebView RAM buffers.
      */
+    /**
+     * Checks whether combined memory pressure is high across JVM heap, native heap
+     * (WebView Chromium, FFmpegKit, ONNX, Tesseract, Chaquopy Python), and OS available RAM.
+     */
+    fun isSystemMemoryPressureHigh(context: Context? = null): Boolean {
+        if (isHeapLimitExceeded()) return true
+        val nativeAllocated = runCatching { Debug.getNativeHeapAllocatedSize() }.getOrDefault(0L)
+        if (context != null) {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            if (am != null) {
+                val memInfo = ActivityManager.MemoryInfo()
+                am.getMemoryInfo(memInfo)
+                if (memInfo.lowMemory) return true
+                if (memInfo.totalMem > 0L) {
+                    val usedFraction = 1.0 - (memInfo.availMem.toDouble() / memInfo.totalMem.toDouble())
+                    if (usedFraction >= MAX_RAM_FRACTION) return true
+                }
+                val memoryClassBytes = am.largeMemoryClass.toLong() * 1024L * 1024L
+                if (memoryClassBytes > 0L && nativeAllocated >= (memoryClassBytes * MAX_RAM_FRACTION).toLong()) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     fun enforceLimit(context: Context? = null, webView: WebView? = null) {
-        if (!isHeapLimitExceeded()) return
+        if (!isSystemMemoryPressureHigh(context)) return
 
         val fraction = getHeapUsageFraction()
-        Log.w(TAG, "Heap usage is ${(fraction * 100).toInt()}% (exceeds 80% RAM limit). Enforcing memory reclaim.")
+        val nativeMb = runCatching { Debug.getNativeHeapAllocatedSize() / (1024L * 1024L) }.getOrDefault(0L)
+        Log.w(TAG, "Memory pressure exceeded threshold (JVM=${(fraction * 100).toInt()}%, native=${nativeMb}MB). Enforcing memory reclaim.")
 
         // 1. Evict in-memory Coil bitmap caches
         context?.let { ctx ->

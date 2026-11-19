@@ -116,9 +116,9 @@ chaquopy {
     defaultConfig {
         version = "3.11"
         pip {
-            install("gallery-dl")
-            install("yt-dlp")
-            install("instaloader")
+            install("gallery-dl==1.32.20")
+            install("yt-dlp>=2026.8.19,<2027.0")
+            install("instaloader==4.16")
         }
     }
 }

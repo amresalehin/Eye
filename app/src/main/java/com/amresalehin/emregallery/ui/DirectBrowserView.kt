@@ -149,6 +149,7 @@ fun DirectBrowserView(
     var isDeepScanning by remember { mutableStateOf(false) }
     var hasInitiatedScanInStage by remember { mutableStateOf(false) }
     var deepScanJob by remember { mutableStateOf<Job?>(null) }
+    var deepScanToken by remember { mutableIntStateOf(0) }
 
     var currentUrl by remember(initialUrl) { mutableStateOf(startUrl) }
     val totalDetectedCount = remember(currentUrl, tabDetectedCount, sessionDiscoveredItems.size) {
@@ -355,6 +356,7 @@ fun DirectBrowserView(
     }
 
     fun stopBrowserDeepScan() {
+        deepScanToken++
         deepScanJob?.cancel()
         deepScanJob = null
         PocketDeepScanEngine.stopScan()
@@ -366,6 +368,7 @@ fun DirectBrowserView(
         if (current.isBlank() || current == "about:blank") return
 
         stopBrowserDeepScan()
+        val myScanToken = ++deepScanToken
         isDeepScanning = true
         hasInitiatedScanInStage = true
 
@@ -429,7 +432,9 @@ fun DirectBrowserView(
                     delay(1_200L)
                 }
             } finally {
-                isDeepScanning = false
+                if (deepScanToken == myScanToken) {
+                    isDeepScanning = false
+                }
             }
         }
     }
@@ -636,8 +641,11 @@ fun DirectBrowserView(
                             initialItems = alreadyFetchedMediaItems
                         )
 
-                        // Run WebView in background and capture all media from page
-                        pocketRepo.startDeepScan(bookmark.id, context)
+                        // Avoid spawning a contending background WebView while the interactive browser WebView is active;
+                        // only trigger background deep scan if no media was captured yet from the live page.
+                        if (alreadyFetchedMediaItems.isEmpty()) {
+                            scanCurrentPageDOM(webViewInstance)
+                        }
 
                         val initialCount = alreadyFetchedMediaItems.size
                         val message = if (initialCount > 0) {

@@ -243,11 +243,26 @@ class RecursiveSiteCrawler(
         var lastResult: OkHttpDownloader.HttpResponse? = null
         for (attempt in 1..maxRetries) {
             currentCoroutineContext().ensureActive()
+            if (!HostRateLimiter.acquire(url)) return lastResult
             val res = runCatching { OkHttpDownloader.getHtml(url) }.getOrNull()
-            if (res != null && res.isSuccessful) return res
+            if (res != null && res.isSuccessful) {
+                if (detectCaptchaChallenge(res.bodyString)) {
+                    HostRateLimiter.recordRateLimitOrBotChallenge(url)
+                    return res
+                }
+                HostRateLimiter.recordSuccess(url)
+                return res
+            }
             lastResult = res
+            if (res != null && res.statusCode == 429) {
+                HostRateLimiter.recordRateLimitOrBotChallenge(url)
+                return res
+            }
+            if (res != null && HostRateLimiter.classifyError(res.statusCode, res.errorMessage) == HostRateLimiter.ErrorCategory.PERMANENT) {
+                return res
+            }
             if (attempt < maxRetries && retryDelayMs > 0L) {
-                delay(retryDelayMs.coerceAtMost(3_000L))
+                delay((retryDelayMs * attempt).coerceAtMost(5_000L))
             }
         }
         return lastResult

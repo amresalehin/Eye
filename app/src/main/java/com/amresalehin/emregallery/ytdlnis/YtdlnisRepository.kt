@@ -160,6 +160,13 @@ class YtdlnisRepository private constructor(private val appContext: Context) {
         persistSearchHistory()
     }
 
+    fun removeSearchHistoryItem(query: String) {
+        val clean = query.trim()
+        if (clean.isBlank()) return
+        _searchHistory.value = _searchHistory.value.filterNot { it.equals(clean, ignoreCase = true) }
+        persistSearchHistory()
+    }
+
     fun clearSearchHistory() {
         _searchHistory.value = emptyList()
         prefs.edit().remove(KEY_SEARCH_HISTORY).apply()

@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,9 +73,9 @@ enum class UnifiedDownloaderTab(val label: String) {
     POWER("Power")
 }
 
-private enum class DownloaderCanvasMode {
+internal enum class DownloaderCanvasMode {
+    SEARCH,
     QUEUE,
-    GRID,
     SETTINGS
 }
 
@@ -156,7 +157,7 @@ fun YtdlnisScreen(
         mutableStateOf(
             when (initialTab) {
                 UnifiedDownloaderTab.TERMINAL, UnifiedDownloaderTab.POWER -> DownloaderCanvasMode.SETTINGS
-                else -> DownloaderCanvasMode.GRID
+                else -> DownloaderCanvasMode.SEARCH
             }
         )
     }
@@ -188,8 +189,8 @@ fun YtdlnisScreen(
                 playlistEntries = emptyList()
                 selectedPlaylistUrls = emptySet()
             }
-            canvasMode != DownloaderCanvasMode.GRID -> {
-                canvasMode = DownloaderCanvasMode.GRID
+            canvasMode != DownloaderCanvasMode.SEARCH -> {
+                canvasMode = DownloaderCanvasMode.SEARCH
             }
             extractionState.isRunning || isFetching -> {
                 extractionCoordinator.cancel()
@@ -283,13 +284,13 @@ fun YtdlnisScreen(
                         }
                     }
                 } else {
-                    // Automatically fall back to Multi-Engine Grid Scan if yt-dlp returns an error on a gallery/board page
+                    // Automatically fall back to Multi-Engine Media Scan if yt-dlp returns an error on a gallery/board page
                     if (MediaClassifier.isValidWebUrl(normalizedSingle) || MediaClassifier.isRedditShorthand(raw)) {
                         val sanitized = MediaClassifier.normalizeRedditShorthand(raw)
                             ?: MediaClassifier.sanitizeUrl(normalizedSingle)
                         DownloaderSession.startSession(sanitized)
                         extractionCoordinator.extract(sanitized, scope)
-                        canvasMode = DownloaderCanvasMode.GRID
+                        canvasMode = DownloaderCanvasMode.SEARCH
                     } else {
                         fetchError = res.errorMessage ?: "Failed to fetch media info"
                     }
@@ -316,7 +317,7 @@ fun YtdlnisScreen(
         repo.addSearchHistory(targetUrl)
         DownloaderSession.startSession(targetUrl)
         extractionCoordinator.extract(targetUrl, scope)
-        canvasMode = DownloaderCanvasMode.GRID
+        canvasMode = DownloaderCanvasMode.SEARCH
     }
 
     LaunchedEffect(initialUrl, initialTab) {
@@ -385,7 +386,7 @@ fun YtdlnisScreen(
                             .height(52.dp)
                     ) {
                         when (canvasMode) {
-                            DownloaderCanvasMode.GRID -> {
+                            DownloaderCanvasMode.SEARCH -> {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -695,8 +696,8 @@ fun YtdlnisScreen(
                         }
                     }
 
-                    // Thin progress indicator when probing formats or scanning site in Grid
-                    AnimatedVisibility(visible = canvasMode == DownloaderCanvasMode.GRID && (isFetching || extractionState.isRunning)) {
+                    // Thin progress indicator when probing formats or scanning site in Search
+                    AnimatedVisibility(visible = canvasMode == DownloaderCanvasMode.SEARCH && (isFetching || extractionState.isRunning)) {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             LinearProgressIndicator(
                                 modifier = Modifier
@@ -732,7 +733,7 @@ fun YtdlnisScreen(
                         }
                     }
 
-                    if (canvasMode == DownloaderCanvasMode.GRID && !fetchError.isNullOrBlank()) {
+                    if (canvasMode == DownloaderCanvasMode.SEARCH && !fetchError.isNullOrBlank()) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -753,7 +754,7 @@ fun YtdlnisScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(
-                                    text = "Scan Grid →",
+                                    text = "Scan Media →",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -770,9 +771,15 @@ fun YtdlnisScreen(
                 DownloaderBottomNavigationBar(
                     canvasMode = canvasMode,
                     queueCount = queueBadgeCount,
-                    gridCount = discoveredItems.size,
+                    onSelectSearch = {
+                        if (canvasMode == DownloaderCanvasMode.SEARCH && discoveredItems.isNotEmpty()) {
+                            extractionCoordinator.cancel()
+                            DownloaderSession.clear()
+                        } else {
+                            canvasMode = DownloaderCanvasMode.SEARCH
+                        }
+                    },
                     onSelectQueue = { canvasMode = DownloaderCanvasMode.QUEUE },
-                    onSelectGrid = { canvasMode = DownloaderCanvasMode.GRID },
                     onSelectBrowser = {
                         val seed = urlInput.trim().takeIf { MediaClassifier.isValidWebUrl(it) }
                         if (onOpenBrowser != null) {
@@ -806,47 +813,85 @@ fun YtdlnisScreen(
                         )
                     }
 
-                    DownloaderCanvasMode.GRID -> {
-                        WebbyDiscoveredMediaGrid(
-                            items = discoveredItems,
-                            onDownloadSingle = { item ->
-                                DownloadQueueManager.enqueueDownload(
-                                    context = context,
-                                    item = item,
-                                    referer = sessionSourceUrl.ifBlank { null },
-                                    stackTitle = sessionPageTitle.ifBlank { null },
-                                    sourceDomain = sessionSourceDomain.ifBlank { null },
-                                    sourceUrl = sessionSourceUrl.ifBlank { null }
-                                )
-                                Toast.makeText(context, "Queued ${item.title}", Toast.LENGTH_SHORT).show()
-                            },
-                            onDownloadSelected = { selectedList ->
-                                if (selectedList.isNotEmpty()) {
-                                    DownloadQueueManager.enqueueBatch(
+                    DownloaderCanvasMode.SEARCH -> {
+                        if (discoveredItems.isNotEmpty()) {
+                            WebbyDiscoveredMediaGrid(
+                                items = discoveredItems,
+                                onDownloadSingle = { item ->
+                                    DownloadQueueManager.enqueueDownload(
                                         context = context,
-                                        items = selectedList,
+                                        item = item,
                                         referer = sessionSourceUrl.ifBlank { null },
-                                        stackTitle = sessionPageTitle.ifBlank { "Downloaded Media" },
-                                        sourceDomain = sessionSourceDomain.ifBlank { "Web" },
-                                        sourceUrl = sessionSourceUrl
+                                        stackTitle = sessionPageTitle.ifBlank { null },
+                                        sourceDomain = sessionSourceDomain.ifBlank { null },
+                                        sourceUrl = sessionSourceUrl.ifBlank { null }
                                     )
-                                    Toast.makeText(context, "Queued ${selectedList.size} items", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Queued ${item.title}", Toast.LENGTH_SHORT).show()
+                                },
+                                onDownloadSelected = { selectedList ->
+                                    if (selectedList.isNotEmpty()) {
+                                        DownloadQueueManager.enqueueBatch(
+                                            context = context,
+                                            items = selectedList,
+                                            referer = sessionSourceUrl.ifBlank { null },
+                                            stackTitle = sessionPageTitle.ifBlank { "Downloaded Media" },
+                                            sourceDomain = sessionSourceDomain.ifBlank { "Web" },
+                                            sourceUrl = sessionSourceUrl
+                                        )
+                                        Toast.makeText(context, "Queued ${selectedList.size} items", Toast.LENGTH_SHORT).show()
+                                        canvasMode = DownloaderCanvasMode.QUEUE
+                                    }
+                                },
+                                onOpenInStudio = { itemUrl ->
+                                    urlInput = itemUrl
+                                    triggerStudioFetch(itemUrl)
+                                },
+                                onClearAll = { DownloaderSession.clear() },
+                                searchHistory = searchHistory,
+                                onSelectHistoryUrl = { targetUrl ->
+                                    urlInput = targetUrl
+                                    triggerMultiEngineGridScan(targetUrl)
+                                },
+                                onClearHistory = { repo.clearSearchHistory() },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            DownloaderSearchHomeCanvas(
+                                searchHistory = searchHistory,
+                                nativeActivities = nativeActivities,
+                                ytdlnisDownloads = ytdlnisDownloads,
+                                onSelectRecentSearch = { query ->
+                                    urlInput = query
+                                    if (!quickDownload) {
+                                        triggerMultiEngineGridScan(query)
+                                    } else {
+                                        triggerStudioFetch(query)
+                                    }
+                                },
+                                onPopulateSearchInput = { query ->
+                                    urlInput = query
+                                },
+                                onRemoveRecentSearch = { query ->
+                                    repo.removeSearchHistoryItem(query)
+                                },
+                                onClearRecentSearches = {
+                                    repo.clearSearchHistory()
+                                },
+                                onOpenInStudio = { targetUrl ->
+                                    urlInput = targetUrl
+                                    triggerStudioFetch(targetUrl)
+                                },
+                                onShowLogs = { logViewerItem = it },
+                                onOpenMediaFile = onOpenMediaFile,
+                                onNavigateToQueue = {
                                     canvasMode = DownloaderCanvasMode.QUEUE
+                                },
+                                onClearDownloadHistory = {
+                                    DownloadActivityManager.clearFinished()
+                                    repo.clearCompletedAndCancelled()
                                 }
-                            },
-                            onOpenInStudio = { itemUrl ->
-                                urlInput = itemUrl
-                                triggerStudioFetch(itemUrl)
-                            },
-                            onClearAll = { DownloaderSession.clear() },
-                            searchHistory = searchHistory,
-                            onSelectHistoryUrl = { targetUrl ->
-                                urlInput = targetUrl
-                                triggerMultiEngineGridScan(targetUrl)
-                            },
-                            onClearHistory = { repo.clearSearchHistory() },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                            )
+                        }
                     }
 
                     DownloaderCanvasMode.SETTINGS -> {
@@ -1068,9 +1113,8 @@ private fun SmallLightningToggleButton(
 private fun DownloaderBottomNavigationBar(
     canvasMode: DownloaderCanvasMode,
     queueCount: Int,
-    gridCount: Int,
+    onSelectSearch: () -> Unit,
     onSelectQueue: () -> Unit,
-    onSelectGrid: () -> Unit,
     onSelectBrowser: () -> Unit,
     onSelectSettings: () -> Unit
 ) {
@@ -1098,32 +1142,40 @@ private fun DownloaderBottomNavigationBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BottomNavPillButton(
-                    label = if (gridCount > 0) "Grid ($gridCount)" else "Grid",
-                    icon = Icons.Default.GridView,
-                    selected = canvasMode == DownloaderCanvasMode.GRID,
-                    onClick = onSelectGrid,
-                    modifier = Modifier.weight(1f)
+                    label = "Search",
+                    icon = Icons.Default.Search,
+                    selected = canvasMode == DownloaderCanvasMode.SEARCH,
+                    onClick = onSelectSearch,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("downloader_nav_search")
                 )
                 BottomNavPillButton(
                     label = if (queueCount > 0) "Queue ($queueCount)" else "Queue",
                     icon = Icons.Default.Download,
                     selected = canvasMode == DownloaderCanvasMode.QUEUE,
                     onClick = onSelectQueue,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("downloader_nav_queue")
                 )
                 BottomNavPillButton(
                     label = "Browser",
                     icon = Icons.Default.Language,
                     selected = false,
                     onClick = onSelectBrowser,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("downloader_nav_browser")
                 )
                 BottomNavPillButton(
                     label = "Settings",
                     icon = Icons.Default.Settings,
                     selected = canvasMode == DownloaderCanvasMode.SETTINGS,
                     onClick = onSelectSettings,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("downloader_nav_settings")
                 )
             }
         }
@@ -1190,6 +1242,486 @@ private fun BottomNavPillButton(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+/**
+ * Downloader Search Home Canvas displayed when on the Search tab and no media grid is currently open.
+ * Shows:
+ * 1. Recent Searches section (with tap-to-search, populate-input button, individual remove, and Clear All)
+ * 2. Download History section (showing past/recent downloads with thumbnail previews, format badges, timestamps, and actions)
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloaderSearchHomeCanvas(
+    searchHistory: List<String>,
+    nativeActivities: List<DownloadActivityItem>,
+    ytdlnisDownloads: List<YtdlnisDownloadItem>,
+    onSelectRecentSearch: (String) -> Unit,
+    onPopulateSearchInput: (String) -> Unit,
+    onRemoveRecentSearch: (String) -> Unit,
+    onClearRecentSearches: () -> Unit,
+    onOpenInStudio: (String) -> Unit,
+    onShowLogs: (YtdlnisDownloadItem) -> Unit,
+    onOpenMediaFile: (String) -> Unit,
+    onNavigateToQueue: () -> Unit,
+    onClearDownloadHistory: () -> Unit
+) {
+    val context = LocalContext.current
+    val repo = remember { YtdlnisRepository.getInstance(context) }
+
+    val distinctSearches = remember(searchHistory) {
+        searchHistory
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(12)
+    }
+
+    val ytMap = remember(ytdlnisDownloads) {
+        ytdlnisDownloads.associateBy { "ytdlnis_${it.id}" }
+    }
+
+    val deduplicatedNative = remember(nativeActivities) {
+        nativeActivities
+            .distinctBy { it.id }
+            .sortedByDescending { it.timestampMillis }
+    }
+
+    val scheduledOrSavedYt = remember(ytdlnisDownloads) {
+        ytdlnisDownloads.filter {
+            it.status == YtdlnisDownloadStatus.SCHEDULED || it.status == YtdlnisDownloadStatus.SAVED
+        }
+    }
+
+    val hasClearableHistory = remember(deduplicatedNative, ytdlnisDownloads) {
+        deduplicatedNative.any { it.isFinished } ||
+            ytdlnisDownloads.any { it.status == YtdlnisDownloadStatus.COMPLETED || it.status == YtdlnisDownloadStatus.CANCELLED }
+    }
+
+    val totalHistoryCount = deduplicatedNative.size + scheduledOrSavedYt.size
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .testTag("downloader_search_home_canvas"),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(top = 6.dp, bottom = 28.dp)
+    ) {
+        // 1. Recent Searches Section Header & Content
+        item(key = "recent_searches_section") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("downloader_recent_searches_section"),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Recent searches",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (distinctSearches.isNotEmpty()) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Text(
+                                    text = "${distinctSearches.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (distinctSearches.isNotEmpty()) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(CircleShape)
+                                .clickable { onClearRecentSearches() }
+                                .testTag("clear_recent_searches_button")
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = "Clear",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (distinctSearches.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "No recent searches yet",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Paste a URL, search query, or r/subreddit above to fetch media in the grid.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            distinctSearches.forEachIndexed { index, query ->
+                                val isUrl = remember(query) {
+                                    query.startsWith("http://", ignoreCase = true) ||
+                                        query.startsWith("https://", ignoreCase = true) ||
+                                        MediaClassifier.isValidWebUrl(query)
+                                }
+                                val displayPrimary = remember(query) {
+                                    query.removePrefix("https://")
+                                        .removePrefix("http://")
+                                        .removePrefix("www.")
+                                        .trimEnd('/')
+                                }
+                                val domainBadge = remember(query, isUrl) {
+                                    if (isUrl) MediaClassifier.cleanDomainFromUrl(query).takeIf { it.isNotBlank() }
+                                    else if (query.startsWith("r/", ignoreCase = true) || query.contains("reddit.com/r/", ignoreCase = true)) "reddit.com"
+                                    else null
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelectRecentSearch(query) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainer,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (isUrl) Icons.Default.Language else Icons.Default.History,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                                    ) {
+                                        Text(
+                                            text = displayPrimary,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (!domainBadge.isNullOrBlank() && !displayPrimary.equals(domainBadge, ignoreCase = true)) {
+                                            Text(
+                                                text = domainBadge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    IconButton(
+                                        onClick = { onPopulateSearchInput(query) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.NorthWest,
+                                            contentDescription = "Fill search bar",
+                                            modifier = Modifier.size(15.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { onRemoveRecentSearch(query) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove recent search",
+                                            modifier = Modifier.size(15.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                if (index < distinctSearches.lastIndex) {
+                                    HorizontalDivider(
+                                        thickness = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Download History Section Header
+        item(key = "download_history_header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .testTag("downloader_download_history_section"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DownloadDone,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Download history",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (totalHistoryCount > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            Text(
+                                text = "$totalHistoryCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (totalHistoryCount > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(CircleShape)
+                                .clickable { onNavigateToQueue() }
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = "View queue",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+
+                    if (hasClearableHistory) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(CircleShape)
+                                .clickable { onClearDownloadHistory() }
+                                .testTag("clear_download_history_button")
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = "Clear",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (deduplicatedNative.isEmpty() && scheduledOrSavedYt.isEmpty()) {
+            item(key = "download_history_empty") {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "No download history yet",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Downloaded videos, audio, and images will appear here.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            items(
+                items = scheduledOrSavedYt,
+                key = { "search_sched_saved_${it.id}" }
+            ) { ytItem ->
+                MonochromeScheduledOrSavedCard(
+                    item = ytItem,
+                    onStartNow = {
+                        YtdlnisDownloadWorker.enqueue(context, ytItem.copy(scheduledTimeMillis = 0L))
+                    },
+                    onOpenStudio = { onOpenInStudio(ytItem.url) },
+                    onDelete = { repo.removeDownload(ytItem.id) }
+                )
+            }
+
+            items(
+                items = deduplicatedNative,
+                key = { "search_history_act_${it.id}" }
+            ) { item ->
+                val linkedYt = ytMap[item.id]
+                MonochromeUnifiedActivityCard(
+                    item = item,
+                    linkedYtdlnisItem = linkedYt,
+                    onPause = { DownloadActivityManager.pauseDownload(context, item.id) },
+                    onResumeOrRetry = { DownloadActivityManager.retryDownload(context, item.id) },
+                    onDelete = { DownloadActivityManager.deleteActivity(item.id) },
+                    onOpenStudio = {
+                        val target = item.sourceUrl?.takeIf { it.startsWith("http") }
+                            ?: item.mediaUrl.takeIf { it.startsWith("http") }
+                        if (!target.isNullOrBlank()) {
+                            onOpenInStudio(target)
+                        }
+                    },
+                    onShowLogs = { if (linkedYt != null) onShowLogs(linkedYt) },
+                    onOpenMedia = {
+                        val uri = item.localUri
+                        if (item.isFinished && !uri.isNullOrBlank()) {
+                            onOpenMediaFile(uri)
+                        }
+                    }
+                )
+            }
         }
     }
 }

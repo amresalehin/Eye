@@ -101,4 +101,11 @@ class YtdlnisFeaturesUnitTest {
         val compatVideo = YtdlnisDownloadItem(url = "https://example.com", type = YtdlnisDownloadType.VIDEO, container = "webm", compatibleMode = true)
         assertEquals("mp4", YtdlnisEngine.resolveTargetExtension(compatVideo, File("in.webm")))
     }
+
+    @Test
+    fun downloaderCanvasMode_usesSearchAsHomeTab() {
+        val modes = com.amresalehin.emregallery.ui.ytdlnis.DownloaderCanvasMode.entries.map { it.name }
+        assertEquals(listOf("SEARCH", "QUEUE", "SETTINGS"), modes)
+        assertFalse("Grid is a media layout, not a canvas mode tab", modes.contains("GRID"))
+    }
 }

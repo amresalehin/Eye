@@ -496,13 +496,21 @@ fun WebbyDiscoveredMediaGrid(
                                 .height(34.dp)
                                 .clip(CircleShape)
                                 .clickable { onClearAll() }
+                                .testTag("grid_back_to_search_button")
                         ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(horizontal = 12.dp)
                             ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Back to Search",
+                                    modifier = Modifier.size(13.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Text(
-                                    text = "Reset",
+                                    text = "Back to Search",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -533,13 +541,19 @@ fun WebbyDiscoveredMediaGrid(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    Icons.Default.GridView,
+                                    Icons.Default.Search,
                                     contentDescription = null,
                                     modifier = Modifier.size(26.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
+                        Text(
+                            text = "No fetched media to display",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
 
                         if (searchHistory.isNotEmpty() && onSelectHistoryUrl != null) {
                             val distinctHistory = remember(searchHistory) {

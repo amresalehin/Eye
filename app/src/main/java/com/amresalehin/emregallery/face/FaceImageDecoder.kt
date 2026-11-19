@@ -53,25 +53,18 @@ object FaceImageDecoder {
         // 2. Modern ImageDecoder on Android 9+ (API 28+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val decoded = runCatching {
-                val source = if (scheme == null || scheme == ContentResolver.SCHEME_FILE || scheme == "file") {
-                    val file = File(uri.path ?: uri.toString())
-                    if (file.exists() && file.canRead()) {
-                        ImageDecoder.createSource(file)
-                    } else {
-                        val afd = runCatching { context.contentResolver.openAssetFileDescriptor(targetUri, "r") }.getOrNull()
-                        if (afd != null) {
-                            ImageDecoder.createSource { afd }
-                        } else {
-                            ImageDecoder.createSource(context.contentResolver, targetUri)
-                        }
-                    }
+                val localFile = if (scheme == null || scheme == ContentResolver.SCHEME_FILE || scheme == "file") {
+                    File(uri.path ?: uri.toString()).takeIf { it.exists() && it.canRead() }
                 } else {
-                    val afd = runCatching { context.contentResolver.openAssetFileDescriptor(targetUri, "r") }.getOrNull()
-                    if (afd != null) {
-                        ImageDecoder.createSource { afd }
-                    } else {
-                        ImageDecoder.createSource(context.contentResolver, targetUri)
-                    }
+                    null
+                }
+                // ImageDecoder.createSource(Callable<AssetFileDescriptor>) is API 29+.
+                // The ContentResolver/Uri overload is available on our API 28 minimum
+                // and avoids keeping an AssetFileDescriptor open across decoding.
+                val source = if (localFile != null) {
+                    ImageDecoder.createSource(localFile)
+                } else {
+                    ImageDecoder.createSource(context.contentResolver, targetUri)
                 }
                 var origW = 0
                 var origH = 0

@@ -1574,8 +1574,17 @@ private fun MonochromeUnifiedActivityCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    val thumbModel = item.localUri?.takeIf { item.isFinished } ?: item.thumbnailUrl ?: item.mediaUrl
-                    if (!thumbModel.isNullOrBlank()) {
+                    val thumbModel = remember(item.localUri, item.isFinished, item.thumbnailUrl, item.mediaUrl, item.isVideo, item.isAudio, item.isStream) {
+                        item.localUri?.takeIf { item.isFinished && it.isNotBlank() }
+                            ?: com.amresalehin.emregallery.ui.ThumbnailUtils.resolvePreviewImageModel(
+                                thumbnailUrl = item.thumbnailUrl,
+                                mediaUrl = item.mediaUrl,
+                                isVideo = item.isVideo,
+                                isAudio = item.isAudio,
+                                isStream = item.isStream
+                            )
+                    }
+                    if (thumbModel != null) {
                         AsyncImage(
                             model = thumbModel,
                             contentDescription = item.title,
@@ -1586,7 +1595,7 @@ private fun MonochromeUnifiedActivityCard(
                         Icon(
                             imageVector = when {
                                 item.isAudio -> Icons.Default.Audiotrack
-                                item.isVideo -> Icons.Default.Videocam
+                                item.isVideo || item.isStream -> Icons.Default.Videocam
                                 else -> Icons.Default.Image
                             },
                             contentDescription = null,

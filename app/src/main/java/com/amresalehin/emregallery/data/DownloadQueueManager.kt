@@ -134,15 +134,124 @@ object DownloadQueueManager {
         _inMemoryDownloading.value = remaining > 0
     }
 
+    data class QueuedDownloadPayload(
+        val itemId: String,
+        val mediaUrl: String,
+        val fileName: String,
+        val referer: String?,
+        val title: String,
+        val isVideo: Boolean,
+        val isAudio: Boolean,
+        val isStream: Boolean,
+        val format: String,
+        val stackId: String,
+        val stackTitle: String,
+        val sourceDomain: String,
+        val sourceUrl: String,
+        val sourceEngine: String,
+        val downloadHeaders: Map<String, String>
+    )
+
+    private val payloadCache = ConcurrentHashMap<String, QueuedDownloadPayload>()
+
+    private fun String.takeUtf8Bytes(maxBytes: Int): String {
+        if (this.isEmpty() || maxBytes <= 0) return ""
+        val bytes = this.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return this
+        var end = minOf(this.length, maxBytes)
+        while (end > 0 && this.substring(0, end).toByteArray(Charsets.UTF_8).size > maxBytes) {
+            end = (end * 3) / 4
+        }
+        return this.substring(0, end)
+    }
+
+    private fun payloadFileFor(context: Context, itemId: String): java.io.File {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(itemId.toByteArray(Charsets.UTF_8))
+            .take(16)
+            .joinToString("") { "%02x".format(it) }
+        val dir = java.io.File(context.cacheDir, "download_work_payloads")
+        if (!dir.exists()) dir.mkdirs()
+        return java.io.File(dir, "payload_$digest.json")
+    }
+
+    private fun persistPayloadToDisk(context: Context, payload: QueuedDownloadPayload) {
+        runCatching {
+            val headersObj = JSONObject()
+            payload.downloadHeaders.forEach { (k, v) -> headersObj.put(k, v) }
+            val root = JSONObject().apply {
+                put("itemId", payload.itemId)
+                put("mediaUrl", payload.mediaUrl)
+                put("fileName", payload.fileName)
+                put("referer", payload.referer ?: "")
+                put("title", payload.title)
+                put("isVideo", payload.isVideo)
+                put("isAudio", payload.isAudio)
+                put("isStream", payload.isStream)
+                put("format", payload.format)
+                put("stackId", payload.stackId)
+                put("stackTitle", payload.stackTitle)
+                put("sourceDomain", payload.sourceDomain)
+                put("sourceUrl", payload.sourceUrl)
+                put("sourceEngine", payload.sourceEngine)
+                put("headers", headersObj)
+            }
+            payloadFileFor(context, payload.itemId).writeText(root.toString(), Charsets.UTF_8)
+        }
+    }
+
+    fun getPayload(context: Context, itemId: String): QueuedDownloadPayload? {
+        payloadCache[itemId]?.let { return it }
+        return runCatching {
+            val file = payloadFileFor(context, itemId)
+            if (!file.exists()) return null
+            val root = JSONObject(file.readText(Charsets.UTF_8))
+            val headersMap = mutableMapOf<String, String>()
+            root.optJSONObject("headers")?.let { hObj ->
+                val keys = hObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    headersMap[k] = hObj.optString(k, "")
+                }
+            }
+            QueuedDownloadPayload(
+                itemId = root.optString("itemId", itemId),
+                mediaUrl = root.optString("mediaUrl", ""),
+                fileName = root.optString("fileName", ""),
+                referer = root.optString("referer", "").takeIf { it.isNotBlank() },
+                title = root.optString("title", ""),
+                isVideo = root.optBoolean("isVideo", false),
+                isAudio = root.optBoolean("isAudio", false),
+                isStream = root.optBoolean("isStream", false),
+                format = root.optString("format", ""),
+                stackId = root.optString("stackId", ""),
+                stackTitle = root.optString("stackTitle", ""),
+                sourceDomain = root.optString("sourceDomain", ""),
+                sourceUrl = root.optString("sourceUrl", ""),
+                sourceEngine = root.optString("sourceEngine", ""),
+                downloadHeaders = headersMap
+            ).also {
+                payloadCache[itemId] = it
+            }
+        }.getOrNull()
+    }
+
+    fun clearPayload(context: Context, itemId: String) {
+        payloadCache.remove(itemId)
+        runCatching {
+            payloadFileFor(context, itemId).delete()
+        }
+    }
+
     private fun serializeHeaders(headers: Map<String, String>): String? {
         if (headers.isEmpty()) return null
         return runCatching {
             val json = JSONObject()
             headers.forEach { (k, v) ->
                 // Guard against exceeding WorkManager's input Data size limit.
-                if (v.length <= 2048) json.put(k, v)
+                if (k.length <= 128 && v.length <= 1024) json.put(k, v)
             }
-            json.toString().takeIf { it.length <= 4096 }
+            json.toString().takeIf { it.toByteArray(Charsets.UTF_8).size <= 1500 }
         }.getOrNull()
     }
 
@@ -154,22 +263,48 @@ object DownloadQueueManager {
         sourceDomain: String,
         sourceUrl: String
     ): androidx.work.OneTimeWorkRequest {
+        val payload = QueuedDownloadPayload(
+            itemId = item.id,
+            mediaUrl = item.url,
+            fileName = item.title,
+            referer = referer,
+            title = item.title,
+            isVideo = item.isVideo,
+            isAudio = item.isAudio,
+            isStream = item.isStream,
+            format = item.format,
+            stackId = stackId,
+            stackTitle = stackTitle,
+            sourceDomain = sourceDomain,
+            sourceUrl = sourceUrl,
+            sourceEngine = item.provenance.extractorEngine,
+            downloadHeaders = item.downloadHeaders
+        )
+        payloadCache[item.id] = payload
+
         val headersJson = serializeHeaders(item.downloadHeaders)
+        // WorkManager enforces a strict 10,240-byte limit on serialized Data.
+        // Keep inline Data fields bounded; MediaDownloadWorker reads the full untruncated
+        // payload from DownloadQueueManager.getPayload(context, itemId).
+        val inlineMediaUrl = if (item.url.toByteArray(Charsets.UTF_8).size <= 3500) item.url else ""
+        val inlineSourceUrl = if (sourceUrl.toByteArray(Charsets.UTF_8).size <= 800) sourceUrl else inlineMediaUrl.takeUtf8Bytes(800)
+        val inlineReferer = referer?.takeIf { it.toByteArray(Charsets.UTF_8).size <= 800 }
+
         val inputData = Data.Builder()
-            .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
-            .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
-            .putString(MediaDownloadWorker.KEY_REFERER, referer)
-            .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id)
-            .putString(MediaDownloadWorker.KEY_TITLE, item.title)
+            .putString(MediaDownloadWorker.KEY_MEDIA_URL, inlineMediaUrl)
+            .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title.takeUtf8Bytes(200))
+            .putString(MediaDownloadWorker.KEY_REFERER, inlineReferer)
+            .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id.takeUtf8Bytes(256))
+            .putString(MediaDownloadWorker.KEY_TITLE, item.title.takeUtf8Bytes(200))
             .putBoolean(MediaDownloadWorker.KEY_IS_VIDEO, item.isVideo)
             .putBoolean(MediaDownloadWorker.KEY_IS_AUDIO, item.isAudio)
             .putBoolean(MediaDownloadWorker.KEY_IS_STREAM, item.isStream)
-            .putString(MediaDownloadWorker.KEY_FORMAT, item.format)
-            .putString(MediaDownloadWorker.KEY_STACK_ID, stackId)
-            .putString(MediaDownloadWorker.KEY_STACK_TITLE, stackTitle)
-            .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, sourceDomain)
-            .putString(MediaDownloadWorker.KEY_SOURCE_URL, sourceUrl)
-            .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine)
+            .putString(MediaDownloadWorker.KEY_FORMAT, item.format.takeUtf8Bytes(64))
+            .putString(MediaDownloadWorker.KEY_STACK_ID, stackId.takeUtf8Bytes(128))
+            .putString(MediaDownloadWorker.KEY_STACK_TITLE, stackTitle.takeUtf8Bytes(200))
+            .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, sourceDomain.takeUtf8Bytes(200))
+            .putString(MediaDownloadWorker.KEY_SOURCE_URL, inlineSourceUrl)
+            .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine.takeUtf8Bytes(128))
             .apply {
                 if (!headersJson.isNullOrBlank()) {
                     putString(MediaDownloadWorker.KEY_HEADERS_JSON, headersJson)
@@ -181,7 +316,7 @@ object DownloadQueueManager {
             .setConstraints(networkConstraints)
             .setInputData(inputData)
             .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
-            .addTag("item_${item.id}")
+            .addTag("item_${item.id.takeUtf8Bytes(120)}")
             .build()
     }
 
@@ -230,6 +365,14 @@ object DownloadQueueManager {
             }
 
             val request = buildRequest(item, referer, sId, sTitle, domain, url)
+            payloadCache[item.id]?.let { persistPayloadToDisk(context, it) }
+
+            val safeThumbnailUrl = item.thumbnailUrl?.takeIf {
+                it.isNotBlank() && !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
+            } ?: item.url.takeIf {
+                !item.isVideo && !item.isAudio && !item.isStream &&
+                    !com.amresalehin.emregallery.ui.ThumbnailUtils.isRemoteNonImageUrl(it)
+            }
 
             // Record the owning activity before enqueueing so a fast worker cannot finish
             // before its activity is created.
@@ -237,7 +380,7 @@ object DownloadQueueManager {
                 id = item.id,
                 title = item.title,
                 mediaUrl = item.url,
-                thumbnailUrl = item.thumbnailUrl ?: item.url,
+                thumbnailUrl = safeThumbnailUrl,
                 isVideo = item.isVideo,
                 isAudio = item.isAudio,
                 isStream = item.isStream,

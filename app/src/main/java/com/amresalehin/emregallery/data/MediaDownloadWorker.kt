@@ -79,34 +79,53 @@ class MediaDownloadWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val mediaUrl = inputData.getString(KEY_MEDIA_URL) ?: return@withContext Result.failure()
-        val fileName = inputData.getString(KEY_FILE_NAME) ?: "media_${System.currentTimeMillis()}"
-        val referer = inputData.getString(KEY_REFERER)
-        val itemId = inputData.getString(KEY_ITEM_ID) ?: "item_${System.currentTimeMillis()}"
-        val title = inputData.getString(KEY_TITLE) ?: fileName
-        val isVideo = inputData.getBoolean(KEY_IS_VIDEO, false)
-        val isAudio = inputData.getBoolean(KEY_IS_AUDIO, false)
-        val isStream = inputData.getBoolean(KEY_IS_STREAM, false)
-        val format = inputData.getString(KEY_FORMAT) ?: ""
-        val stackId = inputData.getString(KEY_STACK_ID) ?: "stack_${System.currentTimeMillis()}"
-        val stackTitle = inputData.getString(KEY_STACK_TITLE) ?: "Discovered Media"
-        val sourceDomain = inputData.getString(KEY_SOURCE_DOMAIN) ?: ""
-        val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: mediaUrl
-        val sourceEngine = inputData.getString(KEY_SOURCE_ENGINE) ?: ""
+        val rawItemId = inputData.getString(KEY_ITEM_ID) ?: "item_${System.currentTimeMillis()}"
+        val cachedPayload = DownloadQueueManager.getPayload(applicationContext, rawItemId)
+        val activityItem = runCatching {
+            DownloadActivityManager.initialize(applicationContext)
+            DownloadActivityManager.activities.value.firstOrNull { it.id == rawItemId }
+        }.getOrNull()
+
+        val itemId = cachedPayload?.itemId ?: rawItemId
+        val mediaUrl = cachedPayload?.mediaUrl?.takeIf { it.isNotBlank() }
+            ?: inputData.getString(KEY_MEDIA_URL)?.takeIf { it.isNotBlank() }
+            ?: activityItem?.mediaUrl?.takeIf { it.isNotBlank() }
+            ?: return@withContext Result.failure()
+        val fileName = cachedPayload?.fileName?.takeIf { it.isNotBlank() }
+            ?: inputData.getString(KEY_FILE_NAME)?.takeIf { it.isNotBlank() }
+            ?: activityItem?.title?.takeIf { it.isNotBlank() }
+            ?: "media_${System.currentTimeMillis()}"
+        val referer = cachedPayload?.referer ?: inputData.getString(KEY_REFERER)
+        val title = (cachedPayload?.title?.takeIf { it.isNotBlank() }
+            ?: inputData.getString(KEY_TITLE)?.takeIf { it.isNotBlank() }
+            ?: fileName).take(160)
+        val isVideo = cachedPayload?.isVideo ?: inputData.getBoolean(KEY_IS_VIDEO, activityItem?.isVideo ?: false)
+        val isAudio = cachedPayload?.isAudio ?: inputData.getBoolean(KEY_IS_AUDIO, activityItem?.isAudio ?: false)
+        val isStream = cachedPayload?.isStream ?: inputData.getBoolean(KEY_IS_STREAM, activityItem?.isStream ?: false)
+        val format = cachedPayload?.format ?: inputData.getString(KEY_FORMAT) ?: activityItem?.format ?: ""
+        val stackId = cachedPayload?.stackId ?: inputData.getString(KEY_STACK_ID) ?: "stack_${System.currentTimeMillis()}"
+        val stackTitle = cachedPayload?.stackTitle ?: inputData.getString(KEY_STACK_TITLE) ?: "Discovered Media"
+        val sourceDomain = cachedPayload?.sourceDomain ?: inputData.getString(KEY_SOURCE_DOMAIN) ?: activityItem?.sourceDomain ?: ""
+        val sourceUrl = cachedPayload?.sourceUrl?.takeIf { it.isNotBlank() }
+            ?: inputData.getString(KEY_SOURCE_URL)?.takeIf { it.isNotBlank() }
+            ?: activityItem?.sourceUrl?.takeIf { it.isNotBlank() }
+            ?: mediaUrl
+        val sourceEngine = cachedPayload?.sourceEngine ?: inputData.getString(KEY_SOURCE_ENGINE) ?: ""
         val headersJson = inputData.getString(KEY_HEADERS_JSON)
 
-        val downloadHeaders: Map<String, String> = runCatching {
-            if (!headersJson.isNullOrBlank()) {
-                val obj = JSONObject(headersJson)
-                val map = mutableMapOf<String, String>()
-                val keys = obj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    map[k] = obj.getString(k)
-                }
-                map
-            } else emptyMap()
-        }.getOrDefault(emptyMap())
+        val downloadHeaders: Map<String, String> = cachedPayload?.downloadHeaders?.takeIf { it.isNotEmpty() }
+            ?: runCatching {
+                if (!headersJson.isNullOrBlank()) {
+                    val obj = JSONObject(headersJson)
+                    val map = mutableMapOf<String, String>()
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        map[k] = obj.getString(k)
+                    }
+                    map
+                } else emptyMap()
+            }.getOrDefault(emptyMap())
 
         val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
             ?: downloadHeaders["Cookie"]
@@ -402,15 +421,17 @@ class MediaDownloadWorker(
                     )
                 }
 
+                DownloadQueueManager.clearPayload(applicationContext, itemId)
+
                 Result.success(
                     workDataOf(
-                        KEY_LOCAL_URI to downloadedFile.absolutePath,
+                        KEY_LOCAL_URI to downloadedFile.absolutePath.take(1024),
                         KEY_SIZE_BYTES to downloadedFile.length(),
-                        KEY_ITEM_ID to itemId
+                        KEY_ITEM_ID to itemId.take(256)
                     )
                 )
             } else {
-                val finalError = errorDiagnostic ?: "Download failed via yt-dlp and gallery-dl for $mediaUrl"
+                val finalError = (errorDiagnostic ?: "Download failed via yt-dlp and gallery-dl for ${mediaUrl.take(240)}").take(512)
                 val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
                 val isPausedOrCancelled = isStopped ||
                     currentItem?.status == DownloadActivityStatus.PAUSED ||
@@ -428,8 +449,8 @@ class MediaDownloadWorker(
                 Result.failure(workDataOf(KEY_ERROR to finalError))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in MediaDownloadWorker for $mediaUrl", e)
-            val err = e.message ?: "Unknown error"
+            Log.e(TAG, "Error in MediaDownloadWorker for ${mediaUrl.take(240)}", e)
+            val err = (e.message ?: "Unknown error").take(512)
             val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
             val isPausedOrCancelled = isStopped ||
                 e is kotlinx.coroutines.CancellationException ||

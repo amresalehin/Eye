@@ -231,6 +231,14 @@ object OkHttpDownloader {
                         requestBuilder.header(key, value)
                     }
                 }
+                val existingAccept = original.header("Accept")
+                if (!existingAccept.isNullOrBlank() && existingAccept.contains("image/avif", ignoreCase = true)) {
+                    requestBuilder.header(
+                        "Accept",
+                        existingAccept.replace("image/avif,", "", ignoreCase = true)
+                            .replace("image/avif", "image/webp", ignoreCase = true)
+                    )
+                }
                 chain.proceed(requestBuilder.build())
             }
 

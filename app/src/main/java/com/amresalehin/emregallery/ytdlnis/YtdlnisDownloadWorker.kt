@@ -202,12 +202,12 @@ class YtdlnisDownloadWorker(
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
-                        KEY_ITEM_ID to item.id,
-                        KEY_TITLE to item.title.ifBlank { item.url }
+                        KEY_ITEM_ID to item.id.take(256),
+                        KEY_TITLE to item.title.ifBlank { item.url }.take(200)
                     )
                 )
                 .addTag("ytdlnis_download")
-                .addTag("ytdlnis_${item.id}")
+                .addTag("ytdlnis_${item.id.take(120)}")
 
             if (delayMs > 1000L) {
                 requestBuilder.setInitialDelay(delayMs, TimeUnit.MILLISECONDS)

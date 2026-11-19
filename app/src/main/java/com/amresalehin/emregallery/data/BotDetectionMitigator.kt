@@ -21,7 +21,7 @@ object BotDetectionMitigator {
 
     val STEALTH_HEADERS: Map<String, String> = mapOf(
         "User-Agent" to STEALTH_USER_AGENT,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language" to "en-US,en;q=0.9",
         "Sec-Ch-Ua" to "\"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
         "Sec-Ch-Ua-Mobile" to "?1",

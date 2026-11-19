@@ -652,16 +652,43 @@ fun WebbyDiscoveredMediaGrid(
                                 )
                                 .testTag("download_single_${item.id}")
                         ) {
-                            AsyncImage(
-                                model = item.thumbnailUrl ?: item.url,
-                                contentDescription = item.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        alpha = if (isSelected) 1f else 0.72f
-                                    }
-                            )
+                            val previewModel = remember(item.thumbnailUrl, item.url, item.isVideo, item.isAudio, item.isStream) {
+                                ThumbnailUtils.resolvePreviewImageModel(
+                                    thumbnailUrl = item.thumbnailUrl,
+                                    mediaUrl = item.url,
+                                    isVideo = item.isVideo,
+                                    isAudio = item.isAudio,
+                                    isStream = item.isStream
+                                )
+                            }
+                            if (previewModel != null) {
+                                AsyncImage(
+                                    model = previewModel,
+                                    contentDescription = item.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            alpha = if (isSelected) 1f else 0.72f
+                                        }
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = when {
+                                            item.isAudio -> Icons.Default.Audiotrack
+                                            item.isVideo || item.isStream -> Icons.Default.Videocam
+                                            else -> Icons.Default.Image
+                                        },
+                                        contentDescription = item.title,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isSelected) 0.85f else 0.5f),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
 
                             // Top-left Webby sequential order badge (#1, #2, #3...)
                             Surface(

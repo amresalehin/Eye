@@ -20,8 +20,31 @@ object ThumbnailUtils {
 
     fun mediaThumbnailKey(uri: String): String = "${uri}_thumb"
 
-    fun parseMediaDataModel(rawUrl: String): Any {
+    private val REMOTE_NON_IMAGE_EXTENSIONS = setOf(
+        "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v",
+        "m3u8", "mpd", "mp3", "m4a", "wav", "flac", "ogg", "opus", "aac",
+        "wma", "zip", "rar", "7z", "pdf", "epub", "apk", "vtt", "srt", "ass", "ttml"
+    )
+
+    fun isRemoteNonImageUrl(rawUrl: String): Boolean {
         val trimmed = rawUrl.trim()
+        if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
+            return false
+        }
+        val cleanPath = trimmed.substringBefore('#').substringBefore('?')
+        val ext = cleanPath.substringAfterLast('.', "").lowercase()
+        return ext in REMOTE_NON_IMAGE_EXTENSIONS
+    }
+
+    private fun rewriteAvifQueryToWebp(rawUrl: String): String {
+        if (!rawUrl.contains("avif", ignoreCase = true)) return rawUrl
+        return rawUrl
+            .replace(Regex("""([?&](?:format|fm|fmt|ext)=)avif\b""", RegexOption.IGNORE_CASE), "$1webp")
+    }
+
+    fun parseMediaDataModel(rawUrl: String): Any? {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank()) return null
         if (trimmed.startsWith("data:image/", ignoreCase = true)) {
             val base64Marker = ";base64,"
             val idx = trimmed.indexOf(base64Marker, ignoreCase = true)
@@ -34,8 +57,32 @@ object ThumbnailUtils {
                     return decoded
                 }
             }
+            return null
         }
-        return Uri.parse(trimmed)
+        if (isRemoteNonImageUrl(trimmed)) {
+            return null
+        }
+        return Uri.parse(rewriteAvifQueryToWebp(trimmed))
+    }
+
+    fun resolvePreviewImageModel(
+        thumbnailUrl: String?,
+        mediaUrl: String,
+        isVideo: Boolean = false,
+        isAudio: Boolean = false,
+        isStream: Boolean = false
+    ): Any? {
+        val thumb = thumbnailUrl?.trim()?.takeIf { it.isNotBlank() && !isRemoteNonImageUrl(it) }
+        if (thumb != null) {
+            return parseMediaDataModel(thumb)
+        }
+        val media = mediaUrl.trim()
+        if (media.isBlank()) return null
+        val isRemote = media.startsWith("http://", ignoreCase = true) || media.startsWith("https://", ignoreCase = true)
+        if (isRemote && (isVideo || isAudio || isStream || isRemoteNonImageUrl(media))) {
+            return null
+        }
+        return parseMediaDataModel(media)
     }
 
     fun buildThumbnailRequest(

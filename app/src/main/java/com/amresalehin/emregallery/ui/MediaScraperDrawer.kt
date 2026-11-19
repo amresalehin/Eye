@@ -584,7 +584,7 @@ object ImageDimensionProber {
                 val reqBuilder = okhttp3.Request.Builder()
                     .url(httpUrl)
                     .header("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
-                    .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                    .header("Accept", "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                     .header("Accept-Encoding", "identity")
                     .header("Range", "bytes=0-8191")
 
@@ -607,6 +607,16 @@ object ImageDimensionProber {
                             sizeCache[cleanUrl] = totalSize
                         }
 
+                        val contentType = resp.header("Content-Type")?.lowercase() ?: ""
+                        val isIsoBmffContentType = contentType.startsWith("video/") ||
+                            contentType.startsWith("audio/") ||
+                            contentType.contains("avif") ||
+                            contentType.contains("heif") ||
+                            contentType.contains("heic")
+                        if (isIsoBmffContentType) {
+                            return@withPermit null
+                        }
+
                         val body = resp.body ?: return@withPermit null
                         val maxProbeBytes = 8192
                         val buffer = ByteArray(maxProbeBytes)
@@ -618,7 +628,14 @@ object ImageDimensionProber {
                                 totalRead += read
                             }
                         }
-                        if (totalRead > 0) {
+                        // Do not pass partial 8KB ISOBMFF ('ftyp' box at offset 4) buffers to BitmapFactory,
+                        // as Android's HeifDecoderImpl logs 'E/HeifDecoderImpl: getSize: not supported!' on partial streams.
+                        val hasIsoBmffBox = totalRead >= 12 &&
+                            buffer[4] == 'f'.code.toByte() &&
+                            buffer[5] == 't'.code.toByte() &&
+                            buffer[6] == 'y'.code.toByte() &&
+                            buffer[7] == 'p'.code.toByte()
+                        if (totalRead > 0 && !hasIsoBmffBox) {
                             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                             BitmapFactory.decodeByteArray(buffer, 0, totalRead, opts)
                             if (opts.outWidth > 0 && opts.outHeight > 0) {

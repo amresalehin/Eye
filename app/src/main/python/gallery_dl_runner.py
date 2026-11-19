@@ -851,7 +851,7 @@ def extract_yt_dlp(url, options_json="{}"):
         cookie_file = _prepare_cookiefile(cookies, clean_url)
         http_headers = {
             "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "Accept-Language": "en-US,en;q=0.9",
             "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
             "Sec-Ch-Ua-Mobile": "?1",
@@ -1171,7 +1171,7 @@ def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_h
     try:
         http_headers = {
             "User-Agent": user_agent or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
             "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
             "Sec-Ch-Ua-Mobile": "?1",

@@ -69,10 +69,51 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
-          if [[ ! -d "$SDK_ROOT/ndk/27.0.12077973" || ! -d "$SDK_ROOT/cmake/3.22.1" ]]; then
-            "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973" "cmake;3.22.1"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            echo "::error::Android sdkmanager was not found at $SDKMANAGER"
+            exit 1
+          fi
+
+          install_sdk_package() {
+            local package="$1"
+            local package_dir="$2"
+            local attempt=1
+
+            while (( attempt <= 3 )); do
+              echo "Installing $package (attempt $attempt/3)..."
+              if "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install "$package" &&
+                 [[ -f "$package_dir/source.properties" ]]; then
+                echo "Installed $package successfully."
+                return 0
+              fi
+
+              echo "Installation of $package was incomplete; removing partial files before retry."
+              rm -rf "$package_dir"
+              # sdkmanager can leave a truncated archive or extraction workspace after
+              # a transient network/runner I/O error. Remove its temporary workspace so
+              # the next attempt fetches and extracts a clean package.
+              rm -rf "$SDK_ROOT/.temp"
+              if (( attempt < 3 )); then
+                sleep $((attempt * 5))
+              fi
+              ((attempt += 1))
+            done
+
+            echo "::error::Could not install $package after three attempts."
+            return 1
+          }
+
+          if [[ ! -f "$SDK_ROOT/cmake/3.22.1/source.properties" ]]; then
+            install_sdk_package "cmake;3.22.1" "$SDK_ROOT/cmake/3.22.1"
           else
-            echo "Required NDK and CMake versions are already installed."
+            echo "Required CMake version is already installed."
+          fi
+
+          if [[ ! -f "$SDK_ROOT/ndk/27.0.12077973/source.properties" ]]; then
+            install_sdk_package "ndk;27.0.12077973" "$SDK_ROOT/ndk/27.0.12077973"
+          else
+            echo "Required NDK version is already installed."
           fi
 
       # Preserve native CMake state across commits on the long-lived feature branch.

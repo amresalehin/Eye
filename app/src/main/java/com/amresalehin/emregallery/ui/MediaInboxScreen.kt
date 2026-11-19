@@ -102,8 +102,8 @@ fun MediaInboxScreen(
     val sessionSourceDomain by DownloaderSession.sourceDomain.collectAsState()
     val sessionSourceUrl by DownloaderSession.currentUrl.collectAsState()
 
-    BackHandler(enabled = true) {
-        if (viewMode == DownloaderViewMode.DISCOVERED_MEDIA && initialViewMode != DownloaderViewMode.DISCOVERED_MEDIA) {
+    BackHandler(enabled = viewMode == DownloaderViewMode.DISCOVERED_MEDIA) {
+        if (initialViewMode != DownloaderViewMode.DISCOVERED_MEDIA) {
             viewMode = DownloaderViewMode.ACTIVITY_PAGE
         } else {
             onBack()
@@ -522,7 +522,7 @@ fun WebbyDiscoveredMediaGrid(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.padding(24.dp)
                     ) {
                         Surface(
@@ -540,12 +540,6 @@ fun WebbyDiscoveredMediaGrid(
                                 )
                             }
                         }
-                        Text(
-                            text = "Ready to Scan & Download",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
 
                         if (searchHistory.isNotEmpty() && onSelectHistoryUrl != null) {
                             val distinctHistory = remember(searchHistory) {
@@ -615,7 +609,7 @@ fun WebbyDiscoveredMediaGrid(
                         start = 2.dp,
                         end = 2.dp,
                         top = 2.dp,
-                        bottom = 88.dp
+                        bottom = 72.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -759,49 +753,41 @@ fun WebbyDiscoveredMediaGrid(
             }
         }
 
-        // Floating Monochrome Batch Download Bar
-        if (filteredItems.isNotEmpty()) {
+        // Compact Floating Download Pill (single count, small footprint)
+        if (filteredItems.isNotEmpty() && selectedIds.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surface,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
                 tonalElevation = 6.dp,
                 shadowElevation = 8.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(bottom = 12.dp)
+                    .height(38.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        val toDownload = items.filter { it.id in selectedIds }
+                        onDownloadSelected(toDownload)
+                    }
+                    .testTag("grid_batch_download_pill")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "${selectedIds.size} selected",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 6.dp)
+                    Icon(
+                        Icons.Default.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(15.dp)
                     )
-
-                    Button(
-                        onClick = {
-                            val toDownload = items.filter { it.id in selectedIds }
-                            onDownloadSelected(toDownload)
-                        },
-                        enabled = selectedIds.isNotEmpty(),
-                        shape = RoundedCornerShape(50),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "Download (${selectedIds.size})",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Text(
+                        text = "Download (${selectedIds.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             }
         }

@@ -181,16 +181,32 @@ fun YtdlnisScreen(
 
     var logViewerItem by remember { mutableStateOf<YtdlnisDownloadItem?>(null) }
 
-    BackHandler {
+    fun handleBackNavigation() {
         when {
             activeConfigInfo != null -> activeConfigInfo = null
             playlistEntries.isNotEmpty() -> {
                 playlistEntries = emptyList()
                 selectedPlaylistUrls = emptySet()
             }
-            canvasMode != DownloaderCanvasMode.GRID -> canvasMode = DownloaderCanvasMode.GRID
+            canvasMode != DownloaderCanvasMode.GRID -> {
+                canvasMode = DownloaderCanvasMode.GRID
+            }
+            extractionState.isRunning || isFetching -> {
+                extractionCoordinator.cancel()
+                isFetching = false
+            }
+            discoveredItems.isNotEmpty() || sessionSourceUrl.isNotBlank() || urlInput.isNotBlank() || !fetchError.isNullOrBlank() -> {
+                extractionCoordinator.cancel()
+                DownloaderSession.clear()
+                urlInput = ""
+                fetchError = null
+            }
             else -> onBack()
         }
+    }
+
+    BackHandler {
+        handleBackNavigation()
     }
 
     fun triggerStudioFetch(rawInput: String) {
@@ -326,12 +342,23 @@ fun YtdlnisScreen(
         }
     }
 
-    val activeDownloadCount = remember(nativeActivities, ytdlnisDownloads) {
-        val nativeActive = nativeActivities.count { it.isDownloading || it.isRetrying }
-        val ytActive = ytdlnisDownloads.count {
-            it.status == YtdlnisDownloadStatus.ACTIVE || it.status == YtdlnisDownloadStatus.QUEUED
+    val deduplicatedNative = remember(nativeActivities) {
+        nativeActivities.distinctBy { it.id }
+    }
+    val activeQueueCount = remember(deduplicatedNative) {
+        deduplicatedNative.count { it.isDownloading || it.isRetrying || it.isPaused }
+    }
+    val failedQueueCount = remember(deduplicatedNative) {
+        deduplicatedNative.count { it.isFailed }
+    }
+    val finishedQueueCount = remember(deduplicatedNative) {
+        deduplicatedNative.count { it.isFinished }
+    }
+    val queueBadgeCount = remember(deduplicatedNative, ytdlnisDownloads) {
+        val scheduledOrSaved = ytdlnisDownloads.count {
+            it.status == YtdlnisDownloadStatus.SCHEDULED || it.status == YtdlnisDownloadStatus.SAVED
         }
-        maxOf(nativeActive, ytActive)
+        deduplicatedNative.size + scheduledOrSaved
     }
 
     YtdlnisMonochromeTheme {
@@ -346,7 +373,7 @@ fun YtdlnisScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Top Search Pill matching the app's main Home page FloatingSearchPill shape & size (52.dp CircleShape)
+                    // Adaptive Top Pill Bar matching the main Home page FloatingSearchPill shape & size (52.dp CircleShape)
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -357,136 +384,319 @@ fun YtdlnisScreen(
                             .fillMaxWidth()
                             .height(52.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(start = 4.dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier.size(44.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
+                        when (canvasMode) {
+                            DownloaderCanvasMode.GRID -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(start = 4.dp, end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { handleBackNavigation() },
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
 
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                if (urlInput.isEmpty()) {
-                                    Text(
-                                        text = "Paste URL, search, or r/sub…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                BasicTextField(
-                                    value = urlInput,
-                                    onValueChange = { urlInput = it },
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    ),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                                    keyboardActions = KeyboardActions(
-                                        onGo = {
-                                            if (canvasMode == DownloaderCanvasMode.GRID && !quickDownload) {
-                                                triggerMultiEngineGridScan(urlInput)
-                                            } else {
-                                                triggerStudioFetch(urlInput)
-                                            }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (urlInput.isEmpty()) {
+                                            Text(
+                                                text = "Paste URL, search, or r/sub…",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
+                                        BasicTextField(
+                                            value = urlInput,
+                                            onValueChange = { urlInput = it },
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                            keyboardActions = KeyboardActions(
+                                                onGo = {
+                                                    if (!quickDownload) {
+                                                        triggerMultiEngineGridScan(urlInput)
+                                                    } else {
+                                                        triggerStudioFetch(urlInput)
+                                                    }
+                                                }
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
 
-                            if (urlInput.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        urlInput = ""
-                                        fetchError = null
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Clear,
-                                        contentDescription = "Clear",
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            } else {
-                                IconButton(
-                                    onClick = { txtFilePicker.launch("text/plain") },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.PostAdd,
-                                        contentDescription = "Import .txt",
-                                        modifier = Modifier.size(17.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            // Small Lightning Button: shows lightning when ON, and lightning divided by a slash when OFF
-                            SmallLightningToggleButton(
-                                enabled = quickDownload,
-                                onToggle = {
-                                    repo.setQuickDownloadMode(!quickDownload)
-                                    Toast.makeText(
-                                        context,
-                                        if (!quickDownload) "Instant Download On" else "Instant Download Off (Studio Mode)",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            )
-
-                            // Primary Action Pill matching main app pill shapes & labelMedium font
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .height(36.dp)
-                                    .clip(CircleShape)
-                                    .clickable(enabled = urlInput.isNotBlank() && !isFetching) {
-                                        if (canvasMode == DownloaderCanvasMode.GRID && !quickDownload) {
-                                            triggerMultiEngineGridScan(urlInput)
-                                        } else {
-                                            triggerStudioFetch(urlInput)
+                                    if (urlInput.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = {
+                                                urlInput = ""
+                                                fetchError = null
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Clear,
+                                                contentDescription = "Clear",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    } else {
+                                        IconButton(
+                                            onClick = { txtFilePicker.launch("text/plain") },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.PostAdd,
+                                                contentDescription = "Import .txt",
+                                                modifier = Modifier.size(17.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 14.dp)
-                                ) {
-                                    Text(
-                                        text = "Get",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary
+
+                                    SmallLightningToggleButton(
+                                        enabled = quickDownload,
+                                        onToggle = {
+                                            repo.setQuickDownloadMode(!quickDownload)
+                                            Toast.makeText(
+                                                context,
+                                                if (!quickDownload) "Instant Download On" else "Instant Download Off (Studio Mode)",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     )
+
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier
+                                            .height(36.dp)
+                                            .clip(CircleShape)
+                                            .clickable(enabled = urlInput.isNotBlank() && !isFetching) {
+                                                if (!quickDownload) {
+                                                    triggerMultiEngineGridScan(urlInput)
+                                                } else {
+                                                    triggerStudioFetch(urlInput)
+                                                }
+                                            }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(horizontal = 14.dp)
+                                        ) {
+                                            Text(
+                                                text = "Get",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            DownloaderCanvasMode.QUEUE -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(start = 4.dp, end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { handleBackNavigation() },
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Queue",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (queueBadgeCount > 0) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.secondaryContainer
+                                            ) {
+                                                Text(
+                                                    text = if (activeQueueCount > 0) "$activeQueueCount active" else "$queueBadgeCount",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (failedQueueCount > 0) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                            modifier = Modifier
+                                                .height(32.dp)
+                                                .clip(CircleShape)
+                                                .clickable { DownloadActivityManager.retryAllFailed(context) }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                                Text(
+                                                    text = "Retry",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (activeQueueCount > 0) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                            modifier = Modifier
+                                                .height(32.dp)
+                                                .clip(CircleShape)
+                                                .clickable { DownloadActivityManager.cancelAllActive(context) }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                                Text(
+                                                    text = "Stop",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (finishedQueueCount > 0) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                            modifier = Modifier
+                                                .height(32.dp)
+                                                .clip(CircleShape)
+                                                .clickable {
+                                                    DownloadActivityManager.clearFinished()
+                                                    repo.clearCompletedAndCancelled()
+                                                }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                                Text(
+                                                    text = "Clear",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            DownloaderCanvasMode.SETTINGS -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(start = 4.dp, end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { handleBackNavigation() },
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "Settings",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainer,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                    ) {
+                                        Row(modifier = Modifier.padding(2.dp)) {
+                                            listOf(
+                                                UtilitySheetMode.POWER to "Power",
+                                                UtilitySheetMode.TERMINAL to "Terminal"
+                                            ).forEach { (mode, label) ->
+                                                val selected = utilitySheetMode == mode
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                                    modifier = Modifier
+                                                        .height(32.dp)
+                                                        .clip(CircleShape)
+                                                        .clickable { utilitySheetMode = mode }
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = label,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                            color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Thin progress indicator when probing formats or scanning site
-                    AnimatedVisibility(visible = isFetching || extractionState.isRunning) {
+                    // Thin progress indicator when probing formats or scanning site in Grid
+                    AnimatedVisibility(visible = canvasMode == DownloaderCanvasMode.GRID && (isFetching || extractionState.isRunning)) {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             LinearProgressIndicator(
                                 modifier = Modifier
@@ -522,7 +732,7 @@ fun YtdlnisScreen(
                         }
                     }
 
-                    if (!fetchError.isNullOrBlank()) {
+                    if (canvasMode == DownloaderCanvasMode.GRID && !fetchError.isNullOrBlank()) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -557,12 +767,6 @@ fun YtdlnisScreen(
                 }
             },
             bottomBar = {
-                val queueBadgeCount = remember(nativeActivities, ytdlnisDownloads) {
-                    val scheduledOrSaved = ytdlnisDownloads.count {
-                        it.status == YtdlnisDownloadStatus.SCHEDULED || it.status == YtdlnisDownloadStatus.SAVED
-                    }
-                    nativeActivities.distinctBy { it.id }.size + scheduledOrSaved
-                }
                 DownloaderBottomNavigationBar(
                     canvasMode = canvasMode,
                     queueCount = queueBadgeCount,
@@ -647,45 +851,6 @@ fun YtdlnisScreen(
 
                     DownloaderCanvasMode.SETTINGS -> {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.Start,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(50),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                ) {
-                                    Row(modifier = Modifier.padding(3.dp)) {
-                                        listOf(
-                                            UtilitySheetMode.POWER to "Power Settings",
-                                            UtilitySheetMode.TERMINAL to "yt-dlp Terminal"
-                                        ).forEach { (mode, label) ->
-                                            val selected = utilitySheetMode == mode
-                                            Surface(
-                                                shape = RoundedCornerShape(50),
-                                                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .clickable { utilitySheetMode = mode }
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
                             when (utilitySheetMode) {
                                 UtilitySheetMode.POWER -> UnifiedPowerSuiteTab(
                                     repo = repo,
@@ -955,7 +1120,7 @@ private fun DownloaderBottomNavigationBar(
                 )
                 BottomNavPillButton(
                     label = "Settings",
-                    icon = Icons.Default.Tune,
+                    icon = Icons.Default.Settings,
                     selected = canvasMode == DownloaderCanvasMode.SETTINGS,
                     onClick = onSelectSettings,
                     modifier = Modifier.weight(1f)
@@ -1118,82 +1283,28 @@ private fun VisualQueueCanvas(
                     UnifiedActivityFilter.SAVED to savedCount
                 )
 
-            UnifiedActivityFilter.entries.forEach { f ->
-                val count = filterCounts[f] ?: 0
-                if (f == UnifiedActivityFilter.ALL || count > 0) {
-                    val selected = filter == f
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable { filter = f }
-                    ) {
-                        Text(
-                            text = if (count > 0 && f != UnifiedActivityFilter.ALL) "${f.label} $count" else f.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
-                        )
+                UnifiedActivityFilter.entries.forEach { f ->
+                    val count = filterCounts[f] ?: 0
+                    if (f == UnifiedActivityFilter.ALL || count > 0) {
+                        val selected = filter == f
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                            border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { filter = f }
+                        ) {
+                            Text(
+                                text = if (count > 0 && f != UnifiedActivityFilter.ALL) "${f.label} $count" else f.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+                            )
+                        }
                     }
                 }
-            }
-
-            if (failedCount > 0) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable { DownloadActivityManager.retryAllFailed(context) }
-                ) {
-                    Text(
-                        text = "Retry",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-            }
-
-            if (activeCount > 0) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable { DownloadActivityManager.cancelAllActive(context) }
-                ) {
-                    Text(
-                        text = "Stop",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-            }
-
-            if (finishedCount > 0) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable {
-                            DownloadActivityManager.clearFinished()
-                            repo.clearCompletedAndCancelled()
-                        }
-                ) {
-                    Text(
-                        text = "Clear",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-            }
             }
         }
 
@@ -1206,29 +1317,24 @@ private fun VisualQueueCanvas(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(24.dp)
                 ) {
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.size(64.dp)
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier.size(60.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 Icons.Default.Download,
                                 contentDescription = null,
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(26.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                    Text(
-                        text = "Ready to Download",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
 
                     if (searchHistory.isNotEmpty()) {
                         val distinctHistory = remember(searchHistory) {

@@ -285,18 +285,18 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Scraper & Archive
+            // 2-column tiles: Browser & Archive
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 CollectionTile(
-                    title = "Scraper",
+                    title = "Browser",
                     count = "",
                     icon = Icons.Default.TravelExplore,
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Scraper") },
+                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Browser") },
                     modifier = Modifier
                         .weight(1f)
                         .testTag("albums_scraper_tile")

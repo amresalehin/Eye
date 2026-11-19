@@ -1134,9 +1134,9 @@ private fun WebbyFullscreenMediaViewer(
                             }
                         }
 
-                        if ((currentItem.isVideo || currentItem.isStream) && !currentItem.isAudio) {
+                        if ((currentItem.isVideo || currentItem.isStream) && !currentItem.isAudio && onDownloadAudio != null) {
                             OutlinedButton(
-                                onClick = { onDownloadAudio?.invoke(currentItem) ?: onDownloadSingle(currentItem) },
+                                onClick = { onDownloadAudio?.invoke(currentItem) },
                                 shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                 border = BorderStroke(1.dp, Color(0xFF424242)),

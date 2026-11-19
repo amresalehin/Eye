@@ -247,6 +247,52 @@ class MediaDownloaderTest {
                 mediaInfo = audioOnlyStream
             )
         )
+
+        // Explicit/global Audio Only must validate the requested audio track, not
+        // the original page classification (which may still be a video page).
+        assertNull(
+            MediaDownloadWorker.validateMediaStreams(
+                isVideo = true,
+                isAudio = false,
+                isStream = false,
+                requireAudioWithVideo = true,
+                mediaInfo = audioOnlyStream,
+                mediaMode = "audio"
+            )
+        )
+        assertTrue(
+            MediaDownloadWorker.validateMediaStreams(
+                isVideo = true,
+                isAudio = false,
+                isStream = false,
+                requireAudioWithVideo = false,
+                mediaInfo = videoOnly,
+                mediaMode = "audio"
+            )?.contains("audio track") == true
+        )
+
+        // Video Only must require a video track even when the source was detected as
+        // a generic stream and yt-dlp selected an audio-only rendition.
+        assertNull(
+            MediaDownloadWorker.validateMediaStreams(
+                isVideo = true,
+                isAudio = false,
+                isStream = false,
+                requireAudioWithVideo = false,
+                mediaInfo = videoOnly,
+                mediaMode = "video_only"
+            )
+        )
+        assertTrue(
+            MediaDownloadWorker.validateMediaStreams(
+                isVideo = true,
+                isAudio = false,
+                isStream = true,
+                requireAudioWithVideo = false,
+                mediaInfo = audioOnlyStream,
+                mediaMode = "video_only"
+            )?.contains("video track") == true
+        )
     }
 
     @Test

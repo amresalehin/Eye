@@ -226,7 +226,7 @@ class MediaDownloadWorker(
                 lowerOrigin.contains("vimeo.com") || lowerOrigin.contains("twitter.com") ||
                 lowerOrigin.contains("x.com") || lowerOrigin.contains("dailymotion.com") ||
                 lowerOrigin.contains("bilibili.com")
-            val requireAudioTrack = isVideo && isSplitAudioVideoPlatform && mediaMode != "video_only"
+            val requireAudioTrack = isVideo && isSplitAudioVideoPlatform && mediaMode == "video"
 
             val effectiveDomain = sourceDomain.takeIf { it.isNotBlank() }
                 ?: OkHttpDownloader.extractDomain(sourceUrl.ifBlank { mediaUrl })
@@ -238,7 +238,7 @@ class MediaDownloadWorker(
             // Strategy 0: Native parallel HLS/DASH stream reconstruction (Speed Boost segment pool + AES-128 + MP4/TS fallback)
             val isDirectHls = mediaUrl.contains(".m3u8", ignoreCase = true)
             val isDirectDash = mediaUrl.contains(".mpd", ignoreCase = true)
-            if (isStream && (isDirectHls || isDirectDash) && !isYouTubeSource) {
+            if (isStream && (isDirectHls || isDirectDash) && !isYouTubeSource && mediaMode != "audio") {
                 val streamConns = if (speedBoostEnabled) speedBoostConnections else 1
                 setProgress(workDataOf(KEY_PROGRESS to 0.20f, KEY_STATUS to "Reconstructing stream (${streamConns}x): $title..."))
                 val streamRes = if (isDirectHls) {
@@ -447,7 +447,8 @@ class MediaDownloadWorker(
                     isAudio = isAudio,
                     isStream = isStream,
                     requireAudioWithVideo = requireAudioTrack,
-                    mediaInfo = mediaInfo
+                    mediaInfo = mediaInfo,
+                    mediaMode = mediaMode
                 )
                 if (validationError != null) {
                     errorDiagnostic = validationError
@@ -464,7 +465,11 @@ class MediaDownloadWorker(
                     MediaScannerConnection.scanFile(
                         applicationContext,
                         arrayOf(downloadedFile.absolutePath),
-                        arrayOf(if (isVideo) "video/*" else if (isAudio) "audio/*" else "image/*"),
+                        arrayOf(when {
+                            mediaMode == "audio" || isAudio -> "audio/*"
+                            isVideo || isStream -> "video/*"
+                            else -> "image/*"
+                        }),
                         null
                     )
                 }
@@ -584,26 +589,38 @@ class MediaDownloadWorker(
             isAudio: Boolean,
             isStream: Boolean,
             requireAudioWithVideo: Boolean,
-            mediaInfo: FfprobeMediaInfo?
+            mediaInfo: FfprobeMediaInfo?,
+            mediaMode: String = "best"
         ): String? {
             if (!isVideo && !isAudio && !isStream) return null
             val info = mediaInfo ?: return "Downloaded media could not be inspected by FFprobe"
             val hasVideo = !info.videoCodec.isNullOrBlank()
             val hasAudio = !info.audioCodec.isNullOrBlank()
+            val normalizedMode = mediaMode.trim().lowercase()
+            val audioOnly = normalizedMode == "audio" || (!isVideo && isAudio)
+            val videoOnly = normalizedMode == "video_only"
 
-            // HLS/DASH is a container/transport category, not proof that the stream
-            // contains video. An audio-only playlist is still a valid stream download.
-            if (isVideo && !isStream && !hasVideo) {
-                return "Downloaded file does not contain a valid video track"
+            // The selected download mode is authoritative. A video page downloaded as
+            // audio must not be rejected for lacking a video track, while a Video Only
+            // request must not silently accept an audio-only HLS/DASH rendition.
+            val expectsVideo = when {
+                audioOnly -> false
+                videoOnly -> isVideo || isStream || isAudio
+                else -> isVideo && !isStream
             }
-            if (isAudio && !hasAudio) return "Downloaded file does not contain a valid audio track"
-            if (isVideo && isAudio && (!hasVideo || !hasAudio)) {
+            val expectsAudio = audioOnly ||
+                (!videoOnly && (isAudio || (isVideo && requireAudioWithVideo)))
+
+            if (expectsVideo && expectsAudio && (!hasVideo || !hasAudio)) {
                 return "Downloaded file is missing the requested audio or video track"
             }
-            if (isVideo && requireAudioWithVideo && !hasAudio) {
-                return "Video download is missing its expected audio track"
+            if (expectsVideo && !hasVideo) {
+                return "Downloaded file does not contain a valid video track"
             }
-            if (isStream && !hasVideo && !hasAudio) {
+            if (expectsAudio && !hasAudio) {
+                return "Downloaded file does not contain a valid audio track"
+            }
+            if (isStream && !expectsVideo && !expectsAudio && !hasVideo && !hasAudio) {
                 return "Downloaded stream contains neither a valid video nor audio track"
             }
             return null

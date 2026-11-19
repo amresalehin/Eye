@@ -166,7 +166,7 @@ object BrowserSession {
     // Headless Browser Extraction Engine (used for URL Routing Fallback)
     // =========================================================================
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
         @android.webkit.JavascriptInterface

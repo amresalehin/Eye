@@ -75,6 +75,7 @@ class BrowserMediaExtractor(private val context: Context) {
             try {
                 val act = findActivity(context)
                 val wv = if (act != null) WebView(act) else WebView(context)
+                wv.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 webView = wv
 
                 // Sync cookies bidirectionally with CookieManager before navigation

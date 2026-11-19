@@ -137,7 +137,10 @@ fun BookmarkDetailScreen(
         PocketBookmarkViewerPage(
             stack = liveStack,
             onBack = onBack,
-            onOpenBrowser = onOpenBrowser,
+            onOpenBrowser = { url ->
+                pocketRepo.stopDeepScan(liveStack.id)
+                onOpenBrowser(url)
+            },
             onDelete = { showDeleteConfirmDialog = true },
             onEditNote = { editingStack = liveStack },
             onRefreshMetadata = onRefreshMetadata,

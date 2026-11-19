@@ -165,6 +165,7 @@ fun DirectBrowserView(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var webViewRecreateEpoch by remember { mutableIntStateOf(0) }
+    var lastRendererCrashMs by remember { mutableLongStateOf(0L) }
 
     // Dialog & Sheet States
     var showAddShortcutDialog by remember { mutableStateOf(false) }
@@ -239,6 +240,8 @@ fun DirectBrowserView(
     }
 
     LaunchedEffect(Unit) {
+        // Ensure no background deep-scan WebView is contending for the Chromium renderer process
+        PocketDeepScanEngine.stopScan()
         if (startUrl.isBlank()) {
             tabSession.clearMedia()
             tabSession.updateNavigation("")
@@ -395,35 +398,40 @@ fun DirectBrowserView(
             scanCurrentPageDOM(wv)
         }
 
-        // 2. Run isolated background deep scan with full scrolling & JS offscreen
-        // The active browser viewport NEVER scrolls; the user's reading view remains 100% still!
-        PocketDeepScanEngine.startScan(
-            context = context,
-            bookmarkId = "browser_active_${System.currentTimeMillis()}",
-            targetUrl = current,
-            scope = coroutineScope,
-            onIncrementalMediaDiscovered = { newItems ->
-                val scraped = newItems.map { item ->
-                    ScrapedMediaItem(
-                        id = item.id.ifBlank { "deep_${item.sourceUrl.hashCode()}" },
-                        url = item.sourceUrl,
-                        title = item.title.ifBlank { pageTitle },
-                        source = ExtractionSource.DOM_SCRAPE.label,
-                        isVideo = item.isVideo || item.isStream,
-                        isAudio = item.isAudio,
-                        isStream = item.isStream,
-                        sizeBytes = item.sizeBytes
+        // 2. Run multi-pass DOM & lazy-media extraction directly on the active WebView
+        // Avoids spawning a second concurrent WebView in the single Chromium renderer process
+        deepScanJob = coroutineScope.launch {
+            try {
+                repeat(6) {
+                    if (!isActive || !isDeepScanning) return@launch
+                    val wv = webViewInstance ?: return@launch
+                    RamGovernor.enforceLimit(context, wv)
+                    wv.evaluateJavascript(RamGovernor.MEDIA_BUFFER_PRUNING_JS, null)
+                    wv.evaluateJavascript(
+                        """
+                        (function() {
+                            try {
+                                var lazyEls = document.querySelectorAll('[data-src], [data-original], [data-lazy], [data-lazy-src], [data-url], [data-highres]');
+                                for (var i = 0; i < lazyEls.length; i++) {
+                                    var el = lazyEls[i];
+                                    var candidate = el.getAttribute('data-src') || el.getAttribute('data-original') || el.getAttribute('data-lazy') || el.getAttribute('data-lazy-src') || el.getAttribute('data-url') || el.getAttribute('data-highres');
+                                    if (candidate && !el.getAttribute('src')) {
+                                        el.setAttribute('src', candidate);
+                                    }
+                                }
+                                window.dispatchEvent(new Event('scroll'));
+                            } catch(e) {}
+                        })();
+                        """.trimIndent(),
+                        null
                     )
+                    scanCurrentPageDOM(wv)
+                    delay(1_200L)
                 }
-                tabSession.registerMediaBatch(scraped, pageTitle)
-                val domain = runCatching { URL(current).host }.getOrDefault("")
-                onBatchExtracted(scraped, pageTitle, domain)
-                DownloaderSession.addDiscoveredItems(scraped, pageTitle)
-            },
-            onCompleted = {
+            } finally {
                 isDeepScanning = false
             }
-        )
+        }
     }
 
     fun handleDiscoveredMediaClick() {
@@ -761,6 +769,11 @@ fun DirectBrowserView(
                             WebView(ctx).apply {
                                 webViewInstance = this
                                 BrowserSession.activeWebView = this
+                            // Software layer avoids missing GPU rendernode crashes in cloud emulators
+                            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
+                            }
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -1041,6 +1054,8 @@ fun DirectBrowserView(
                                     }
                                     BotDetectionMitigator.injectStealth(view)
                                     BotDetectionMitigator.syncCookiesFromWebView(url)
+                                    view?.evaluateJavascript(RamGovernor.MEDIA_BUFFER_PRUNING_JS, null)
+                                    RamGovernor.enforceLimit(context, view)
                                     if (redirectProtectionEnabled && hideBlockedElements) {
                                         view?.evaluateJavascript(RedirectProtectionEngine.getTrackClickTargetScript(), null)
                                     }
@@ -1109,7 +1124,11 @@ fun DirectBrowserView(
                                     detail: RenderProcessGoneDetail?
                                 ): Boolean {
                                     val didCrash = detail?.didCrash() ?: false
-                                    Log.w("DirectBrowserView", "Chromium renderer process gone (didCrash=$didCrash). Cleanly recovering...")
+                                    val now = System.currentTimeMillis()
+                                    val isRapidCrashLoop = (now - lastRendererCrashMs) < 8_000L
+                                    lastRendererCrashMs = now
+                                    Log.w("DirectBrowserView", "Chromium renderer process gone (didCrash=$didCrash, rapidLoop=$isRapidCrashLoop). Cleanly recovering...")
+                                    stopBrowserDeepScan()
                                     try {
                                         view?.let { wv ->
                                             (wv.parent as? android.view.ViewGroup)?.removeView(wv)
@@ -1118,6 +1137,13 @@ fun DirectBrowserView(
                                     } catch (_: Throwable) {}
                                     if (webViewInstance === view) {
                                         webViewInstance = null
+                                    }
+                                    if (BrowserSession.activeWebView === view) {
+                                        BrowserSession.activeWebView = null
+                                    }
+                                    if (isRapidCrashLoop) {
+                                        currentUrl = ""
+                                        addressInput = ""
                                     }
                                     RamGovernor.enforceLimit(context, null)
                                     webViewRecreateEpoch++
@@ -1134,6 +1160,9 @@ fun DirectBrowserView(
                     update = { wv ->
                         webViewInstance = wv
                         BrowserSession.activeWebView = wv
+                        if (wv.layerType != android.view.View.LAYER_TYPE_SOFTWARE) {
+                            wv.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+                        }
                         wv.setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             wv.settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF

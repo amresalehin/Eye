@@ -240,6 +240,8 @@ object PocketDeepScanEngine {
                 databaseEnabled = true
                 mediaPlaybackRequiresUserGesture = true
                 loadsImagesAutomatically = true
+                // Prevent offscreen scraper from decoding full-resolution bitmaps into native Chromium renderer RAM
+                blockNetworkImage = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 cacheMode = WebSettings.LOAD_NO_CACHE
                 userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -252,9 +254,10 @@ object PocketDeepScanEngine {
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
                     val url = request?.url?.toString()?.lowercase(Locale.ROOT) ?: return null
-                    // Block intrusive ad trackers or audio streams, but allow images, videos, and scripts
+                    // Block intrusive ad trackers or heavy binary video/audio payloads in offscreen DOM scan
                     if (url.contains("google-analytics") || url.contains("doubleclick") ||
-                        url.contains("facebook.com/tr") || url.contains("adservice")) {
+                        url.contains("facebook.com/tr") || url.contains("adservice") ||
+                        url.matches(Regex(""".*\.(mp4|webm|mov|mkv|ts|m4s|mp3|m4a|aac|flac|wav)(\?.*)?$"""))) {
                         return WebResourceResponse("text/plain", "UTF-8", null)
                     }
                     return null

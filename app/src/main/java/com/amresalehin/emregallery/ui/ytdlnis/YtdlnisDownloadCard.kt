@@ -1,11 +1,18 @@
 package com.amresalehin.emregallery.ui.ytdlnis
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,28 +21,101 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amresalehin.emregallery.ytdlnis.*
 import kotlinx.coroutines.launch
 
+private val MonochromeDarkScheme = darkColorScheme(
+    primary = Color(0xFFF5F5F5),
+    onPrimary = Color(0xFF101010),
+    primaryContainer = Color(0xFF262626),
+    onPrimaryContainer = Color(0xFFF5F5F5),
+    secondary = Color(0xFFD4D4D4),
+    onSecondary = Color(0xFF121212),
+    secondaryContainer = Color(0xFF222222),
+    onSecondaryContainer = Color(0xFFE5E5E5),
+    tertiary = Color(0xFFA3A3A3),
+    onTertiary = Color(0xFF121212),
+    background = Color(0xFF101010),
+    onBackground = Color(0xFFF5F5F5),
+    surface = Color(0xFF161616),
+    onSurface = Color(0xFFF5F5F5),
+    surfaceVariant = Color(0xFF202020),
+    onSurfaceVariant = Color(0xFF9E9E9E),
+    outline = Color(0xFF3A3A3A),
+    outlineVariant = Color(0xFF2C2C2C),
+    error = Color(0xFFE57373),
+    onError = Color(0xFF141414)
+)
+
+private val MonochromeLightScheme = lightColorScheme(
+    primary = Color(0xFF141414),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFEAEAEA),
+    onPrimaryContainer = Color(0xFF141414),
+    secondary = Color(0xFF333333),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFF0F0F0),
+    onSecondaryContainer = Color(0xFF1A1A1A),
+    tertiary = Color(0xFF555555),
+    onTertiary = Color(0xFFFFFFFF),
+    background = Color(0xFFFAFAFA),
+    onBackground = Color(0xFF141414),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF141414),
+    surfaceVariant = Color(0xFFF0F0F0),
+    onSurfaceVariant = Color(0xFF616161),
+    outline = Color(0xFFD0D0D0),
+    outlineVariant = Color(0xFFE2E2E2),
+    error = Color(0xFFB00020),
+    onError = Color(0xFFFFFFFF)
+)
+
 /**
- * Reusable YTDLnis Download Configuration Card / Bottom Sheet content.
- * Supports Audio / Video / Custom Command modes, editable title & author,
- * format & multi-audio selection, container picker, live filename template preview,
- * timestamp/chapter cuts, crop presets, SponsorBlock, subtitles, metadata/chapters,
- * compatible mode, lrclib.net synced lyrics + timing offset, and date/time scheduling.
+ * Theme wrapper that preserves Emre Gallery's active light/dark MaterialTheme
+ * (so the Downloader never overrides the user's selected app theme).
+ */
+@Composable
+fun YtdlnisMonochromeTheme(
+    content: @Composable () -> Unit
+) {
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        typography = MaterialTheme.typography,
+        shapes = MaterialTheme.shapes,
+        content = content
+    )
+}
+
+private enum class StudioDisclosureChip(val label: String, val icon: ImageVector) {
+    CUT("Cut", Icons.Default.ContentCut),
+    SPONSORBLOCK("SponsorBlock", Icons.Default.Shield),
+    SUBTITLES("Subtitles", Icons.Default.Subtitles),
+    LYRICS("Lyrics", Icons.Default.MusicNote),
+    CROP_COMPAT("Adjust", Icons.Default.Crop),
+    SCHEDULE("Schedule", Icons.Default.Schedule),
+    OUTPUT("Output", Icons.Default.Folder)
+}
+
+/**
+ * Visual-first, minimal monochrome Studio Format & Quality Sheet.
+ * Uses progressive disclosure chips so advanced YTDLnis tools (Cut, SponsorBlock, Subtitles,
+ * Synced Lyrics, Crop/Compatible Mode, Schedule, and Output Template) expand only when tapped.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun YtdlnisDownloadConfigCard(
     initialInfo: YtdlnisVideoInfo,
-    templates: List<YtdlnisCommandTemplate>,
+    templates: List<YtdlnisCommandTemplate> = emptyList(),
     defaultFilenameTemplate: String,
     defaultSubfolderMode: YtdlnisSubfolderMode,
     incognito: Boolean,
@@ -50,12 +130,17 @@ fun YtdlnisDownloadConfigCard(
     var downloadType by remember(initialInfo.url) { mutableStateOf(YtdlnisDownloadType.VIDEO) }
     var title by remember(initialInfo.url) { mutableStateOf(initialInfo.title) }
     var author by remember(initialInfo.url) { mutableStateOf(initialInfo.author) }
+    var isEditingMetadata by remember { mutableStateOf(false) }
+
     var selectedFormatId by remember(initialInfo.url) { mutableStateOf("best") }
     var selectedAudioIds by remember(initialInfo.url) { mutableStateOf(setOf<String>()) }
     var container by remember(initialInfo.url) { mutableStateOf("mp4") }
     var filenameTemplate by remember(initialInfo.url) { mutableStateOf(defaultFilenameTemplate) }
     var subfolderMode by remember(initialInfo.url) { mutableStateOf(defaultSubfolderMode) }
     var customCommand by remember(initialInfo.url) { mutableStateOf("") }
+
+    // Progressive disclosure chip selection (null = all collapsed for clean visual view)
+    var activeChip by remember { mutableStateOf<StudioDisclosureChip?>(null) }
 
     // Editing options
     var cutSections by remember(initialInfo.url) { mutableStateOf(listOf<YtdlnisCutSection>()) }
@@ -83,9 +168,10 @@ fun YtdlnisDownloadConfigCard(
     var scheduleDelayMinutes by remember { mutableStateOf(0) }
 
     // Lyrics (lrclib.net)
-    var showLyricsDialog by remember { mutableStateOf(false) }
     var lyricsText by remember { mutableStateOf("") }
+    var lyricsOffsetMs by remember { mutableStateOf(0L) }
     var saveLrcFile by remember { mutableStateOf(false) }
+    var isFetchingLyrics by remember { mutableStateOf(false) }
 
     val videoFormats = remember(initialInfo.formats) {
         initialInfo.formats.filter { it.hasVideo }.sortedByDescending { it.height }
@@ -124,7 +210,7 @@ fun YtdlnisDownloadConfigCard(
         return YtdlnisDownloadItem(
             url = initialInfo.url,
             title = title.trim().ifBlank { initialInfo.title },
-            author = author.trim(),
+            author = author.trim().ifBlank { initialInfo.author },
             durationSec = initialInfo.durationSec,
             durationString = initialInfo.durationString,
             thumbnailUrl = initialInfo.thumbnail,
@@ -137,626 +223,776 @@ fun YtdlnisDownloadConfigCard(
             container = effContainer,
             filenameTemplate = filenameTemplate.trim().ifBlank { "%(title)s.%(ext)s" },
             subfolderMode = subfolderMode,
+            customCommand = customCommand.trim(),
             cutSections = cutSections,
             mergeCutSections = mergeCuts,
-            cropConfig = YtdlnisCropConfig(enabled = cropPreset != "Original", aspectPreset = cropPreset),
             splitByChapters = splitByChapters,
+            cropConfig = YtdlnisCropConfig(
+                enabled = cropPreset != "Original",
+                aspectPreset = cropPreset
+            ),
             sponsorBlockAction = sbAction,
-            sponsorBlockCategories = if (sbAction == YtdlnisSponsorBlockAction.NONE) emptySet() else sbCategories,
+            sponsorBlockCategories = sbCategories,
             embedMetadata = embedMetadata,
             embedThumbnail = embedThumbnail,
             embedChapters = embedChapters,
-            downloadSubtitles = downloadSubtitles || embedSubtitles || burnSubtitles,
+            downloadSubtitles = downloadSubtitles,
             embedSubtitles = embedSubtitles,
             burnSubtitles = burnSubtitles,
-            subtitleLanguages = subtitleLangsInput.split(",").map { it.trim() }.filter { it.isNotBlank() }.ifEmpty { listOf("en") },
+            subtitleLanguages = subtitleLangsInput.split(",").map { it.trim() }.filter { it.isNotBlank() },
             compatibleMode = compatibleMode,
-            lyricsText = lyricsText,
-            saveLrcFile = saveLrcFile,
-            customCommand = customCommand.trim(),
             scheduledTimeMillis = scheduledAt,
-            incognito = incognito
+            incognito = incognito,
+            lyricsText = lyricsText,
+            saveLrcFile = saveLrcFile
         )
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)
-    ) {
-        // Header with thumbnail & metadata
-        item {
+    YtdlnisMonochromeTheme {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 1. Visual Media Header Card (Thumbnail + Title/Author + Edit Toggle)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (initialInfo.thumbnail.isNotBlank()) {
-                    AsyncImage(
-                        model = initialInfo.thumbnail,
-                        contentDescription = title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(width = 104.dp, height = 64.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(width = 96.dp, height = 64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (initialInfo.thumbnail.isNotBlank()) {
+                        AsyncImage(
+                            model = initialInfo.thumbnail,
+                            contentDescription = title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (initialInfo.durationString.isNotBlank()) {
+                        Surface(
+                            color = Color(0xCC101010),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(4.dp)
+                        ) {
+                            Text(
+                                text = initialInfo.durationString,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
                 }
-                Column(modifier = Modifier.weight(1f)) {
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
-                        text = initialInfo.extractor.ifBlank { "yt-dlp" } +
-                            if (initialInfo.durationString.isNotBlank()) " · ${initialInfo.durationString}" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        text = title.ifBlank { "Untitled Media" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = title.ifBlank { initialInfo.url },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
+                        text = listOfNotNull(
+                            author.takeIf { it.isNotBlank() },
+                            initialInfo.extractor.takeIf { it.isNotBlank() }
+                        ).joinToString(" · ").ifBlank { initialInfo.url },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
+
+                IconButton(
+                    onClick = { isEditingMetadata = !isEditingMetadata },
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isEditingMetadata) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                ) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit title and author",
+                        modifier = Modifier.size(16.dp),
+                        tint = if (isEditingMetadata) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            }
-        }
 
-        // Mode switcher: Audio / Video / Command
-        item {
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                YtdlnisDownloadType.entries.forEachIndexed { index, mode ->
-                    SegmentedButton(
-                        selected = downloadType == mode,
-                        onClick = {
-                            downloadType = mode
-                            container = when (mode) {
-                                YtdlnisDownloadType.AUDIO -> "m4a"
-                                YtdlnisDownloadType.VIDEO -> "mp4"
-                                YtdlnisDownloadType.COMMAND -> container
-                            }
-                            selectedFormatId = "best"
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(index, YtdlnisDownloadType.entries.size),
-                        icon = {
-                            Icon(
-                                when (mode) {
-                                    YtdlnisDownloadType.AUDIO -> Icons.Default.Audiotrack
-                                    YtdlnisDownloadType.VIDEO -> Icons.Default.Videocam
-                                    YtdlnisDownloadType.COMMAND -> Icons.Default.Terminal
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    ) {
-                        Text(mode.label)
-                    }
-                }
-            }
-        }
-
-        // Editable Title & Author
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1.4f)
-                )
-                OutlinedTextField(
-                    value = author,
-                    onValueChange = { author = it },
-                    label = { Text("Author") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // Format & Container Selection OR Custom Command Editor
-        if (downloadType == YtdlnisDownloadType.COMMAND) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Command Templates", style = MaterialTheme.typography.labelLarge)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(templates) { tpl ->
-                            SuggestionChip(
-                                onClick = { customCommand = tpl.command },
-                                label = { Text(tpl.title) }
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = customCommand,
-                        onValueChange = { customCommand = it },
-                        label = { Text("Custom yt-dlp flags") },
-                        placeholder = { Text("-f bestvideo+bestaudio --merge-output-format mp4") },
-                        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
-                        minLines = 3,
-                        modifier = Modifier.fillMaxWidth()
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-        } else {
-            // Container chips
-            item {
-                val containers = if (downloadType == YtdlnisDownloadType.AUDIO) {
-                    listOf("m4a", "mp3", "opus", "flac", "wav")
-                } else {
-                    listOf("mp4", "mkv", "webm")
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Container & Format", style = MaterialTheme.typography.labelLarge)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(containers) { ext ->
-                            FilterChip(
-                                selected = container.equals(ext, ignoreCase = true),
-                                onClick = { container = ext },
-                                label = { Text(ext.uppercase()) }
-                            )
-                        }
-                    }
-                    val formats = if (downloadType == YtdlnisDownloadType.AUDIO) audioFormats else videoFormats
-                    if (formats.isNotEmpty()) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            item {
-                                FilterChip(
-                                    selected = selectedFormatId == "best",
-                                    onClick = { selectedFormatId = "best" },
-                                    label = { Text("Best Auto") }
-                                )
-                            }
-                            items(formats.take(15)) { fmt ->
-                                FilterChip(
-                                    selected = selectedFormatId == fmt.formatId,
-                                    onClick = { selectedFormatId = fmt.formatId },
-                                    label = { Text(fmt.displayLabel) }
-                                )
-                            }
-                        }
-                    }
-                    // Multi-audio track selection for Video mode
-                    if (downloadType == YtdlnisDownloadType.VIDEO && audioFormats.isNotEmpty()) {
-                        Text(
-                            "Audio Tracks (optional multi-audio)",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(audioFormats.take(10)) { af ->
-                                val selected = af.formatId in selectedAudioIds
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        selectedAudioIds = if (selected) selectedAudioIds - af.formatId else selectedAudioIds + af.formatId
-                                    },
-                                    label = { Text(af.displayLabel) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
-        // Filename template with live preview & subfolder mode
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(
-                    value = filenameTemplate,
-                    onValueChange = { filenameTemplate = it },
-                    label = { Text("Filename Template") },
-                    singleLine = true,
-                    supportingText = { Text("Preview: $livePreviewName") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(YtdlnisSubfolderMode.entries) { mode ->
-                        FilterChip(
-                            selected = subfolderMode == mode,
-                            onClick = { subfolderMode = mode },
-                            label = { Text(mode.label) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Cut Video / Audio by Timestamps or Chapters
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            // Collapsible inline Title / Author edit fields
+            AnimatedVisibility(visible = isEditingMetadata) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Cut & Chapters", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                        if (cutSections.size > 1) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Merge cuts", style = MaterialTheme.typography.labelSmall)
-                                Checkbox(checked = mergeCuts, onCheckedChange = { mergeCuts = it })
-                            }
-                        }
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = newCutStart,
-                            onValueChange = { newCutStart = it },
-                            label = { Text("Start") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = newCutEnd,
-                            onValueChange = { newCutEnd = it },
-                            label = { Text("End") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilledTonalButton(
-                            onClick = {
-                                if (newCutStart.isNotBlank() && newCutEnd.isNotBlank()) {
-                                    cutSections = cutSections + YtdlnisCutSection(newCutStart.trim(), newCutEnd.trim())
-                                }
-                            }
-                        ) {
-                            Text("Add")
-                        }
-                    }
-                    if (initialInfo.chapters.isNotEmpty()) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(initialInfo.chapters) { ch ->
-                                AssistChip(
-                                    onClick = {
-                                        val s = formatSecToTs(ch.startTimeSec)
-                                        val e = formatSecToTs(ch.endTimeSec)
-                                        cutSections = cutSections + YtdlnisCutSection(s, e, ch.title)
-                                    },
-                                    label = { Text("+ ${ch.title.take(22)}") }
-                                )
-                            }
-                        }
-                    }
-                    if (cutSections.isNotEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            cutSections.forEachIndexed { idx, cut ->
-                                InputChip(
-                                    selected = true,
-                                    onClick = { cutSections = cutSections.filterIndexed { i, _ -> i != idx } },
-                                    label = { Text("${cut.startTime}–${cut.endTime}") },
-                                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(14.dp)) }
-                                )
-                            }
-                        }
-                    }
-                    if (initialInfo.chapters.isNotEmpty()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = splitByChapters, onCheckedChange = { splitByChapters = it })
-                            Text("Split into separate files by chapters", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Title") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.3f)
+                    )
+                    OutlinedTextField(
+                        value = author,
+                        onValueChange = { author = it },
+                        label = { Text("Author") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
-        }
 
-        // Crop, SponsorBlock, Subtitles, Metadata, Compatible Mode, Lyrics
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Editing & Post-Processing", style = MaterialTheme.typography.labelLarge)
-                    if (downloadType == YtdlnisDownloadType.VIDEO) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(listOf("Original", "16:9", "9:16", "1:1", "4:3")) { preset ->
-                                FilterChip(
-                                    selected = cropPreset == preset,
-                                    onClick = { cropPreset = preset },
-                                    label = { Text("Crop: $preset") }
-                                )
-                            }
-                        }
-                    }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        FilterChip(
-                            selected = embedMetadata,
-                            onClick = { embedMetadata = !embedMetadata },
-                            label = { Text("Metadata") }
-                        )
-                        FilterChip(
-                            selected = embedThumbnail,
-                            onClick = { embedThumbnail = !embedThumbnail },
-                            label = { Text("Thumbnail") }
-                        )
-                        FilterChip(
-                            selected = embedChapters,
-                            onClick = { embedChapters = !embedChapters },
-                            label = { Text("Chapters") }
-                        )
-                        FilterChip(
-                            selected = compatibleMode,
-                            onClick = { compatibleMode = !compatibleMode },
-                            label = { Text("Compatible H.264") }
-                        )
-                        FilterChip(
-                            selected = downloadSubtitles,
-                            onClick = { downloadSubtitles = !downloadSubtitles },
-                            label = { Text("Subtitles") }
-                        )
-                        if (downloadSubtitles && downloadType == YtdlnisDownloadType.VIDEO) {
-                            FilterChip(
-                                selected = embedSubtitles,
-                                onClick = {
-                                    embedSubtitles = !embedSubtitles
-                                    if (embedSubtitles) burnSubtitles = false
-                                },
-                                label = { Text("Embed Subs") }
-                            )
-                            FilterChip(
-                                selected = burnSubtitles,
-                                onClick = {
-                                    burnSubtitles = !burnSubtitles
-                                    if (burnSubtitles) embedSubtitles = false
-                                },
-                                label = { Text("Burn Subs") }
-                            )
-                        }
-                        AssistChip(
-                            onClick = { showLyricsDialog = true },
-                            label = { Text(if (lyricsText.isBlank()) "Lyrics (lrclib)" else "Lyrics Attached") },
-                            leadingIcon = { Icon(Icons.Default.Lyrics, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        )
-                    }
-
-                    if (downloadSubtitles) {
-                        OutlinedTextField(
-                            value = subtitleLangsInput,
-                            onValueChange = { subtitleLangsInput = it },
-                            label = { Text("Subtitle languages (comma-separated, e.g. en,es)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // SponsorBlock action
-                    Text("SponsorBlock", style = MaterialTheme.typography.labelMedium)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(YtdlnisSponsorBlockAction.entries) { action ->
-                            FilterChip(
-                                selected = sbAction == action,
-                                onClick = { sbAction = action },
-                                label = { Text(action.label) }
-                            )
-                        }
-                    }
-                    if (sbAction != YtdlnisSponsorBlockAction.NONE) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("sponsor", "intro", "outro", "selfpromo", "preview", "filler", "interaction", "music_offtopic").forEach { cat ->
-                                FilterChip(
-                                    selected = cat in sbCategories,
-                                    onClick = {
-                                        sbCategories = if (cat in sbCategories) sbCategories - cat else sbCategories + cat
-                                    },
-                                    label = { Text(cat) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Schedule selector
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Schedule", style = MaterialTheme.typography.labelLarge)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listOf(0 to "Now", 15 to "+15 min", 60 to "+1 hr", 360 to "+6 hr", 720 to "+12 hr")) { (mins, label) ->
-                        FilterChip(
-                            selected = scheduleDelayMinutes == mins,
-                            onClick = { scheduleDelayMinutes = mins },
-                            label = { Text(label) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Action Buttons
-        item {
+            // 2. Segmented Mode Switcher (Video | Audio | Command) + Container Pills
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(modifier = Modifier.padding(3.dp)) {
+                        YtdlnisDownloadType.entries.forEach { type ->
+                            val selected = downloadType == type
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable {
+                                        downloadType = type
+                                        container = when (type) {
+                                            YtdlnisDownloadType.AUDIO -> "m4a"
+                                            YtdlnisDownloadType.VIDEO -> "mp4"
+                                            YtdlnisDownloadType.COMMAND -> "mp4"
+                                        }
+                                        selectedFormatId = "best"
+                                    }
+                            ) {
+                                Text(
+                                    text = type.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (downloadType != YtdlnisDownloadType.COMMAND) {
+                    val containers = if (downloadType == YtdlnisDownloadType.AUDIO) {
+                        listOf("m4a", "mp3", "opus", "flac")
+                    } else {
+                        listOf("mp4", "mkv", "webm")
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        containers.forEach { c ->
+                            val selected = container == c
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { container = c }
+                            ) {
+                                Text(
+                                    text = c.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Scrollable Main Area: Visual Format Cards + Progressive Disclosure Chips
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (downloadType == YtdlnisDownloadType.COMMAND) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = customCommand,
+                                onValueChange = { customCommand = it },
+                                label = { Text("Custom yt-dlp Flags") },
+                                placeholder = { Text("-f bestvideo+bestaudio --embed-subs") },
+                                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (templates.isNotEmpty()) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(templates) { tpl ->
+                                        AssistChip(
+                                            onClick = { customCommand = tpl.command },
+                                            label = { Text(tpl.title) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Visual Horizontal Format Cards (DBase Downloader style)
+                    item {
+                        val listToRender = if (downloadType == YtdlnisDownloadType.AUDIO) audioFormats else videoFormats
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                item {
+                                    VisualFormatTile(
+                                        title = if (downloadType == YtdlnisDownloadType.AUDIO) "Best Audio" else "Best Quality",
+                                        subtitle = "Auto Select",
+                                        badge = container.uppercase(),
+                                        selected = selectedFormatId == "best",
+                                        onClick = { selectedFormatId = "best" }
+                                    )
+                                }
+                                items(listToRender.take(14)) { fmt ->
+                                    val primaryLabel = if (downloadType == YtdlnisDownloadType.AUDIO) {
+                                        if (fmt.abr > 0) "${fmt.abr.toInt()} kbps" else fmt.ext.uppercase()
+                                    } else {
+                                        if (fmt.height > 0) "${fmt.height}p" else fmt.resolution.ifBlank { fmt.formatId }
+                                    }
+                                    val sizeLabel = formatByteSize(fmt.filesize).ifBlank { fmt.ext.uppercase() }
+                                    VisualFormatTile(
+                                        title = primaryLabel,
+                                        subtitle = sizeLabel,
+                                        badge = fmt.vcodec.takeIf { it != "none" && it.isNotBlank() }?.substringBefore(".")?.uppercase()
+                                            ?: fmt.acodec.takeIf { it != "none" && it.isNotBlank() }?.substringBefore(".")?.uppercase()
+                                            ?: fmt.ext.uppercase(),
+                                        selected = selectedFormatId == fmt.formatId,
+                                        onClick = { selectedFormatId = fmt.formatId }
+                                    )
+                                }
+                            }
+
+                            // Multi-Audio stream chips (only when video mode has multiple distinct audio tracks)
+                            if (downloadType == YtdlnisDownloadType.VIDEO && audioFormats.size > 1) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(audioFormats.take(8)) { af ->
+                                        val isChosen = selectedAudioIds.contains(af.formatId)
+                                        FilterChip(
+                                            selected = isChosen,
+                                            onClick = {
+                                                selectedAudioIds = if (isChosen) selectedAudioIds - af.formatId
+                                                else selectedAudioIds + af.formatId
+                                            },
+                                            label = {
+                                                val lang = af.language.ifBlank { af.formatId }
+                                                Text("Audio: $lang (${af.abr.toInt()}k)", style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 4. Progressive Disclosure Chips Row
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            StudioDisclosureChip.entries.forEach { chip ->
+                                val isExpanded = activeChip == chip
+                                val badgeText = when (chip) {
+                                    StudioDisclosureChip.CUT -> if (cutSections.isNotEmpty()) "${cutSections.size}" else if (splitByChapters) "Ch" else null
+                                    StudioDisclosureChip.SPONSORBLOCK -> if (sbAction != YtdlnisSponsorBlockAction.NONE) sbAction.label else null
+                                    StudioDisclosureChip.SUBTITLES -> if (downloadSubtitles) subtitleLangsInput else null
+                                    StudioDisclosureChip.LYRICS -> if (saveLrcFile) "LRC" else null
+                                    StudioDisclosureChip.CROP_COMPAT -> if (cropPreset != "Original") cropPreset else if (compatibleMode) "H.264" else null
+                                    StudioDisclosureChip.SCHEDULE -> if (scheduleDelayMinutes > 0) "+${scheduleDelayMinutes}m" else null
+                                    StudioDisclosureChip.OUTPUT -> if (subfolderMode != YtdlnisSubfolderMode.NONE) subfolderMode.label else null
+                                }
+                                val isConfigured = badgeText != null
+
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = when {
+                                        isExpanded -> MaterialTheme.colorScheme.primary
+                                        isConfigured -> MaterialTheme.colorScheme.surfaceVariant
+                                        else -> MaterialTheme.colorScheme.surface
+                                    },
+                                    border = if (isExpanded) null else BorderStroke(
+                                        1.dp,
+                                        if (isConfigured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .clickable {
+                                            activeChip = if (isExpanded) null else chip
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            chip.icon,
+                                            contentDescription = chip.label,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = if (isExpanded) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (badgeText != null) "${chip.label} · $badgeText" else chip.label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isExpanded || isConfigured) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isExpanded) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Expandable Progressive Disclosure Panel for the active chip
+                        AnimatedVisibility(visible = activeChip != null) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    when (activeChip) {
+                                        StudioDisclosureChip.CUT -> {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = newCutStart,
+                                                    onValueChange = { newCutStart = it },
+                                                    label = { Text("Start") },
+                                                    singleLine = true,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                OutlinedTextField(
+                                                    value = newCutEnd,
+                                                    onValueChange = { newCutEnd = it },
+                                                    label = { Text("End") },
+                                                    singleLine = true,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        val s = newCutStart.trim()
+                                                        val e = newCutEnd.trim()
+                                                        if (s.isNotBlank() && e.isNotBlank()) {
+                                                            cutSections = cutSections + YtdlnisCutSection(startTime = s, endTime = e)
+                                                        } else {
+                                                            Toast.makeText(context, "Enter start and end times", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                ) {
+                                                    Text("Add")
+                                                }
+                                            }
+
+                                            if (initialInfo.chapters.isNotEmpty()) {
+                                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    items(initialInfo.chapters) { ch ->
+                                                        AssistChip(
+                                                            onClick = {
+                                                                val sMin = (ch.startTimeSec / 60).toInt()
+                                                                val sSec = (ch.startTimeSec % 60).toInt()
+                                                                val eMin = (ch.endTimeSec / 60).toInt()
+                                                                val eSec = (ch.endTimeSec % 60).toInt()
+                                                                cutSections = cutSections + YtdlnisCutSection(
+                                                                    startTime = String.format("%02d:%02d", sMin, sSec),
+                                                                    endTime = String.format("%02d:%02d", eMin, eSec),
+                                                                    label = ch.title
+                                                                )
+                                                            },
+                                                            label = { Text(ch.title, maxLines = 1) }
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            if (cutSections.isNotEmpty()) {
+                                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    cutSections.forEachIndexed { idx, cut ->
+                                                        InputChip(
+                                                            selected = true,
+                                                            onClick = {
+                                                                cutSections = cutSections.filterIndexed { i, _ -> i != idx }
+                                                            },
+                                                            label = {
+                                                                Text("${cut.startTime}-${cut.endTime} ✕")
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                if (cutSections.size > 1) {
+                                                    FilterChip(
+                                                        selected = mergeCuts,
+                                                        onClick = { mergeCuts = !mergeCuts },
+                                                        label = { Text("Merge Cuts") }
+                                                    )
+                                                }
+                                                if (initialInfo.chapters.isNotEmpty()) {
+                                                    FilterChip(
+                                                        selected = splitByChapters,
+                                                        onClick = { splitByChapters = !splitByChapters },
+                                                        label = { Text("Split Chapters") }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.SPONSORBLOCK -> {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                YtdlnisSponsorBlockAction.entries.forEach { act ->
+                                                    FilterChip(
+                                                        selected = sbAction == act,
+                                                        onClick = { sbAction = act },
+                                                        label = { Text(act.label) }
+                                                    )
+                                                }
+                                            }
+                                            if (sbAction != YtdlnisSponsorBlockAction.NONE) {
+                                                val allCats = listOf("sponsor", "intro", "outro", "selfpromo", "interaction", "music_offtopic")
+                                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    allCats.forEach { cat ->
+                                                        val sel = sbCategories.contains(cat)
+                                                        FilterChip(
+                                                            selected = sel,
+                                                            onClick = {
+                                                                sbCategories = if (sel) sbCategories - cat else sbCategories + cat
+                                                            },
+                                                            label = { Text(cat) }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.SUBTITLES -> {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                FilterChip(
+                                                    selected = downloadSubtitles,
+                                                    onClick = { downloadSubtitles = !downloadSubtitles },
+                                                    label = { Text("Download") }
+                                                )
+                                                FilterChip(
+                                                    selected = embedSubtitles,
+                                                    onClick = {
+                                                        embedSubtitles = !embedSubtitles
+                                                        if (embedSubtitles) downloadSubtitles = true
+                                                    },
+                                                    label = { Text("Embed") }
+                                                )
+                                                FilterChip(
+                                                    selected = burnSubtitles,
+                                                    onClick = {
+                                                        burnSubtitles = !burnSubtitles
+                                                        if (burnSubtitles) downloadSubtitles = true
+                                                    },
+                                                    label = { Text("Burn-In") }
+                                                )
+                                            }
+                                            if (downloadSubtitles) {
+                                                OutlinedTextField(
+                                                    value = subtitleLangsInput,
+                                                    onValueChange = { subtitleLangsInput = it },
+                                                    label = { Text("Languages (e.g. en,es,ja)") },
+                                                    singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.LYRICS -> {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        isFetchingLyrics = true
+                                                        scope.launch {
+                                                            val list = YtdlnisEngine.searchLyrics(context, title, author)
+                                                            isFetchingLyrics = false
+                                                            val best = list.firstOrNull { it.syncedLyrics.isNotBlank() } ?: list.firstOrNull()
+                                                            if (best != null) {
+                                                                lyricsText = best.syncedLyrics.ifBlank { best.plainLyrics }
+                                                                saveLrcFile = true
+                                                            } else {
+                                                                Toast.makeText(context, "No synced lyrics found", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !isFetchingLyrics
+                                                ) {
+                                                    Text(if (isFetchingLyrics) "Searching..." else "Fetch lrclib.net")
+                                                }
+                                                FilterChip(
+                                                    selected = saveLrcFile,
+                                                    onClick = { saveLrcFile = !saveLrcFile },
+                                                    label = { Text("Save .lrc") }
+                                                )
+                                            }
+                                            if (lyricsText.isNotBlank()) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    listOf(-500L to "-500ms", -100L to "-100ms", 100L to "+100ms", 500L to "+500ms").forEach { (delta, lbl) ->
+                                                        AssistChip(
+                                                            onClick = {
+                                                                lyricsOffsetMs += delta
+                                                                lyricsText = YtdlnisEngine.adjustLrcTimingLocal(lyricsText, delta)
+                                                            },
+                                                            label = { Text(lbl, style = MaterialTheme.typography.labelSmall) }
+                                                        )
+                                                    }
+                                                }
+                                                OutlinedTextField(
+                                                    value = lyricsText,
+                                                    onValueChange = { lyricsText = it },
+                                                    maxLines = 4,
+                                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.CROP_COMPAT -> {
+                                            if (downloadType == YtdlnisDownloadType.VIDEO) {
+                                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    val presets = listOf("Original", "1:1", "4:5", "16:9", "9:16")
+                                                    items(presets) { preset ->
+                                                        FilterChip(
+                                                            selected = cropPreset == preset,
+                                                            onClick = { cropPreset = preset },
+                                                            label = { Text("Crop: $preset") }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                FilterChip(
+                                                    selected = compatibleMode,
+                                                    onClick = { compatibleMode = !compatibleMode },
+                                                    label = { Text("H.264 Compatible") }
+                                                )
+                                                FilterChip(
+                                                    selected = embedMetadata,
+                                                    onClick = { embedMetadata = !embedMetadata },
+                                                    label = { Text("Metadata") }
+                                                )
+                                                FilterChip(
+                                                    selected = embedThumbnail,
+                                                    onClick = { embedThumbnail = !embedThumbnail },
+                                                    label = { Text("Thumbnail") }
+                                                )
+                                                FilterChip(
+                                                    selected = embedChapters,
+                                                    onClick = { embedChapters = !embedChapters },
+                                                    label = { Text("Chapters") }
+                                                )
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.SCHEDULE -> {
+                                            val delays = listOf(0 to "Now", 15 to "+15m", 60 to "+1h", 180 to "+3h", 360 to "+6h", 720 to "+12h")
+                                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                items(delays) { (mins, label) ->
+                                                    FilterChip(
+                                                        selected = scheduleDelayMinutes == mins,
+                                                        onClick = { scheduleDelayMinutes = mins },
+                                                        label = { Text(label) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        StudioDisclosureChip.OUTPUT -> {
+                                            OutlinedTextField(
+                                                value = filenameTemplate,
+                                                onValueChange = { filenameTemplate = it },
+                                                label = { Text("Filename Template") },
+                                                supportingText = { Text("Preview: $livePreviewName", maxLines = 1) },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                items(YtdlnisSubfolderMode.entries) { mode ->
+                                                    FilterChip(
+                                                        selected = subfolderMode == mode,
+                                                        onClick = { subfolderMode = mode },
+                                                        label = { Text(mode.label) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        null -> Unit
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Sticky Bottom Action Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
-                    onClick = {
-                        val item = buildDownloadItem().copy(status = YtdlnisDownloadStatus.SAVED)
-                        onSaveForLater(item)
-                    },
-                    modifier = Modifier.weight(1f)
+                    onClick = { onSaveForLater(buildDownloadItem()) },
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.height(46.dp)
                 ) {
-                    Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.BookmarkBorder, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Save")
                 }
+
                 Button(
                     onClick = { onEnqueue(buildDownloadItem()) },
-                    modifier = Modifier.weight(1.6f)
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
                 ) {
                     Icon(
                         if (scheduleDelayMinutes > 0) Icons.Default.Schedule else Icons.Default.Download,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (scheduleDelayMinutes > 0) "Schedule" else "Download")
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (scheduleDelayMinutes > 0) "Schedule (+${scheduleDelayMinutes}m)"
+                        else "Download · ${container.uppercase()}",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
-    }
-
-    if (showLyricsDialog) {
-        YtdlnisLyricsDialog(
-            initialTrack = title,
-            initialArtist = author,
-            initialLyrics = lyricsText,
-            initialSaveLrc = saveLrcFile,
-            onDismiss = { showLyricsDialog = false },
-            onApply = { updatedLyrics, shouldSaveLrc ->
-                lyricsText = updatedLyrics
-                saveLrcFile = shouldSaveLrc
-                showLyricsDialog = false
-                Toast.makeText(context, "Lyrics attached", Toast.LENGTH_SHORT).show()
-            }
-        )
     }
 }
 
 @Composable
-private fun YtdlnisLyricsDialog(
-    initialTrack: String,
-    initialArtist: String,
-    initialLyrics: String,
-    initialSaveLrc: Boolean,
-    onDismiss: () -> Unit,
-    onApply: (String, Boolean) -> Unit
+private fun VisualFormatTile(
+    title: String,
+    subtitle: String,
+    badge: String,
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var track by remember { mutableStateOf(initialTrack) }
-    var artist by remember { mutableStateOf(initialArtist) }
-    var isSearching by remember { mutableStateOf(false) }
-    var results by remember { mutableStateOf<List<YtdlnisLyricsResult>>(emptyList()) }
-    var selectedLyrics by remember { mutableStateOf(initialLyrics) }
-    var offsetMs by remember { mutableStateOf(0L) }
-    var saveLrc by remember { mutableStateOf(initialSaveLrc) }
-
-    val adjustedLyrics = remember(selectedLyrics, offsetMs) {
-        if (offsetMs == 0L) selectedLyrics else YtdlnisEngine.adjustLrcTimingLocal(selectedLyrics, offsetMs)
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Lyrics Search (lrclib.net)") },
-        text = {
-            Column(
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .widthIn(min = 104.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = track,
-                    onValueChange = { track = it },
-                    label = { Text("Track title") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                 )
-                OutlinedTextField(
-                    value = artist,
-                    onValueChange = { artist = it },
-                    label = { Text("Artist (optional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(
-                    onClick = {
-                        scope.launch {
-                            isSearching = true
-                            results = YtdlnisEngine.searchLyrics(context, track, artist)
-                            isSearching = false
-                        }
-                    },
-                    enabled = !isSearching && track.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isSearching) "Searching lrclib.net..." else "Search Synced Lyrics")
-                }
-
-                if (results.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(results.take(6)) { r ->
-                            SuggestionChip(
-                                onClick = {
-                                    selectedLyrics = r.syncedLyrics.ifBlank { r.plainLyrics }
-                                    offsetMs = 0L
-                                },
-                                label = { Text("${r.trackName} - ${r.artistName}".take(28)) }
-                            )
-                        }
-                    }
-                }
-
-                if (selectedLyrics.isNotBlank()) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("Timing: ${offsetMs}ms", style = MaterialTheme.typography.labelSmall)
-                        TextButton(onClick = { offsetMs -= 250L }) { Text("-250ms") }
-                        TextButton(onClick = { offsetMs += 250L }) { Text("+250ms") }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 140.dp)
-                    ) {
-                        Text(
-                            text = adjustedLyrics.take(600),
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = saveLrc, onCheckedChange = { saveLrc = it })
-                        Text("Save companion .lrc file", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onApply(adjustedLyrics, saveLrc) },
-                enabled = adjustedLyrics.isNotBlank()
-            ) {
-                Text("Attach")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
-    )
-}
-
-private fun formatSecToTs(sec: Double): String {
-    val total = sec.toInt().coerceAtLeast(0)
-    val h = total / 3600
-    val m = (total % 3600) / 60
-    val s = total % 60
-    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+    }
 }

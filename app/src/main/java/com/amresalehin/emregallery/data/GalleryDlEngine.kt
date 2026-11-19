@@ -95,6 +95,9 @@ object GalleryDlEngine {
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(context.applicationContext))
                 }
+                runCatching {
+                    Python.getInstance().getModule("ytdlnis_engine").callAttr("install_android_subproc_guard")
+                }
                 isInitialized = true
                 Log.d(TAG, "Chaquopy Python SDK and yt-dlp/gallery-dl runtime initialized successfully")
             } catch (t: Throwable) {

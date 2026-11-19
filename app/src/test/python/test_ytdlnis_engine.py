@@ -129,6 +129,16 @@ class TestYtdlnisEngine(unittest.TestCase):
             if path2 and os.path.exists(path2):
                 os.unlink(path2)
 
+    def test_android_subproc_guard_blocks_posixsubprocess_fork_exec(self):
+        import subprocess
+        ytdlnis_engine.install_android_subproc_guard()
+        self.assertIsNotNone(sys.modules.get("_posixsubprocess"))
+        with self.assertRaises(FileNotFoundError):
+            subprocess.Popen(["ffmpeg", "-version"])
+        with self.assertRaises(FileNotFoundError):
+            sys.modules["_posixsubprocess"].fork_exec()
+
 
 if __name__ == "__main__":
     unittest.main()
+

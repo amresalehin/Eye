@@ -768,6 +768,15 @@ object DownloadActivityManager {
     fun pauseDownload(context: Context, itemId: String) {
         activeRetryJobs[itemId]?.cancel()
         activeRetryJobs.remove(itemId)
+        if (itemId.startsWith("ytdlnis_")) {
+            val ytId = itemId.removePrefix("ytdlnis_")
+            runCatching {
+                val repo = com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(context)
+                repo.getDownloadById(ytId)?.let { ytItem ->
+                    com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker.cancel(context, ytItem)
+                }
+            }
+        }
         val current = _activities.value.toMutableList()
         val index = current.indexOfFirst { it.id == itemId }
         if (index >= 0) {
@@ -799,6 +808,31 @@ object DownloadActivityManager {
             // Cancel any pending automatic retry to prevent duplicate requests
             activeRetryJobs[itemId]?.cancel()
             activeRetryJobs.remove(itemId)
+
+            if (itemId.startsWith("ytdlnis_")) {
+                val ytId = itemId.removePrefix("ytdlnis_")
+                val repo = com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(context)
+                val ytItem = repo.getDownloadById(ytId)
+                if (ytItem != null) {
+                    val workId = com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker.enqueue(
+                        context,
+                        ytItem.copy(scheduledTimeMillis = 0L)
+                    )
+                    val refreshed = _activities.value.toMutableList()
+                    val rIdx = refreshed.indexOfFirst { it.id == itemId }
+                    if (rIdx >= 0) {
+                        refreshed[rIdx] = refreshed[rIdx].copy(
+                            status = DownloadActivityStatus.DOWNLOADING,
+                            workId = workId.toString(),
+                            errorMessage = null,
+                            retryCount = 0
+                        )
+                        _activities.value = refreshed
+                        persistActivities()
+                    }
+                    return
+                }
+            }
 
             val scraped = ScrapedMediaItem(
                 id = item.id,
@@ -845,6 +879,14 @@ object DownloadActivityManager {
     fun deleteActivity(itemId: String) {
         activeRetryJobs[itemId]?.cancel()
         activeRetryJobs.remove(itemId)
+        if (itemId.startsWith("ytdlnis_")) {
+            val ytId = itemId.removePrefix("ytdlnis_")
+            appContext?.let { ctx ->
+                runCatching {
+                    com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(ctx).removeDownload(ytId)
+                }
+            }
+        }
         val current = _activities.value.toMutableList()
         current.removeAll { it.id == itemId }
         _activities.value = current
@@ -857,6 +899,15 @@ object DownloadActivityManager {
         }
         activeRetryJobs.clear()
         DownloadQueueManager.cancelAll(context)
+        runCatching {
+            val repo = com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(context)
+            repo.downloads.value.filter {
+                it.status == com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus.ACTIVE ||
+                    it.status == com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus.QUEUED
+            }.forEach { ytItem ->
+                com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker.cancel(context, ytItem)
+            }
+        }
         val current = _activities.value.toMutableList()
         for (i in current.indices) {
             if (current[i].status == DownloadActivityStatus.DOWNLOADING ||

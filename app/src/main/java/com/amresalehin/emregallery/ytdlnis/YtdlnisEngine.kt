@@ -3,8 +3,10 @@ package com.amresalehin.emregallery.ytdlnis
 import android.content.Context
 import android.os.Environment
 import android.util.Log
+import com.amresalehin.emregallery.data.AndroidMediaMuxer
 import com.amresalehin.emregallery.data.GalleryDlEngine
 import com.amresalehin.emregallery.data.HostRateLimiter
+import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaDownloadWorker
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
@@ -173,6 +175,11 @@ object YtdlnisEngine {
                         results.add("url" to cleaned)
                     }
                 }
+            } else if (!line.contains(' ') && MediaClassifier.isValidWebUrl(line)) {
+                val sanitized = MediaClassifier.sanitizeUrl(line)
+                if (seen.add(sanitized)) {
+                    results.add("url" to sanitized)
+                }
             } else {
                 val query = if (line.startsWith("ytsearch")) line else "ytsearch1:$line"
                 if (seen.add(query)) {
@@ -337,6 +344,14 @@ object YtdlnisEngine {
             }
 
             val destDir = resolveDestinationDir(item, context)
+            val mergeAudioFiles = buildList {
+                resObj.optJSONArray("merge_audio_files")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val f = File(arr.optString(i))
+                        if (f.exists() && f.length() > 0L) add(f)
+                    }
+                }
+            }
             val subtitleFiles = buildList {
                 resObj.optJSONArray("subtitle_files")?.let { arr ->
                     for (i in 0 until arr.length()) {
@@ -349,6 +364,52 @@ object YtdlnisEngine {
                 resObj.optJSONArray("chapters")?.let { arr ->
                     for (i in 0 until arr.length()) {
                         arr.optJSONObject(i)?.let { add(YtdlnisChapter.fromJson(it)) }
+                    }
+                }
+            }
+
+            // 0. In-process video + companion audio stream muxing (replaces yt-dlp subprocess ffmpeg merger)
+            if (mergeAudioFiles.isNotEmpty() && item.type == YtdlnisDownloadType.VIDEO) {
+                onStatusUpdate?.invoke(0.55f, "Muxing video & audio streams...")
+                val muxExt = resolveTargetExtension(item, currentFile)
+                val muxedFile = File(workDir, "muxed_${currentFile.nameWithoutExtension}.$muxExt")
+                var muxSucceeded = false
+
+                if (FfmpegKitEngine.getStatus().isAvailable) {
+                    val inputs = buildString {
+                        append("-y -i \"${currentFile.absolutePath}\" ")
+                        mergeAudioFiles.forEach { af ->
+                            append("-i \"${af.absolutePath}\" ")
+                        }
+                        append("-map 0:v:0 ")
+                        mergeAudioFiles.indices.forEach { idx ->
+                            append("-map ${idx + 1}:a:0 ")
+                        }
+                        if (muxExt.equals("mp4", ignoreCase = true)) {
+                            append("-c:v copy -c:a aac -b:a 192k -movflags +faststart ")
+                        } else {
+                            append("-c copy ")
+                        }
+                        append("\"${muxedFile.absolutePath}\"")
+                    }
+                    val muxRes = FfmpegKitEngine.executeCommand(inputs)
+                    logBuilder.appendLine("[FFmpeg Stream Mux] rc=${muxRes.returnCode}")
+                    if (muxRes.isSuccess && muxedFile.exists() && muxedFile.length() > 0L) {
+                        currentFile = muxedFile
+                        muxSucceeded = true
+                    } else {
+                        runCatching { if (muxedFile.exists()) muxedFile.delete() }
+                    }
+                }
+
+                if (!muxSucceeded) {
+                    val nativeMuxOut = File(workDir, "nativemux_${currentFile.nameWithoutExtension}.mp4")
+                    val nativeOk = runCatching {
+                        AndroidMediaMuxer.muxVideoAndAudio(currentFile, mergeAudioFiles.first(), nativeMuxOut)
+                    }.getOrDefault(false)
+                    logBuilder.appendLine("[AndroidMediaMuxer Fallback] ok=$nativeOk")
+                    if (nativeOk && nativeMuxOut.exists() && nativeMuxOut.length() > 0L) {
+                        currentFile = nativeMuxOut
                     }
                 }
             }

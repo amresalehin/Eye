@@ -1,24 +1,72 @@
+import errno
+import hashlib
 import json
 import os
 import sys
-import traceback
-import hashlib
 import threading
+import traceback
+import types
 
-# Android Sandbox Guard: Chaquopy runs in the Android ART process where calling fork()/sigaction
-# via native _posixsubprocess triggers a fatal SIGSEGV (SIG_DFL). Block _posixsubprocess and stub subprocess.
-sys.modules['_posixsubprocess'] = None
-try:
-    import subprocess
-    class _AndroidDisabledPopen:
-        def __init__(self, *args, **kwargs):
-            raise FileNotFoundError("External subprocess is not supported on Android")
-    subprocess.Popen = _AndroidDisabledPopen
-    subprocess.call = lambda *a, **kw: 1
-    subprocess.check_call = lambda *a, **kw: 1
-    subprocess.check_output = lambda *a, **kw: b""
-except Exception:
-    pass
+
+def install_android_subproc_guard():
+    """
+    Neutralizes _posixsubprocess.fork_exec, os.fork, and subprocess.Popen in pure Python
+    so Chaquopy running inside Android ART never invokes native _posixsubprocess.cpython-311.so
+    (which triggers `E/libsigchain: Setting SIGSEGV to SIG_DFL`) while still allowing
+    `import subprocess`, `import yt_dlp`, and `import gallery_dl` to succeed cleanly.
+    """
+    def _disabled_fork_exec(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "External subprocess fork_exec is disabled on Android ART")
+
+    def _disabled_fork(*args, **kwargs):
+        raise OSError(errno.ENOSYS, "os.fork is disabled on Android ART")
+
+    for fn_name in ("fork", "forkpty", "posix_spawn", "posix_spawnp", "system", "popen"):
+        if hasattr(os, fn_name):
+            try:
+                setattr(os, fn_name, _disabled_fork)
+            except Exception:
+                pass
+
+    existing_ps = sys.modules.get("_posixsubprocess")
+    if existing_ps is not None:
+        try:
+            existing_ps.fork_exec = _disabled_fork_exec
+        except Exception:
+            pass
+
+    stub_ps = types.ModuleType("_posixsubprocess")
+    stub_ps.fork_exec = _disabled_fork_exec
+    sys.modules["_posixsubprocess"] = stub_ps
+
+    try:
+        import subprocess
+        subprocess._fork_exec = _disabled_fork_exec
+        subprocess._posixsubprocess = stub_ps
+
+        def _disabled_popen_init(self, *args, **kwargs):
+            self.stdin = None
+            self.stdout = None
+            self.stderr = None
+            self.pid = None
+            self.returncode = 127
+            self._closed_child_pipe_fds = True
+            self._child_created = False
+            _disabled_fork_exec()
+
+        if hasattr(subprocess, "Popen"):
+            subprocess.Popen.__init__ = _disabled_popen_init
+            subprocess.Popen._execute_child = lambda self, *a, **kw: _disabled_fork_exec()
+
+        subprocess.run = lambda *a, **kw: _disabled_fork_exec()
+        subprocess.call = lambda *a, **kw: 1
+        subprocess.check_call = lambda *a, **kw: _disabled_fork_exec()
+        subprocess.check_output = lambda *a, **kw: _disabled_fork_exec()
+    except Exception:
+        pass
+
+
+install_android_subproc_guard()
 
 _gdl_lock = threading.Lock()
 
@@ -32,6 +80,12 @@ except Exception:
 try:
     import yt_dlp
     YTDLP_AVAILABLE = True
+    try:
+        from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
+        FFmpegPostProcessor._determine_executables = lambda self: None
+        FFmpegPostProcessor._versions = {}
+    except Exception:
+        pass
 except Exception:
     YTDLP_AVAILABLE = False
 

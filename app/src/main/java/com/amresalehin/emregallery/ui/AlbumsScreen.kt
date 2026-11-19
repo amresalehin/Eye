@@ -135,13 +135,27 @@ fun AlbumsScreen(
     val archiveCount = archive.size
 
     val downloadActivities by com.amresalehin.emregallery.data.DownloadActivityManager.activities.collectAsState()
-    val activityCountText = remember(downloadActivities) {
-        val active = downloadActivities.count { it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.DOWNLOADING || it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.RETRYING }
+    val ytdlnisDownloads by remember(context) {
+        com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(context).downloads
+    }.collectAsState()
+    val activityCountText = remember(downloadActivities, ytdlnisDownloads) {
+        val active = downloadActivities.count {
+            it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.DOWNLOADING ||
+                it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.RETRYING
+        }
+        val scheduled = ytdlnisDownloads.count {
+            it.status == com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus.SCHEDULED
+        }
         val failed = downloadActivities.count { it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.FAILED }
+        val total = downloadActivities.size + ytdlnisDownloads.count {
+            it.status == com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus.SCHEDULED ||
+                it.status == com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadStatus.SAVED
+        }
         when {
             active > 0 -> "$active active"
+            scheduled > 0 -> "$scheduled scheduled"
             failed > 0 -> "$failed failed"
-            downloadActivities.isNotEmpty() -> "${downloadActivities.size} items"
+            total > 0 -> "$total items"
             else -> ""
         }
     }
@@ -242,7 +256,7 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Locked folder & Activity
+            // 2-column tiles: Locked folder & Downloader (merged YTDLnis + Native Downloader)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -257,31 +271,35 @@ fun AlbumsScreen(
                     modifier = Modifier.weight(1f)
                 )
                 CollectionTile(
-                    title = "Activity",
+                    title = "Downloader",
                     count = activityCountText,
-                    icon = Icons.Default.MonitorHeart,
+                    icon = Icons.Default.Download,
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Activity") },
-                    modifier = Modifier.weight(1f)
+                    onClick = { onFilter("Downloader") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("albums_downloader_tile")
                 )
             }
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Browser & Archive
+            // 2-column tiles: Scraper & Archive
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 CollectionTile(
-                    title = "Browser",
+                    title = "Scraper",
                     count = "",
                     icon = Icons.Default.TravelExplore,
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Browser") },
-                    modifier = Modifier.weight(1f)
+                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Scraper") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("albums_scraper_tile")
                 )
                 CollectionTile(
                     title = "Archive",

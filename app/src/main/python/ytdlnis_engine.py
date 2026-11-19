@@ -12,24 +12,91 @@ Provides:
 - Safe in-process yt-dlp terminal runner (no forbidden Android subprocess fork)
 """
 
+import errno
+import os
+import sys
+import types
+
+
+def install_android_subproc_guard():
+    """
+    Neutralizes _posixsubprocess.fork_exec, os.fork, and subprocess.Popen in pure Python
+    so Chaquopy running inside Android ART never invokes native _posixsubprocess.cpython-311.so
+    (which triggers `E/libsigchain: Setting SIGSEGV to SIG_DFL`) while still allowing
+    `import subprocess`, `import yt_dlp`, and `import gallery_dl` to succeed cleanly.
+    """
+    def _disabled_fork_exec(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "External subprocess fork_exec is disabled on Android ART")
+
+    def _disabled_fork(*args, **kwargs):
+        raise OSError(errno.ENOSYS, "os.fork is disabled on Android ART")
+
+    for fn_name in ("fork", "forkpty", "posix_spawn", "posix_spawnp", "system", "popen"):
+        if hasattr(os, fn_name):
+            try:
+                setattr(os, fn_name, _disabled_fork)
+            except Exception:
+                pass
+
+    existing_ps = sys.modules.get("_posixsubprocess")
+    if existing_ps is not None:
+        try:
+            existing_ps.fork_exec = _disabled_fork_exec
+        except Exception:
+            pass
+
+    stub_ps = types.ModuleType("_posixsubprocess")
+    stub_ps.fork_exec = _disabled_fork_exec
+    sys.modules["_posixsubprocess"] = stub_ps
+
+    try:
+        import subprocess
+        subprocess._fork_exec = _disabled_fork_exec
+        subprocess._posixsubprocess = stub_ps
+
+        def _disabled_popen_init(self, *args, **kwargs):
+            self.stdin = None
+            self.stdout = None
+            self.stderr = None
+            self.pid = None
+            self.returncode = 127
+            self._closed_child_pipe_fds = True
+            self._child_created = False
+            _disabled_fork_exec()
+
+        if hasattr(subprocess, "Popen"):
+            subprocess.Popen.__init__ = _disabled_popen_init
+            subprocess.Popen._execute_child = lambda self, *a, **kw: _disabled_fork_exec()
+
+        subprocess.run = lambda *a, **kw: _disabled_fork_exec()
+        subprocess.call = lambda *a, **kw: 1
+        subprocess.check_call = lambda *a, **kw: _disabled_fork_exec()
+        subprocess.check_output = lambda *a, **kw: _disabled_fork_exec()
+    except Exception:
+        pass
+
+
+install_android_subproc_guard()
+
 import io
 import json
-import os
 import re
 import shlex
-import sys
 import tempfile
 import traceback
 import urllib.parse
 import urllib.request
 from contextlib import redirect_stdout, redirect_stderr
 
-# Guard against fatal SIGSEGV on Android ART if any library attempts fork()
-sys.modules['_posixsubprocess'] = None
-
 try:
     import yt_dlp
     YTDLP_AVAILABLE = True
+    try:
+        from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
+        FFmpegPostProcessor._determine_executables = lambda self: None
+        FFmpegPostProcessor._versions = {}
+    except Exception:
+        pass
 except Exception:
     yt_dlp = None
     YTDLP_AVAILABLE = False
@@ -278,6 +345,8 @@ def fetch_video_info(url_or_query, options_json="{}"):
             "no_warnings": True,
             "skip_download": True,
             "ignoreerrors": True,
+            "ffmpeg_location": None,
+            "prefer_ffmpeg": False,
             "extract_flat": "in_playlist" if opts.get("flat_playlist", True) else False,
             "socket_timeout": int(opts.get("timeout", 30)),
             "retries": int(opts.get("retries", 3)),
@@ -297,7 +366,10 @@ def fetch_video_info(url_or_query, options_json="{}"):
 
         target = str(url_or_query).strip()
         if not re.match(r"^https?://", target, re.IGNORECASE) and not target.startswith("ytsearch"):
-            target = f"ytsearch5:{target}"
+            if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", target):
+                target = f"https://{target}"
+            else:
+                target = f"ytsearch5:{target}"
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target, download=False)
@@ -433,9 +505,8 @@ def build_ytdlp_options(config_dict, output_dir):
 def download_item(config_json, output_dir):
     """
     Downloads a media item via yt-dlp in-process (Chaquopy) and returns the downloaded
-    file path(s), subtitle paths, thumbnail path, chapters, and execution log so Android
-    FfmpegKitEngine can apply any post-processing (cut, crop, split chapters, remux,
-    compatible re-encode, burn subtitles, embed metadata/lyrics).
+    file path(s), companion audio track path(s) for in-process FfmpegKitEngine muxing,
+    subtitle paths, thumbnail path, chapters, and execution log.
     """
     if not YTDLP_AVAILABLE:
         return json.dumps({"success": False, "error": "yt-dlp is not available"})
@@ -449,6 +520,9 @@ def download_item(config_json, output_dir):
     url = str(config.get("url") or "").strip()
     if not url:
         return json.dumps({"success": False, "error": "URL is required"})
+    if not re.match(r"^https?://", url, re.IGNORECASE) and not url.startswith("ytsearch"):
+        if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", url):
+            url = f"https://{url}"
 
     download_type = str(config.get("type") or "video").lower()
     if download_type == "command" and config.get("custom_command"):
@@ -457,6 +531,7 @@ def download_item(config_json, output_dir):
     cookie_path = _write_temp_cookiefile(config.get("cookies"))
     logs = []
     downloaded_files = []
+    merge_audio_files = []
 
     class _ListLogger:
         def debug(self, msg):
@@ -477,10 +552,35 @@ def download_item(config_json, output_dir):
 
     try:
         ydl_opts = build_ytdlp_options(config, output_dir)
-        # Strip non-yt-dlp metadata helper keys before passing to YoutubeDL
+        # Strip non-yt-dlp metadata helper keys & CLI ffmpeg merge flags before passing to YoutubeDL
         ydl_opts.pop("sponsorblock_categories", None)
         ydl_opts.pop("sponsorblock_action", None)
         ydl_opts.pop("cut_sections", None)
+        ydl_opts.pop("merge_output_format", None)
+        ydl_opts.pop("allow_multiple_audio_streams", None)
+        ydl_opts["ffmpeg_location"] = None
+        ydl_opts["prefer_ffmpeg"] = False
+
+        format_id = str(config.get("format_id") or "").strip()
+        audio_format_ids = [str(x).strip() for x in (config.get("audio_format_ids") or []) if str(x).strip()]
+        max_h = int(config.get("max_height") or 0)
+
+        # Because external CLI ffmpeg is not spawned via subprocess on Android (muxing is done
+        # in-process by FfmpegKitEngine/AndroidMediaMuxer in YtdlnisEngine.kt), avoid passing `+`
+        # to yt-dlp's single-pass format selector so yt-dlp never aborts due to FFmpegMergerPP.
+        if download_type != "audio" and "+" in str(ydl_opts.get("format") or ""):
+            if format_id and format_id != "best":
+                ydl_opts["format"] = f"{format_id}/best[vcodec!=none][acodec!=none]/best"
+            elif audio_format_ids:
+                ydl_opts["format"] = "bestvideo/best[vcodec!=none]/best"
+            elif max_h > 0:
+                ydl_opts["format"] = (
+                    f"best[height<={max_h}][vcodec!=none][acodec!=none]/"
+                    f"best[vcodec!=none][acodec!=none]/"
+                    f"bestvideo[height<={max_h}]/best"
+                )
+            else:
+                ydl_opts["format"] = "best[vcodec!=none][acodec!=none]/bestvideo/best"
 
         if cookie_path:
             ydl_opts["cookiefile"] = cookie_path
@@ -498,6 +598,62 @@ def download_item(config_json, output_dir):
                 break
         if not primary_file and prepared and os.path.exists(prepared):
             primary_file = prepared
+
+        # If a video-only stream was downloaded or explicit audio track IDs were requested,
+        # download companion audio stream(s) separately for in-process FfmpegKitEngine muxing.
+        info_acodec = (info.get("acodec") or "") if isinstance(info, dict) else ""
+        needs_companion_audio = (
+            download_type != "audio"
+            and bool(primary_file)
+            and (info_acodec == "none" or bool(audio_format_ids))
+        )
+        if needs_companion_audio:
+            audio_selectors = audio_format_ids if audio_format_ids else ["bestaudio[ext=m4a]/bestaudio"]
+            for idx, a_sel in enumerate(audio_selectors):
+                audio_files_this_pass = []
+
+                def _audio_hook(d, bucket=audio_files_this_pass):
+                    if d.get("status") == "finished":
+                        fn = d.get("filename")
+                        if fn and fn not in bucket:
+                            bucket.append(fn)
+
+                a_opts = {
+                    "outtmpl": os.path.join(output_dir, f"__companion_audio_{idx}_%(id)s.%(ext)s"),
+                    "format": f"{a_sel}/bestaudio",
+                    "noplaylist": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "ffmpeg_location": None,
+                    "prefer_ffmpeg": False,
+                    "socket_timeout": ydl_opts.get("socket_timeout", 35),
+                    "retries": ydl_opts.get("retries", 2),
+                    "continuedl": True,
+                    "geo_bypass": True,
+                    "logger": _ListLogger(),
+                    "progress_hooks": [_audio_hook],
+                }
+                if cookie_path:
+                    a_opts["cookiefile"] = cookie_path
+                if ydl_opts.get("proxy"):
+                    a_opts["proxy"] = ydl_opts["proxy"]
+                if ydl_opts.get("extractor_args"):
+                    a_opts["extractor_args"] = ydl_opts["extractor_args"]
+                try:
+                    with yt_dlp.YoutubeDL(a_opts) as a_ydl:
+                        a_info = a_ydl.extract_info(url, download=True)
+                        a_prep = a_ydl.prepare_filename(a_info) if a_info else ""
+                    found_a = ""
+                    for cand in audio_files_this_pass:
+                        if os.path.exists(cand) and cand != primary_file:
+                            found_a = cand
+                            break
+                    if not found_a and a_prep and os.path.exists(a_prep) and a_prep != primary_file:
+                        found_a = a_prep
+                    if found_a and found_a not in merge_audio_files:
+                        merge_audio_files.append(found_a)
+                except Exception as a_exc:
+                    logs.append(f"WARNING: Companion audio download ({a_sel}) failed: {a_exc}")
 
         # Discover companion subtitle and thumbnail files in output_dir
         subtitle_files = []
@@ -525,6 +681,7 @@ def download_item(config_json, output_dir):
             "success": bool(primary_file),
             "primary_file": primary_file,
             "downloaded_files": downloaded_files,
+            "merge_audio_files": merge_audio_files,
             "subtitle_files": subtitle_files,
             "thumbnail_file": thumbnail_file,
             "chapters": chapters,
@@ -539,6 +696,7 @@ def download_item(config_json, output_dir):
             "success": False,
             "primary_file": "",
             "downloaded_files": downloaded_files,
+            "merge_audio_files": merge_audio_files,
             "logs": "\n".join(logs[-200:]),
             "error": str(exc),
         })

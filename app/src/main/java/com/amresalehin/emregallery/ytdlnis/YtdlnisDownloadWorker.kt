@@ -75,11 +75,30 @@ class YtdlnisDownloadWorker(
         val itemId = inputData.getString(KEY_ITEM_ID) ?: return Result.failure()
         val repo = YtdlnisRepository.getInstance(applicationContext)
         val item = repo.getDownloadById(itemId) ?: return Result.failure()
+        val actId = "ytdlnis_${item.id}"
 
         runCatching { setForeground(buildForegroundInfo(itemId, item.title.ifBlank { item.url }, 5)) }
 
         repo.updateDownload(itemId) {
             it.copy(status = YtdlnisDownloadStatus.ACTIVE, progress = 0.05f, errorMessage = null)
+        }
+
+        if (!item.incognito) {
+            runCatching {
+                DownloadActivityManager.initialize(applicationContext)
+                DownloadActivityManager.recordQueued(
+                    id = actId,
+                    title = item.title.ifBlank { item.url },
+                    mediaUrl = item.url,
+                    thumbnailUrl = item.thumbnailUrl.ifBlank { null },
+                    isVideo = item.type == YtdlnisDownloadType.VIDEO,
+                    isAudio = item.type == YtdlnisDownloadType.AUDIO,
+                    format = item.container.uppercase().ifBlank { if (item.type == YtdlnisDownloadType.AUDIO) "MP3" else "MP4" },
+                    workId = id.toString(),
+                    sourceDomain = item.extractor.ifBlank { YtdlnisRepository.extractHost(item.url) },
+                    sourceUrl = item.url
+                )
+            }
         }
 
         val result = YtdlnisEngine.downloadAndProcess(
@@ -88,6 +107,17 @@ class YtdlnisDownloadWorker(
             onStatusUpdate = { progress, _ ->
                 repo.updateDownload(itemId) {
                     it.copy(status = YtdlnisDownloadStatus.ACTIVE, progress = progress)
+                }
+                if (!item.incognito) {
+                    runCatching {
+                        DownloadActivityManager.updateProgress(
+                            itemId = actId,
+                            progress = progress.coerceIn(0.01f, 0.99f),
+                            bytesRead = 0L,
+                            totalBytes = 0L,
+                            speedBytesPerSec = 0L
+                        )
+                    }
                 }
                 runCatching {
                     setForegroundAsync(buildForegroundInfo(itemId, item.title.ifBlank { item.url }, (progress * 100).toInt()))
@@ -113,7 +143,6 @@ class YtdlnisDownloadWorker(
             if (!item.incognito) {
                 runCatching {
                     DownloadActivityManager.initialize(applicationContext)
-                    val actId = "ytdlnis_${item.id}"
                     DownloadActivityManager.recordQueued(
                         id = actId,
                         title = item.title.ifBlank { primary.name },
@@ -123,7 +152,8 @@ class YtdlnisDownloadWorker(
                         isAudio = item.type == YtdlnisDownloadType.AUDIO,
                         format = primary.extension.uppercase().ifBlank { item.container.uppercase() },
                         workId = id.toString(),
-                        sourceDomain = item.extractor.ifBlank { YtdlnisRepository.extractHost(item.url) }
+                        sourceDomain = item.extractor.ifBlank { YtdlnisRepository.extractHost(item.url) },
+                        sourceUrl = item.url
                     )
                     DownloadActivityManager.markFinished(
                         itemId = actId,
@@ -134,12 +164,19 @@ class YtdlnisDownloadWorker(
             }
             Result.success()
         } else {
+            val errMsg = result.errorMessage ?: "Download failed"
             repo.updateDownload(itemId) {
                 it.copy(
                     status = YtdlnisDownloadStatus.ERROR,
                     logOutput = if (it.incognito) "" else result.logs,
-                    errorMessage = result.errorMessage ?: "Download failed"
+                    errorMessage = errMsg
                 )
+            }
+            if (!item.incognito) {
+                runCatching {
+                    DownloadActivityManager.initialize(applicationContext)
+                    DownloadActivityManager.markFailed(actId, errMsg)
+                }
             }
             Result.failure()
         }
@@ -185,6 +222,24 @@ class YtdlnisDownloadWorker(
                 )
             )
 
+            if (!item.incognito && delayMs <= 1000L) {
+                runCatching {
+                    DownloadActivityManager.initialize(context)
+                    DownloadActivityManager.recordQueued(
+                        id = "ytdlnis_${item.id}",
+                        title = item.title.ifBlank { item.url },
+                        mediaUrl = item.url,
+                        thumbnailUrl = item.thumbnailUrl.ifBlank { null },
+                        isVideo = item.type == YtdlnisDownloadType.VIDEO,
+                        isAudio = item.type == YtdlnisDownloadType.AUDIO,
+                        format = item.container.uppercase().ifBlank { if (item.type == YtdlnisDownloadType.AUDIO) "MP3" else "MP4" },
+                        workId = request.id.toString(),
+                        sourceDomain = item.extractor.ifBlank { YtdlnisRepository.extractHost(item.url) },
+                        sourceUrl = item.url
+                    )
+                }
+            }
+
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
                 "ytdlnis_job_${item.id}",
                 ExistingWorkPolicy.REPLACE,
@@ -197,6 +252,10 @@ class YtdlnisDownloadWorker(
             WorkManager.getInstance(context.applicationContext).cancelUniqueWork("ytdlnis_job_${item.id}")
             YtdlnisRepository.getInstance(context).updateDownload(item.id) {
                 it.copy(status = YtdlnisDownloadStatus.CANCELLED)
+            }
+            runCatching {
+                DownloadActivityManager.initialize(context)
+                DownloadActivityManager.markFailed("ytdlnis_${item.id}", "Cancelled by user")
             }
         }
     }

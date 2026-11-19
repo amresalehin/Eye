@@ -2,61 +2,61 @@ package com.amresalehin.emregallery.ui
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Deselect
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.TravelExplore
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.AddLink
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.ui.res.painterResource
-import com.amresalehin.emregallery.R
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import com.amresalehin.emregallery.data.BrowserSession
-import com.amresalehin.emregallery.data.DiscoveryFilterManager
-import com.amresalehin.emregallery.data.DiscoveryFilterState
+import com.amresalehin.emregallery.data.DownloadActivityManager
 import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.DownloaderSession
-import com.amresalehin.emregallery.data.ExtractionSource
-import com.amresalehin.emregallery.data.MediaCaptureEngine
 import com.amresalehin.emregallery.data.MediaCategory
-import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxStack
-import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import com.amresalehin.emregallery.ui.ytdlnis.UnifiedDownloaderTab
+import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisMonochromeTheme
+import com.amresalehin.emregallery.ui.ytdlnis.YtdlnisScreen
 
 enum class DownloaderViewMode {
     SEARCH_PAGE,
@@ -66,740 +66,1005 @@ enum class DownloaderViewMode {
     DISCOVERED_MEDIA
 }
 
-/**
- * Direct entry point for download activity and discovered media.
- * Un-embedded from the unnecessary intermediate wrapper and saved library page.
- */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun MediaInboxScreen(
-    onBack: () -> Unit,
     initialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
     initialOpenBrowser: Boolean = false,
-    onOpenMediaItem: ((String) -> Unit)? = null,
-    onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
-    onOpenBrowser: ((String) -> Unit)? = null,
-    onDeepScanClick: (() -> Unit)? = null,
-    isDeepScanning: Boolean = false,
-    modifier: Modifier = Modifier
+    onBack: () -> Unit,
+    onOpenBrowser: ((String?) -> Unit)? = null,
+    onOpenMediaItem: (String) -> Unit = {},
+    onOpenMediaWithList: ((String, List<String>) -> Unit)? = null
 ) {
-    if (initialViewMode == DownloaderViewMode.DISCOVERED_MEDIA) {
-        DiscoveredMediaPage(
-            onBack = onBack,
-            onDeepScanClick = onDeepScanClick,
-            isDeepScanning = isDeepScanning,
-            modifier = modifier.testTag("media_inbox_screen")
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.syncWithStorageDir(context)
+        DownloadActivityManager.syncWithInboxRepository()
+    }
+
+    var viewMode by remember(initialViewMode) {
+        mutableStateOf(
+            when (initialViewMode) {
+                DownloaderViewMode.DISCOVERED_MEDIA -> DownloaderViewMode.DISCOVERED_MEDIA
+                else -> DownloaderViewMode.ACTIVITY_PAGE
+            }
         )
-    } else {
-        DownloaderActivityPage(
-            onBack = onBack,
-            onAddNewDownload = { onOpenBrowser?.invoke("") },
-            onOpenMedia = { item ->
-                item.localUri?.let { uriStr ->
-                    onOpenMediaItem?.invoke(uriStr)
+    }
+
+    var studioSeedUrl by remember { mutableStateOf("") }
+    var studioSeedTab by remember { mutableStateOf(UnifiedDownloaderTab.ACTIVITY) }
+
+    val discoveredItems by DownloaderSession.discoveredItems.collectAsState()
+    val sessionPageTitle by DownloaderSession.pageTitle.collectAsState()
+    val sessionSourceDomain by DownloaderSession.sourceDomain.collectAsState()
+    val sessionSourceUrl by DownloaderSession.currentUrl.collectAsState()
+
+    BackHandler(enabled = true) {
+        if (viewMode == DownloaderViewMode.DISCOVERED_MEDIA && initialViewMode != DownloaderViewMode.DISCOVERED_MEDIA) {
+            viewMode = DownloaderViewMode.ACTIVITY_PAGE
+        } else {
+            onBack()
+        }
+    }
+
+    YtdlnisMonochromeTheme {
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (viewMode) {
+                DownloaderViewMode.DISCOVERED_MEDIA -> {
+                    DiscoveredMediaPage(
+                        items = discoveredItems,
+                        pageTitle = sessionPageTitle,
+                        sourceDomain = sessionSourceDomain,
+                        sourceUrl = sessionSourceUrl,
+                        onBack = {
+                            if (initialViewMode == DownloaderViewMode.DISCOVERED_MEDIA) {
+                                onBack()
+                            } else {
+                                viewMode = DownloaderViewMode.ACTIVITY_PAGE
+                            }
+                        },
+                        onDownloadSingle = { item ->
+                            DownloadQueueManager.enqueueDownload(
+                                context = context,
+                                item = item,
+                                referer = sessionSourceUrl.ifBlank { null },
+                                stackTitle = sessionPageTitle.ifBlank { null },
+                                sourceDomain = sessionSourceDomain.ifBlank { null },
+                                sourceUrl = sessionSourceUrl.ifBlank { null }
+                            )
+                            Toast.makeText(context, "Queued ${item.title}", Toast.LENGTH_SHORT).show()
+                        },
+                        onDownloadSelected = { selectedList ->
+                            if (selectedList.isNotEmpty()) {
+                                DownloadQueueManager.enqueueBatch(
+                                    context = context,
+                                    items = selectedList,
+                                    referer = sessionSourceUrl.ifBlank { null },
+                                    stackTitle = sessionPageTitle.ifBlank { "Downloaded Media" },
+                                    sourceDomain = sessionSourceDomain.ifBlank { "Web" },
+                                    sourceUrl = sessionSourceUrl
+                                )
+                                Toast.makeText(context, "Queued ${selectedList.size} items", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onOpenInStudio = { itemUrl ->
+                            studioSeedUrl = itemUrl
+                            studioSeedTab = UnifiedDownloaderTab.STUDIO
+                            viewMode = DownloaderViewMode.ACTIVITY_PAGE
+                        },
+                        onNavigateToActivities = {
+                            studioSeedTab = UnifiedDownloaderTab.ACTIVITY
+                            viewMode = DownloaderViewMode.ACTIVITY_PAGE
+                        },
+                        onClearAll = {
+                            DownloaderSession.clear()
+                        }
+                    )
                 }
-            },
-            modifier = modifier.testTag("media_inbox_screen")
-        )
+                else -> {
+                    YtdlnisScreen(
+                        onBack = onBack,
+                        initialUrl = studioSeedUrl,
+                        initialTab = studioSeedTab,
+                        onOpenBrowser = { targetUrl ->
+                            onOpenBrowser?.invoke(targetUrl)
+                        },
+                        onOpenDiscoveredMedia = {
+                            viewMode = DownloaderViewMode.DISCOVERED_MEDIA
+                        },
+                        onOpenMediaFile = { uri ->
+                            onOpenMediaItem(uri)
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
 /**
- * Clean, standalone Discovered Media page allowing the user to choose exactly
- * what media they want to download (with multi-select, filters, and batch download).
+ * Full-screen Webby-Images-Downloader style visual media grid page.
+ * Also embeds cleanly inside ShareReceiverActivity, DirectBrowserView, and MediaScraperDrawer.
  */
 @Composable
 fun DiscoveredMediaPage(
     onBack: () -> Unit,
     onDeepScanClick: (() -> Unit)? = null,
     isDeepScanning: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    items: List<ScrapedMediaItem>? = null,
+    pageTitle: String? = null,
+    sourceDomain: String? = null,
+    sourceUrl: String? = null,
+    onDownloadSingle: ((ScrapedMediaItem) -> Unit)? = null,
+    onDownloadSelected: ((List<ScrapedMediaItem>) -> Unit)? = null,
+    onOpenInStudio: ((String) -> Unit)? = null,
+    onNavigateToActivities: (() -> Unit)? = null,
+    onClearAll: (() -> Unit)? = null
 ) {
-    BackHandler { onBack() }
-
     val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        DiscoveryFilterManager.init(context)
-    }
-
-    val filterState by DiscoveryFilterManager.filterState.collectAsState()
-    var showFilterSheet by remember { mutableStateOf(false) }
-    var showAddUrlDialog by remember { mutableStateOf(false) }
-    var showNetworkStatusDialog by remember { mutableStateOf(false) }
-    var manualUrlInput by remember { mutableStateOf("") }
-    var qrShareItem by remember { mutableStateOf<ScrapedMediaItem?>(null) }
-    var searchQuery by remember { mutableStateOf("") }
-    var dismissedIds by remember { mutableStateOf(setOf<String>()) }
-
-    val tabSession = remember { BrowserSession.getTabSession("tab_main") }
-    val tabItems by tabSession.detectedItems.collectAsState()
     val sessionItems by DownloaderSession.discoveredItems.collectAsState()
-    val sourceUrl by DownloaderSession.currentUrl.collectAsState()
-    val sourceDomain by DownloaderSession.sourceDomain.collectAsState()
+    val sessionTitle by DownloaderSession.pageTitle.collectAsState()
+    val sessionDomain by DownloaderSession.sourceDomain.collectAsState()
+    val sessionUrl by DownloaderSession.currentUrl.collectAsState()
 
-    val rawDiscoveredItems = remember(tabItems, sessionItems, dismissedIds, filterState.intelligentDeduplication) {
-        val combined = (sessionItems + tabItems)
-            .filterNot { dismissedIds.contains(it.id.ifBlank { it.url }) }
-        if (filterState.intelligentDeduplication) {
-            MediaClassifier.intelligentDeduplicate(combined)
+    val effectiveItems = items ?: sessionItems
+    val effectiveTitle = pageTitle ?: sessionTitle
+    val effectiveDomain = sourceDomain ?: sessionDomain
+    val effectiveUrl = sourceUrl ?: sessionUrl
+
+    val handleDownloadSingle: (ScrapedMediaItem) -> Unit = { item ->
+        if (onDownloadSingle != null) {
+            onDownloadSingle(item)
         } else {
-            combined.distinctBy { it.id.ifBlank { it.url } }
-        }
-    }
-
-    val discoveredItems = remember(rawDiscoveredItems, filterState, searchQuery) {
-        rawDiscoveredItems.filter { item ->
-            DiscoveryFilterManager.matchesFilters(item, filterState) &&
-                DiscoveryFilterManager.matchesSearchQuery(item, searchQuery)
-        }
-    }
-
-    var selectedFilter by remember { mutableStateOf("All") }
-    var selectedIds by remember { mutableStateOf(setOf<String>()) }
-
-    val videoCount = remember(discoveredItems) { discoveredItems.count { it.isVideo && !it.isStream } }
-    val streamCount = remember(discoveredItems) { discoveredItems.count { it.isStream } }
-    val audioCount = remember(discoveredItems) { discoveredItems.count { it.isAudio } }
-    val imageCount = remember(discoveredItems) {
-        discoveredItems.count { !it.isVideo && !it.isStream && !it.isAudio && !it.isSubtitle && !it.isOtherFile }
-    }
-    val subtitleCount = remember(discoveredItems) { discoveredItems.count { it.isSubtitle } }
-    val fileCount = remember(discoveredItems) { discoveredItems.count { it.isOtherFile } }
-
-    val filteredItems = remember(discoveredItems, selectedFilter) {
-        when (selectedFilter) {
-            "Videos" -> discoveredItems.filter { it.isVideo && !it.isStream }
-            "Streams" -> discoveredItems.filter { it.isStream }
-            "Audio" -> discoveredItems.filter { it.isAudio }
-            "Images" -> discoveredItems.filter { !it.isVideo && !it.isStream && !it.isAudio && !it.isSubtitle && !it.isOtherFile }
-            "Subtitles" -> discoveredItems.filter { it.isSubtitle }
-            "Files" -> discoveredItems.filter { it.isOtherFile }
-            else -> discoveredItems
-        }
-    }
-
-    fun downloadItem(item: ScrapedMediaItem) {
-        val effectiveDomain = sourceDomain.ifBlank {
-            item.provenance.pageUrl.ifBlank { sourceUrl }.let { url ->
-                OkHttpDownloader.extractDomain(url.ifBlank { item.url })
-            }
-        }.ifBlank { "general" }
-
-        DownloadQueueManager.enqueueDownload(
-            context = context,
-            item = item,
-            referer = sourceUrl,
-            stackId = "discovered_${sourceUrl.hashCode()}",
-            stackTitle = effectiveDomain,
-            sourceDomain = effectiveDomain,
-            sourceUrl = sourceUrl
-        )
-    }
-
-    fun downloadBatch(items: List<ScrapedMediaItem>) {
-        if (items.isEmpty()) return
-        items.forEach { downloadItem(it) }
-        Toast.makeText(
-            context,
-            "Queued ${items.size} item${if (items.size > 1) "s" else ""} for download",
-            Toast.LENGTH_SHORT
-        ).show()
-        selectedIds = emptySet()
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .testTag("discovered_media_page")
-    ) {
-        // Top app bar with back button, filter button, deep scan, and Select All toggle (completely clean & clear)
-        Surface(
-            color = MaterialTheme.colorScheme.background,
-            modifier = Modifier.fillMaxWidth().statusBarsPadding()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag("discovered_media_back_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // 8-Platform Network Status Diagnostics button (MSC72m/media_downloader)
-                IconButton(
-                    onClick = { showNetworkStatusDialog = true },
-                    modifier = Modifier.testTag("discovered_media_network_status_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Wifi,
-                        contentDescription = "Platform Network Status",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                // Manual URL Entry button ("Add URL" from Website Media Downloader)
-                IconButton(
-                    onClick = { showAddUrlDialog = true },
-                    modifier = Modifier.testTag("discovered_media_add_url_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddLink,
-                        contentDescription = "Add direct URL",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                // Filter icon button to open drawer sheet for discovery filters
-                IconButton(
-                    onClick = { showFilterSheet = true },
-                    modifier = Modifier.testTag("discovered_media_filter_btn")
-                ) {
-                    val isModified = filterState.minWidth != 480 ||
-                            filterState.minHeight != 540 ||
-                            filterState.minSizeBytes != 10 * 1024L ||
-                            filterState.enabledFormats != DiscoveryFilterState.DEFAULT_ENABLED_FORMATS
-
-                    BadgedBox(
-                        badge = {
-                            if (isModified) {
-                                Badge(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(6.dp)
-                                )
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = "Filter Media Discoveries",
-                            tint = if (isModified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                if (onDeepScanClick != null) {
-                    IconButton(
-                        onClick = onDeepScanClick,
-                        modifier = Modifier.testTag("discovered_media_deep_scan_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (isDeepScanning) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
-                                    strokeWidth = 1.5.dp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
-                                )
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_radar),
-                                    contentDescription = "Stop deep scan",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            } else {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_radar),
-                                    contentDescription = "Run deep scan",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (filteredItems.isNotEmpty()) {
-                    IconButton(
-                        onClick = {
-                            val filteredIds = filteredItems.map { it.id.ifBlank { it.url } }.toSet()
-                            selectedIds = if (selectedIds.containsAll(filteredIds)) {
-                                selectedIds - filteredIds
-                            } else {
-                                selectedIds + filteredIds
-                            }
-                        },
-                        modifier = Modifier.testTag("discovered_media_select_all_btn")
-                    ) {
-                        val filteredIds = filteredItems.map { it.id.ifBlank { it.url } }.toSet()
-                        val allFilteredSelected = selectedIds.containsAll(filteredIds)
-                        Icon(
-                            imageVector = if (allFilteredSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
-                            contentDescription = if (allFilteredSelected) "Deselect all" else "Select all",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-        }
-
-        // Global real-time search bar across all media groups
-        if (rawDiscoveredItems.isNotEmpty()) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search filename, URL, format, or host...", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .testTag("discovered_media_search_field")
+            DownloadQueueManager.enqueueDownload(
+                context = context,
+                item = item,
+                referer = effectiveUrl.ifBlank { null },
+                stackTitle = effectiveTitle.ifBlank { null },
+                sourceDomain = effectiveDomain.ifBlank { null },
+                sourceUrl = effectiveUrl.ifBlank { null }
             )
+            Toast.makeText(context, "Queued ${item.title}", Toast.LENGTH_SHORT).show()
         }
+    }
 
-        // 6-Category Media Grouping pills with live counts (Videos, Audio, Streams, Images, Subtitles, Files)
-        if (discoveredItems.isNotEmpty()) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val filters = buildList {
-                    add("All" to discoveredItems.size)
-                    if (videoCount > 0) add("Videos" to videoCount)
-                    if (audioCount > 0) add("Audio" to audioCount)
-                    if (streamCount > 0) add("Streams" to streamCount)
-                    if (imageCount > 0) add("Images" to imageCount)
-                    if (subtitleCount > 0) add("Subtitles" to subtitleCount)
-                    if (fileCount > 0) add("Files" to fileCount)
-                }
-                items(filters) { (label, count) ->
-                    val isSelected = selectedFilter == label
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedFilter = label },
-                        label = { Text("$label ($count)") }
-                    )
+    val handleDownloadSelected: (List<ScrapedMediaItem>) -> Unit = { selectedList ->
+        if (onDownloadSelected != null) {
+            onDownloadSelected(selectedList)
+        } else if (selectedList.isNotEmpty()) {
+            DownloadQueueManager.enqueueBatch(
+                context = context,
+                items = selectedList,
+                referer = effectiveUrl.ifBlank { null },
+                stackTitle = effectiveTitle.ifBlank { "Downloaded Media" },
+                sourceDomain = effectiveDomain.ifBlank { "Web" },
+                sourceUrl = effectiveUrl
+            )
+            Toast.makeText(context, "Queued ${selectedList.size} items", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val handleClearAll: () -> Unit = {
+        if (onClearAll != null) onClearAll() else DownloaderSession.clear()
+    }
+
+    YtdlnisMonochromeTheme {
+        Scaffold(
+            modifier = modifier,
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.background)
+                        .statusBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = effectiveTitle.ifBlank { effectiveDomain.ifBlank { "Discovered Media" } },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${effectiveItems.size} items · ${effectiveDomain.ifBlank { "Scan" }}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (onDeepScanClick != null) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (isDeepScanning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                border = if (isDeepScanning) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { onDeepScanClick() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isDeepScanning) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(12.dp),
+                                            strokeWidth = 1.5.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    } else {
+                                        Icon(Icons.Default.Radar, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                    Text(
+                                        text = if (isDeepScanning) "Scanning" else "Deep Scan",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDeepScanning) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        if (effectiveUrl.isNotBlank() && onOpenInStudio != null) {
+                            IconButton(
+                                onClick = { onOpenInStudio(effectiveUrl) },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(Icons.Default.Tune, contentDescription = "Studio", modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        if (effectiveItems.isNotEmpty()) {
+                            IconButton(
+                                onClick = handleClearAll,
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
                 }
             }
-        }
-
-        if (discoveredItems.isEmpty()) {
-            Box(
+        ) { padding ->
+            WebbyDiscoveredMediaGrid(
+                items = effectiveItems,
+                onDownloadSingle = handleDownloadSingle,
+                onDownloadSelected = { selected ->
+                    handleDownloadSelected(selected)
+                    onNavigateToActivities?.invoke()
+                },
+                onOpenInStudio = onOpenInStudio,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(28.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (rawDiscoveredItems.isNotEmpty()) {
+                    .padding(padding)
+            )
+        }
+    }
+}
+
+/**
+ * Webby-Images-Downloader style 3-column numbered visual thumbnail grid with:
+ * - Sequential #1, #2, #3... order badges
+ * - Corner format/resolution pill overlay
+ * - Tap-to-select check ring
+ * - Long-press or expand button to open the Built-in Swipeable Zoom Viewer with 1-tap metadata HUD
+ * - Floating bottom dock for category filtering, Select All / Clear, and 1-tap batch download
+ */
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@Composable
+fun WebbyDiscoveredMediaGrid(
+    items: List<ScrapedMediaItem>,
+    onDownloadSingle: (ScrapedMediaItem) -> Unit,
+    onDownloadSelected: (List<ScrapedMediaItem>) -> Unit,
+    onOpenInStudio: ((String) -> Unit)? = null,
+    onClearAll: (() -> Unit)? = null,
+    searchHistory: List<String> = emptyList(),
+    onSelectHistoryUrl: ((String) -> Unit)? = null,
+    onClearHistory: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var selectedCategory by remember { mutableStateOf<MediaCategory?>(null) }
+    var selectedIds by remember(items) { mutableStateOf(items.map { it.id }.toSet()) }
+    var previewIndex by remember { mutableStateOf<Int?>(null) }
+
+    val filteredItems = remember(items, selectedCategory) {
+        if (selectedCategory == null) items
+        else items.filter { it.category == selectedCategory }
+    }
+
+    // Map each item ID to its 1-based page appearance index (#1, #2, #3...)
+    val globalOrderMap = remember(items) {
+        items.mapIndexed { idx, item -> item.id to (idx + 1) }.toMap()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Minimal category & Select All checkbox strip
+            if (items.isNotEmpty()) {
+                val filteredIds = remember(filteredItems) { filteredItems.map { it.id }.toSet() }
+                val allFilteredChecked = filteredIds.isNotEmpty() && selectedIds.containsAll(filteredIds)
+                val toggleSelectAll = {
+                    selectedIds = if (allFilteredChecked) {
+                        selectedIds - filteredIds
+                    } else {
+                        selectedIds + filteredIds
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Select All Checkbox Pill
+                    Surface(
+                        shape = CircleShape,
+                        color = if (allFilteredChecked) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(CircleShape)
+                            .clickable { toggleSelectAll() }
+                            .testTag("grid_select_all_checkbox")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 6.dp, end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Checkbox(
+                                checked = allFilteredChecked,
+                                onCheckedChange = { toggleSelectAll() },
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "Select all (${selectedIds.count { it in filteredIds }}/${filteredIds.size})",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (allFilteredChecked) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    val allSelected = selectedCategory == null
+                    MonochromeFilterPill(
+                        label = "All ${items.size}",
+                        selected = allSelected,
+                        onClick = { selectedCategory = null }
+                    )
+
+                    MediaCategory.entries.forEach { cat ->
+                        val count = items.count { it.category == cat }
+                        if (count > 0 && cat != MediaCategory.ALL) {
+                            MonochromeFilterPill(
+                                label = "${cat.label} $count",
+                                selected = selectedCategory == cat,
+                                onClick = { selectedCategory = cat }
+                            )
+                        }
+                    }
+
+                    if (onClearAll != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(CircleShape)
+                                .clickable { onClearAll() }
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            ) {
+                                Text(
+                                    text = "Reset",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (filteredItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(24.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.FilterList,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(52.dp)
-                        )
-                        Spacer(Modifier.height(14.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier.size(60.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.GridView,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(26.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         Text(
-                            text = "All media hidden by active filters",
+                            text = "Ready to Scan & Download",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
                         )
-                        Spacer(Modifier.height(6.dp))
+
+                        if (searchHistory.isNotEmpty() && onSelectHistoryUrl != null) {
+                            val distinctHistory = remember(searchHistory) {
+                                searchHistory.distinctBy {
+                                    it.removePrefix("https://")
+                                        .removePrefix("http://")
+                                        .removePrefix("www.")
+                                        .trimEnd('/')
+                                        .take(26)
+                                        .lowercase()
+                                }.take(6)
+                            }
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                distinctHistory.forEach { q ->
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainer,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .clickable { onSelectHistoryUrl(q) }
+                                    ) {
+                                        Text(
+                                            text = q.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/').take(26),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                                if (onClearHistory != null) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .clickable { onClearHistory() }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Clear history",
+                                            modifier = Modifier
+                                                .padding(7.dp)
+                                                .size(12.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(
+                        start = 2.dp,
+                        end = 2.dp,
+                        top = 2.dp,
+                        bottom = 88.dp
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    itemsIndexed(
+                        items = filteredItems,
+                        key = { _, item -> item.id }
+                    ) { idx, item ->
+                        val isSelected = item.id in selectedIds
+                        val seqNum = globalOrderMap[item.id] ?: (idx + 1)
+                        val badgeLabel = remember(item) {
+                            val fmt = item.format.ifBlank {
+                                when {
+                                    item.isStream -> "HLS"
+                                    item.isVideo -> "MP4"
+                                    item.isAudio -> "M4A"
+                                    else -> "JPG"
+                                }
+                            }.take(4).uppercase()
+                            val res = item.resolutionHint?.takeIf { it.isNotBlank() }
+                            if (res != null) "$fmt · $res" else fmt
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(
+                                    width = if (isSelected) 2.dp else 0.5.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                )
+                                .combinedClickable(
+                                    onClick = {
+                                        selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                                    },
+                                    onLongClick = {
+                                        previewIndex = idx
+                                    }
+                                )
+                                .testTag("download_single_${item.id}")
+                        ) {
+                            AsyncImage(
+                                model = item.thumbnailUrl ?: item.url,
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        alpha = if (isSelected) 1f else 0.72f
+                                    }
+                            )
+
+                            // Top-left Webby sequential order badge (#1, #2, #3...)
+                            Surface(
+                                color = Color(0xCC0D0D0D),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(5.dp)
+                            ) {
+                                Text(
+                                    text = "#$seqNum",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            // Top-right selection ring
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(5.dp)
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primary
+                                        else Color(0x88000000)
+                                    )
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                }
+                            }
+
+                            // Bottom-left format / resolution badge
+                            Surface(
+                                color = Color(0xCC0D0D0D),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(5.dp)
+                            ) {
+                                Text(
+                                    text = badgeLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp),
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            // Bottom-right quick zoom / preview button
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x990D0D0D))
+                                    .clickable { previewIndex = idx },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    if (item.isVideo || item.isStream) Icons.Default.PlayArrow else Icons.Default.Fullscreen,
+                                    contentDescription = "Preview",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Floating Monochrome Batch Download Bar
+        if (filteredItems.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "${selectedIds.size} selected",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 6.dp)
+                    )
+
+                    Button(
+                        onClick = {
+                            val toDownload = items.filter { it.id in selectedIds }
+                            onDownloadSelected(toDownload)
+                        },
+                        enabled = selectedIds.isNotEmpty(),
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "${rawDiscoveredItems.size} items were detected on this page, but are hidden by the current filter rules (Min: ${filterState.minWidth}x${filterState.minHeight}px, PNG/SVG disabled).",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+                            text = "Download (${selectedIds.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = { showFilterSheet = true },
-                                modifier = Modifier.testTag("empty_state_adjust_filters_btn")
+                    }
+                }
+            }
+        }
+
+        // Built-in Webby Fullscreen Swipeable Zoom Viewer with 1-Tap Metadata Overlay
+        if (previewIndex != null && filteredItems.isNotEmpty()) {
+            val safeInitial = previewIndex!!.coerceIn(0, filteredItems.lastIndex)
+            WebbyFullscreenMediaViewer(
+                items = filteredItems,
+                initialIndex = safeInitial,
+                globalOrderMap = globalOrderMap,
+                selectedIds = selectedIds,
+                onToggleSelect = { id ->
+                    selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                },
+                onDownloadSingle = onDownloadSingle,
+                onOpenInStudio = onOpenInStudio,
+                onDismiss = { previewIndex = null }
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonochromeFilterPill(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+        )
+    }
+}
+
+/**
+ * Webby-Images-Downloader style Built-in Fullscreen Viewer:
+ * - Swipe left/right across discovered items at 1x zoom
+ * - Pinch-to-zoom and pan, or double-tap to toggle 1x / 2.5x zoom
+ * - Single tap toggles the metadata HUD (page index, resolution, engine, direct URL, Download & Studio actions)
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WebbyFullscreenMediaViewer(
+    items: List<ScrapedMediaItem>,
+    initialIndex: Int,
+    globalOrderMap: Map<String, Int>,
+    selectedIds: Set<String>,
+    onToggleSelect: (String) -> Unit,
+    onDownloadSingle: (ScrapedMediaItem) -> Unit,
+    onOpenInStudio: ((String) -> Unit)?,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { items.size })
+    var showMetadataHud by remember { mutableStateOf(true) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xF50A0A0A))
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                val item = items[page]
+                var scale by remember(page) { mutableFloatStateOf(1f) }
+                var offset by remember(page) { mutableStateOf(Offset.Zero) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(page) {
+                            detectTapGestures(
+                                onTap = { showMetadataHud = !showMetadataHud },
+                                onDoubleTap = {
+                                    if (scale > 1.05f) {
+                                        scale = 1f
+                                        offset = Offset.Zero
+                                    } else {
+                                        scale = 2.5f
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(page) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                scale = newScale
+                                offset = if (newScale > 1.02f) {
+                                    Offset(offset.x + pan.x, offset.y + pan.y)
+                                } else {
+                                    Offset.Zero
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = item.url.takeIf { !item.isVideo && !item.isStream } ?: item.thumbnailUrl ?: item.url,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offset.x
+                                translationY = offset.y
+                            }
+                    )
+                }
+            }
+
+            val currentItem = items.getOrNull(pagerState.currentPage) ?: items.first()
+            val seqNum = globalOrderMap[currentItem.id] ?: (pagerState.currentPage + 1)
+            val isChecked = currentItem.id in selectedIds
+
+            // Top HUD bar (toggled by single tap)
+            AnimatedVisibility(
+                visible = showMetadataHud,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xBB0A0A0A))
+                        .statusBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+
+                    Text(
+                        text = "#$seqNum of ${items.size}",
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    IconButton(onClick = { onToggleSelect(currentItem.id) }) {
+                        Icon(
+                            if (isChecked) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                            contentDescription = "Select",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+
+            // Bottom Metadata & Quick Actions HUD (toggled by single tap)
+            AnimatedVisibility(
+                visible = showMetadataHud,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xDD0F0F0F))
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = currentItem.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(
+                        text = listOfNotNull(
+                            currentItem.format.takeIf { it.isNotBlank() },
+                            currentItem.resolutionHint?.takeIf { it.isNotBlank() },
+                            currentItem.provenance.extractorEngine.takeIf { it.isNotBlank() },
+                            currentItem.sizeBytes?.takeIf { it > 0L }?.let { DownloadActivityManager.formatBytes(it) }
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFBDBDBD)
+                    )
+
+                    Text(
+                        text = currentItem.url,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        ),
+                        color = Color(0xFF9E9E9E),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable {
+                            clipboard.setText(AnnotatedString(currentItem.url))
+                            Toast.makeText(context, "Copied direct URL", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if ((currentItem.isVideo || currentItem.isAudio || currentItem.isStream) && onOpenInStudio != null) {
+                            OutlinedButton(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenInStudio(currentItem.url)
+                                },
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                border = BorderStroke(1.dp, Color(0xFF424242)),
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Adjust Filters")
-                            }
-                            OutlinedButton(
-                                onClick = { DiscoveryFilterManager.resetToDefaults() },
-                                modifier = Modifier.testTag("empty_state_reset_filters_btn")
-                            ) {
-                                Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Reset")
+                                Text("Studio")
                             }
                         }
-                    }
-                } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Text(
-                            text = "No media detected on this page yet",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "Browse pages containing videos, audio, or images and detected options will dynamically appear here for selection.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-        } else {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(filteredItems, key = { it.id.ifBlank { it.url } }) { item ->
-                        val itemId = item.id.ifBlank { item.url }
-                        val isSelected = selectedIds.contains(itemId)
 
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainer,
-                            border = BorderStroke(
-                                width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        Button(
+                            onClick = { onDownloadSingle(currentItem) },
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black
                             ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable {
-                                    selectedIds = if (isSelected) selectedIds - itemId else selectedIds + itemId
-                                }
+                            modifier = Modifier.weight(1.3f)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Checkbox for choosing
-                                Checkbox(
-                                    checked = isSelected,
-                                    onCheckedChange = { checked ->
-                                        selectedIds = if (checked) selectedIds + itemId else selectedIds - itemId
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                )
-
-                                Spacer(Modifier.width(10.dp))
-
-                                if (item.isSubtitle || item.isOtherFile || (item.isAudio && item.thumbnailUrl.isNullOrBlank())) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(68.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(MaterialTheme.colorScheme.secondaryContainer),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = when {
-                                                item.isSubtitle -> Icons.Default.Subtitles
-                                                item.isOtherFile -> Icons.Default.InsertDriveFile
-                                                else -> Icons.Default.Audiotrack
-                                            },
-                                            contentDescription = item.category.label,
-                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                    }
-                                } else {
-                                    AsyncImage(
-                                        model = item.thumbnailUrl?.takeIf { it.isNotBlank() } ?: item.url,
-                                        contentDescription = item.title,
-                                        modifier = Modifier
-                                            .size(68.dp)
-                                            .clip(RoundedCornerShape(10.dp)),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-
-                                Spacer(Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.title.ifBlank { item.url },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        val displayFormat = DiscoveryFilterManager.normalizeFormat(item)
-                                        Text(
-                                            text = if (item.isVideo || item.isStream) "Video ($displayFormat)" else if (item.isAudio) "Audio ($displayFormat)" else displayFormat,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        val dim = if (item.width != null && item.height != null) {
-                                            "${item.width}x${item.height} px"
-                                        } else item.resolutionHint?.takeIf { it.isNotBlank() }
-                                        if (dim != null) {
-                                            Text(
-                                                text = "• $dim",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(Modifier.width(8.dp))
-
-                                // QR Code share button for cross-device transfer
-                                IconButton(
-                                    onClick = { qrShareItem = item },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.QrCode2,
-                                        contentDescription = "Share QR code for ${item.title}",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-
-                                // Single item download button
-                                IconButton(
-                                    onClick = {
-                                        downloadItem(item)
-                                        Toast.makeText(context, "Download queued", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Download,
-                                        contentDescription = "Download ${item.title}",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Bottom floating action bar for downloading chosen items
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    tonalElevation = 6.dp,
-                    shadowElevation = 8.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 20.dp, vertical = 14.dp)
-                        .navigationBarsPadding()
-                        .fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (selectedIds.isEmpty()) {
-                                "Download all (${filteredItems.size})"
-                            } else {
-                                "${selectedIds.size} item${if (selectedIds.size > 1) "s" else ""} chosen"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (selectedIds.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        dismissedIds = dismissedIds + selectedIds
-                                        selectedIds = emptySet()
-                                    },
-                                    modifier = Modifier.testTag("discovered_media_batch_remove_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = "Remove selected",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-
-                            Button(
-                                onClick = {
-                                    val targets = if (selectedIds.isEmpty()) {
-                                        filteredItems
-                                    } else {
-                                        filteredItems.filter { selectedIds.contains(it.id.ifBlank { it.url }) }
-                                    }
-                                    downloadBatch(targets)
-                                },
-                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                            ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = if (selectedIds.isEmpty()) "Download All" else "Download Selected"
-                            )
-                            }
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Download", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
-        }
-
-        if (showFilterSheet) {
-            DiscoveryFilterBottomSheet(
-                filterState = filterState,
-                matchingCount = discoveredItems.size,
-                onFilterChange = { newFilter ->
-                    DiscoveryFilterManager.updateFilters(newFilter)
-                },
-                onDismissRequest = { showFilterSheet = false }
-            )
-        }
-
-        // Manual Direct URL Download Dialog ("Add URL")
-        if (showAddUrlDialog) {
-            AlertDialog(
-                onDismissRequest = { showAddUrlDialog = false },
-                title = { Text("Add Direct Download URL", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Paste a direct link to any video, audio, image, HLS/DASH stream, subtitle, or file.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        OutlinedTextField(
-                            value = manualUrlInput,
-                            onValueChange = { manualUrlInput = it },
-                            placeholder = { Text("https://youtube.com/... or open.spotify.com/...") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        val detectedPlatform = remember(manualUrlInput) {
-                            com.amresalehin.emregallery.data.SupportedMediaPlatform.detect(manualUrlInput)
-                        }
-                        if (detectedPlatform != null) {
-                            val isSpace = com.amresalehin.emregallery.data.SupportedMediaPlatform.isXSpace(manualUrlInput)
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                            ) {
-                                Text(
-                                    text = if (isSpace) "Detected: Twitter / X Space (HLS Audio)"
-                                    else "Detected: ${detectedPlatform.displayName} • ${detectedPlatform.contentSummary}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val trimmed = manualUrlInput.trim()
-                            if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
-                                val built = MediaCaptureEngine.buildMediaItem(
-                                    rawUrl = trimmed,
-                                    source = ExtractionSource.STATIC_HTML,
-                                    baseUrl = sourceUrl.ifBlank { trimmed }
-                                ) ?: run {
-                                    val cls = MediaClassifier.classify(trimmed)
-                                    ScrapedMediaItem(
-                                        id = "manual_${System.currentTimeMillis()}_${trimmed.hashCode()}",
-                                        url = trimmed,
-                                        title = MediaClassifier.deriveFileName(trimmed, cls.format, 0),
-                                        isVideo = cls.isVideo,
-                                        isAudio = cls.isAudio,
-                                        isStream = cls.isStream,
-                                        category = cls.category,
-                                        format = cls.format,
-                                        mimeType = cls.mimeType,
-                                        source = "Manual URL"
-                                    )
-                                }
-                                DownloaderSession.addDiscoveredItem(built)
-                                downloadItem(built)
-                                Toast.makeText(context, "Queued ${built.title}", Toast.LENGTH_SHORT).show()
-                                manualUrlInput = ""
-                                showAddUrlDialog = false
-                            } else {
-                                Toast.makeText(context, "Enter a valid http:// or https:// URL", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Text("Download")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAddUrlDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        // QR Code Sharing Dialog
-        qrShareItem?.let { item ->
-            QrCodeShareDialog(
-                title = item.title,
-                url = item.url,
-                onDismiss = { qrShareItem = null }
-            )
-        }
-
-        // 8-Platform Network Status Dialog
-        if (showNetworkStatusDialog) {
-            NetworkStatusDialog(onDismiss = { showNetworkStatusDialog = false })
         }
     }
 }

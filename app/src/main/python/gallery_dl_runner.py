@@ -248,6 +248,12 @@ def extract_gallery_dl(url, options_json="{}"):
                     except Exception:
                         size_bytes = None
 
+                    raw_dur = kwdict.get("duration")
+                    try:
+                        duration_sec = int(round(float(raw_dur))) if raw_dur and float(raw_dur) > 0 else None
+                    except Exception:
+                        duration_sec = None
+
                     thumb = kwdict.get("thumbnail") or kwdict.get("thumb") or (item_url if category == "IMAGES" else None)
 
                     # Route Reddit DASH videos extracted by gallery-dl through yt-dlp so audio is muxed
@@ -267,6 +273,7 @@ def extract_gallery_dl(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": size_bytes,
+                        "durationSeconds": duration_sec,
                         "source": item_source
                     })
     except Exception as e:
@@ -551,6 +558,7 @@ def extract_yt_dlp(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
+                        "durationSeconds": (int(round(float(entry.get("duration")))) if entry.get("duration") and float(entry.get("duration")) > 0 else None),
                         "source": "yt-dlp"
                     })
     except Exception as e:

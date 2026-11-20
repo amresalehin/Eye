@@ -2005,6 +2005,49 @@ class MediaDownloaderTest {
         assertTrue(dlOpts.audioOnly)
         assertEquals("OPUS", dlOpts.preferredAudioFormat)
 
+        // 6. Duration preview formatting & JSON extraction parsing
+        assertNull(com.amresalehin.emregallery.ui.formatMediaDuration(null))
+        assertNull(com.amresalehin.emregallery.ui.formatMediaDuration(0L))
+        assertEquals("0:09", com.amresalehin.emregallery.ui.formatMediaDuration(9L))
+        assertEquals("3:42", com.amresalehin.emregallery.ui.formatMediaDuration(222L))
+        assertEquals("1:01:05", com.amresalehin.emregallery.ui.formatMediaDuration(3665L))
+
+        val durJson = org.json.JSONObject(
+            """
+            {
+              "pageTitle": "Audio & Video Preview",
+              "engine": "yt-dlp",
+              "items": [
+                {
+                  "id": "yt_dur_1",
+                  "url": "https://youtu.be/abc123",
+                  "title": "demo_4k.webm",
+                  "category": "VIDEOS",
+                  "format": "WEBM",
+                  "mimeType": "video/webm",
+                  "isVideo": true,
+                  "durationSeconds": 222,
+                  "source": "yt-dlp"
+                },
+                {
+                  "id": "yt_dur_2",
+                  "url": "https://soundcloud.com/artist/track",
+                  "title": "track.m4a",
+                  "category": "AUDIO",
+                  "format": "M4A",
+                  "mimeType": "audio/mp4",
+                  "isAudio": true,
+                  "durationSeconds": 3665,
+                  "source": "yt-dlp"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val (_, durItems) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(durJson, "https://youtu.be/abc123")
+        assertEquals(222L, durItems[0].durationSeconds)
+        assertEquals(3665L, durItems[1].durationSeconds)
+
         // Reset defaults
         prefs.setPreferredAudioFormat("M4A")
         prefs.setWifiOnlyDownloads(false)

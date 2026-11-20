@@ -381,6 +381,7 @@ class DualMediaExtractor(private val context: Context) {
                             val upgraded = preferred.copy(
                                 id = existing.id,
                                 thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
+                                durationSeconds = preferred.durationSeconds ?: secondary.durationSeconds,
                                 provenance = preferred.provenance.copy(extractorEngine = mergedEngine)
                             )
                             if (upgraded != existing) {
@@ -440,6 +441,7 @@ class DualMediaExtractor(private val context: Context) {
                             url = resolvedUrl,
                             thumbnailUrl = mergedThumb,
                             resolutionHint = mergedResolution,
+                            durationSeconds = preferred.durationSeconds ?: secondary.durationSeconds,
                             provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
                             downloadHeaders = mergedHeaders
                         )

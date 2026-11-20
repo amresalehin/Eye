@@ -446,6 +446,22 @@ private val NON_DIMENSION_RESOLUTION_HINTS = setOf(
  * 3. Known file size (e.g. "2.4 MB", "340 KB") when sizeBytes or probed Content-Length is available.
  * 4. Clean source or format label (e.g. "yt-dlp", "MP3", "MP4") without dummy dimension placeholders.
  */
+/**
+ * Formats media duration in seconds into a compact timestamp pill (e.g., "0:09", "3:42", "1:05:12").
+ */
+fun formatMediaDuration(durationSeconds: Long?): String? {
+    val total = durationSeconds ?: return null
+    if (total <= 0L) return null
+    val hours = total / 3600L
+    val minutes = (total % 3600L) / 60L
+    val seconds = total % 60L
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
+
 fun formatScrapedMediaDimensionOrSize(
     item: ScrapedMediaItem,
     dynamicDimensions: Map<String, Pair<Int, Int>> = emptyMap()

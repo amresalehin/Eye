@@ -235,6 +235,7 @@ object GalleryDlEngine {
                 source = itemSource,
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
+                durationSeconds = if (obj.has("durationSeconds") && !obj.isNull("durationSeconds")) obj.optLong("durationSeconds", -1L).takeIf { it > 0L } else null,
                 provenance = MediaProvenance(
                     extractorEngine = itemSource,
                     pageUrl = pageUrl

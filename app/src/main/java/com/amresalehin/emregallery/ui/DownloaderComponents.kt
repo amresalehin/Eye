@@ -2376,6 +2376,28 @@ fun DownloaderMediaCard(
                         )
                     }
                 }
+
+                // Bottom-Right Duration Pill for Video, Audio, and Stream previews
+                val durationLabel = remember(item.durationSeconds) { formatMediaDuration(item.durationSeconds) }
+                if (durationLabel != null && (item.isVideo || item.isAudio || item.isStream)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.74f),
+                        modifier = Modifier
+                            .padding(end = 6.dp, bottom = 6.dp)
+                            .align(Alignment.BottomEnd)
+                            .testTag("scraped_media_duration_${item.id}")
+                    ) {
+                        Text(
+                            text = durationLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
 
             // Info below thumbnail

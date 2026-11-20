@@ -261,13 +261,17 @@ class DualMediaExtractor(private val context: Context) {
         val pageTitle: String = "",
         val domain: String = "",
         val items: List<ScrapedMediaItem> = emptyList(),
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val requiresSignIn: Boolean = false,
+        val signInUrl: String? = null,
+        val isObtainingCookiesInBackground: Boolean = false
     )
 
     enum class ExtractionPhase {
         IDLE,
         DIRECT_MEDIA,
         GALLERY_DL,
+        YT_DLP,
         STATIC_SCRAPING,
         BROWSER_INTERCEPTING,
         AUTO_SCROLLING,
@@ -508,14 +512,14 @@ class DualMediaExtractor(private val context: Context) {
                     return@launch
                 }
 
-                val enabledProviders = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getEnabledProvidersSync(appContext)
+                val enabledProviders = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getEnabledProvidersSync(context.applicationContext)
                 val useGalleryDl = "gallery-dl" in enabledProviders
                 val useYtDlp = "yt-dlp" in enabledProviders
                 val useStatic = "static" in enabledProviders
                 val useBrowser = "browser" in enabledProviders
 
                 val galleryDlProvider = GalleryDlProvider()
-                val ytDlpProvider = YtDlpProvider(appContext)
+                val ytDlpProvider = YtDlpProvider(context.applicationContext)
                 val staticHtmlProvider = StaticHtmlProvider()
                 val isStructuredApplicable = (useGalleryDl && galleryDlProvider.isApplicable(requestContext)) ||
                     (useYtDlp && ytDlpProvider.isApplicable(requestContext))

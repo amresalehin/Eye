@@ -34,9 +34,9 @@ class LockedVaultManager(private val context: Context) {
     private val metaFile = File(vaultDir, "vault_metadata.json.enc")
     private val legacyMetaFile = File(vaultDir, "vault_metadata.json")
 
-    fun getVaultItems(): List<MediaItem> = runCatching {
+    fun getVaultItems(): List<MediaItem> {
         val array = readMetadata()
-        buildList {
+        return buildList {
             for (i in 0 until array.length()) {
                 val obj = array.optJSONObject(i) ?: continue
                 val uriString = obj.optString("uri").takeIf { it.isNotBlank() } ?: continue
@@ -70,7 +70,7 @@ class LockedVaultManager(private val context: Context) {
         }.sortedByDescending {
             if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
         }
-    }.getOrDefault(emptyList())
+    }
 
     private fun readMetadata(): JSONArray {
         if (metaFile.isFile) {
@@ -114,6 +114,7 @@ class LockedVaultManager(private val context: Context) {
             val current = getVaultItems().toMutableList()
             val createdFiles = mutableListOf<File>()
             val locked = mutableListOf<MediaItem>()
+            val pendingDeleteUris = mutableListOf<String>()
             try {
                 for (item in items.distinctBy { it.uri }) {
                     val sourceUri = Uri.parse(item.uri)
@@ -121,6 +122,7 @@ class LockedVaultManager(private val context: Context) {
                     val dest = File(vaultDir, "vault_${UUID.randomUUID()}_$safeName.enc")
                     val input = context.contentResolver.openInputStream(sourceUri) ?: continue
                     input.use { VaultCrypto.encryptStreamToFile(it, dest) }
+                    createdFiles.add(dest)
                     if (!dest.isFile || !VaultCrypto.isEncryptedVaultFile(dest) ||
                         VaultCrypto.getVaultFilePlaintextLength(dest) <= 0L
                     ) {
@@ -132,7 +134,6 @@ class LockedVaultManager(private val context: Context) {
                         val firstByte = stream.read()
                         if (firstByte < 0) throw IllegalStateException("Empty source media: ${item.name}")
                     }
-                    createdFiles.add(dest)
                     locked.add(
                         item.copy(
                             uri = Uri.fromFile(dest).toString(),
@@ -140,19 +141,14 @@ class LockedVaultManager(private val context: Context) {
                             sizeBytes = VaultCrypto.getVaultFilePlaintextLength(dest)
                         )
                     )
+                    pendingDeleteUris.add(item.uri)
                 }
 
                 if (locked.isNotEmpty()) {
                     current.addAll(locked)
                     saveVaultItems(current)
                 }
-                VaultLockResult(lockedItems = locked, pendingDeleteUris = locked.mapNotNull { lockedItem ->
-                    // The source is matched by the stable input URI, never by MediaStore numeric ID.
-                    items.firstOrNull { source ->
-                        source.id == lockedItem.id && source.name == lockedItem.name &&
-                            source.isVideo == lockedItem.isVideo
-                    }?.uri
-                }.distinct())
+                VaultLockResult(lockedItems = locked, pendingDeleteUris = pendingDeleteUris.distinct())
             } catch (failure: Throwable) {
                 createdFiles.forEach { it.delete() }
                 throw failure

@@ -1040,6 +1040,49 @@ def build_ytdlp_options(config_dict, output_dir):
     return ydl_opts
 
 
+
+def prepare_android_format_selection(ydl_opts, format_id, audio_format_ids, video_only=False, max_height=0):
+    """
+    Converts a YTDLnis format choice into an Android-safe video-only yt-dlp
+    selection plus companion audio IDs for in-process FFmpegKit/MediaMuxer.
+    A combined ID such as "137+140" must never reach yt-dlp here: yt-dlp
+    would invoke its external FFmpegMergerPP, which cannot spawn on Android ART.
+    """
+    selected_video_id = str(format_id or "").strip()
+    selected_audio_ids = [
+        str(value).strip()
+        for value in (audio_format_ids or [])
+        if str(value).strip()
+    ]
+
+    if selected_video_id and "+" in selected_video_id:
+        combined_parts = [
+            part.strip()
+            for part in selected_video_id.split("+")
+            if part.strip()
+        ]
+        if combined_parts:
+            selected_video_id = combined_parts[0]
+            # Explicit audio choices from the audio-track picker take precedence.
+            if not selected_audio_ids:
+                selected_audio_ids = combined_parts[1:]
+
+    if video_only:
+        selected_audio_ids = []
+
+    height_cap = max(0, int(max_height or 0))
+    if selected_video_id and selected_video_id.lower() != "best":
+        ydl_opts["format"] = f"{selected_video_id}/bestvideo/best"
+    elif height_cap > 0:
+        ydl_opts["format"] = f"bestvideo[height<={height_cap}]/bestvideo/best"
+    else:
+        ydl_opts["format"] = "bestvideo/best"
+
+    if "+" in str(ydl_opts.get("format") or ""):
+        raise ValueError("Android yt-dlp video selector must not contain a merge operator")
+    return selected_audio_ids
+
+
 def _download_direct_http_stream(stream_url, dest_path, timeout=35):
     req = urllib.request.Request(
         stream_url,
@@ -1212,22 +1255,22 @@ def download_item(config_json, output_dir):
         max_h = int(config.get("max_height") or 0)
         video_only = bool(config.get("video_only", False))
 
-        # Because external CLI ffmpeg is not spawned via subprocess on Android (muxing is done
-        # in-process by FfmpegKitEngine/AndroidMediaMuxer in YtdlnisEngine.kt), avoid passing `+`
-        # to yt-dlp's single-pass format selector so yt-dlp never aborts due to FFmpegMergerPP.
-        if download_type != "audio" and "+" in str(ydl_opts.get("format") or ""):
-            if format_id and format_id != "best":
-                ydl_opts["format"] = f"{format_id}/bestvideo/best"
-            elif video_only:
-                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best" if max_h > 0 else "bestvideo/best"
-            elif audio_format_ids:
-                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best" if max_h > 0 else "bestvideo/best"
-            elif max_h > 0:
-                # Download the highest video-only rendition under the cap, then fetch
-                # companion audio separately for native muxing in YtdlnisEngine.kt.
-                ydl_opts["format"] = f"bestvideo[height<={max_h}]/bestvideo/best"
-            else:
-                ydl_opts["format"] = "bestvideo/best"
+        # Keep the yt-dlp pass video-only on Android. Companion audio is fetched
+        # separately and muxed in-process by FfmpegKitEngine/AndroidMediaMuxer.
+        # Split combined UI format IDs (for example "137+140") before yt-dlp
+        # can invoke its unavailable external FFmpegMergerPP.
+        if download_type != "audio":
+            audio_format_ids = prepare_android_format_selection(
+                ydl_opts=ydl_opts,
+                format_id=format_id,
+                audio_format_ids=audio_format_ids,
+                video_only=video_only,
+                max_height=max_h,
+            )
+            logs.append(
+                "[Android format selection] video=%s audio=%s"
+                % (ydl_opts.get("format"), ",".join(audio_format_ids) or ("none (video-only)" if video_only else "auto"))
+            )
 
         if cookie_path:
             ydl_opts["cookiefile"] = cookie_path

@@ -106,7 +106,8 @@ class LockedVaultManager(private val context: Context) {
         }
         // Same-directory rename is atomic on Android/Linux filesystems.
         Os.rename(temp.absolutePath, metaFile.absolutePath)
-        if (legacyMetaFile.exists()) legacyMetaFile.delete()
+        // Keep the legacy index until its plaintext media files have been migrated.
+        // Deleting it here would make those pre-encryption vault items undiscoverable.
     }
 
     suspend fun lockItemsWithPendingDeletes(items: List<MediaItem>): VaultLockResult =

@@ -73,7 +73,7 @@ class MediaDownloadWorker(
         }
     }
 
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    override suspend fun doWork(): Result = DownloadQueueManager.withConcurrencyLimit(applicationContext) { withContext(Dispatchers.IO) {
         val mediaUrl = inputData.getString(KEY_MEDIA_URL) ?: return@withContext Result.failure()
         val fileName = inputData.getString(KEY_FILE_NAME) ?: "media_${System.currentTimeMillis()}"
         val referer = inputData.getString(KEY_REFERER)
@@ -332,7 +332,7 @@ class MediaDownloadWorker(
         } finally {
             DownloadQueueManager.markDownloadCompleted(itemId)
         }
-    }
+    } }
 
     companion object {
         const val TAG = "MediaDownloadWorker"

@@ -442,25 +442,43 @@ fun DownloaderSearchMainPage(
                             }
                         }
                     } else {
-                        // Paste button when empty
-                        IconButton(
-                            onClick = {
-                                val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
-                                if (clipText.isNotBlank()) {
-                                    urlInput = clipText
-                                    submitSearch(clipText)
-                                }
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("downloader_paste_btn")
+                        // Paste & Downloader Settings buttons when empty
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "Paste from clipboard and fetch",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            IconButton(
+                                onClick = {
+                                    val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+                                    if (clipText.isNotBlank()) {
+                                        urlInput = clipText
+                                        submitSearch(clipText)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("downloader_paste_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = "Paste from clipboard and fetch",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { showDownloaderSettings = true },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("downloader_main_settings_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Downloader settings",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -750,6 +768,13 @@ fun SavedPreviewSection(
             }
         }
     }
+
+    if (showDownloaderSettings) {
+        DownloaderSettingsBottomSheet(
+            downloaderPrefs = downloaderPrefs,
+            onDismiss = { showDownloaderSettings = false }
+        )
+    }
 }
 
 /**
@@ -1027,6 +1052,7 @@ fun DownloaderResultsPage(
     var minKbInput by remember(persistedMinKb) { mutableStateOf(persistedMinKb.toString()) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
     var showDownloaderSettings by remember { mutableStateOf(false) }
+    var previewItem by remember { mutableStateOf<ScrapedMediaItem?>(null) }
 
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
 
@@ -1585,6 +1611,10 @@ fun DownloaderResultsPage(
                                         scope.launch {
                                             downloaderPrefs.setAudioOnlyMode(false)
                                             downloaderPrefs.setVideoQualityCap(q)
+                                            if (activeUrl.isNotBlank() && !extractorState.isRunning) {
+                                                dynamicDimensions.clear()
+                                                dualExtractor.extract(activeUrl, scope)
+                                            }
                                         }
                                     }
                                 )
@@ -1593,7 +1623,7 @@ fun DownloaderResultsPage(
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        "Audio Only (M4A/MP3)",
+                                        "Audio Only (M4A / Opus)",
                                         fontWeight = if (audioOnlyMode) FontWeight.Bold else FontWeight.Normal
                                     )
                                 },
@@ -1608,6 +1638,10 @@ fun DownloaderResultsPage(
                                     qualityMenuExpanded = false
                                     scope.launch {
                                         downloaderPrefs.setAudioOnlyMode(!audioOnlyMode)
+                                        if (activeUrl.isNotBlank() && !extractorState.isRunning) {
+                                            dynamicDimensions.clear()
+                                            dualExtractor.extract(activeUrl, scope)
+                                        }
                                     }
                                 }
                             )
@@ -1847,6 +1881,29 @@ fun DownloaderResultsPage(
                 )
             }
 
+            previewItem?.let { itemToPreview ->
+                DownloaderMediaPreviewDialog(
+                    item = itemToPreview,
+                    dynamicDimensions = dynamicDimensions,
+                    onDismiss = { previewItem = null },
+                    onDownloadNow = {
+                        previewItem = null
+                        val stackId = "stack_${System.currentTimeMillis()}"
+                        val stackTitle = extractorState.pageTitle.ifBlank { extractorState.domain.ifBlank { "Media Download" } }
+                        DownloadQueueManager.enqueueDownload(
+                            context = context,
+                            item = itemToPreview,
+                            referer = activeUrl,
+                            stackId = stackId,
+                            stackTitle = stackTitle,
+                            sourceDomain = extractorState.domain,
+                            sourceUrl = activeUrl
+                        )
+                        onDownloadComplete(1)
+                    }
+                )
+            }
+
             // 3. Media Grid Area with Floating Centered Download Pill
             Box(
                 modifier = Modifier
@@ -1870,6 +1927,7 @@ fun DownloaderResultsPage(
                                 isSelected = item.id in selectedItemIds,
                                 isDownloaded = item.id in finishedIds || item.url in finishedMediaUrls,
                                 dynamicDimensions = dynamicDimensions,
+                                onPreview = { previewItem = item },
                                 onToggle = {
                                     isDownloaded = false
                                     selectedItemIds = if (item.id in selectedItemIds) {
@@ -2076,8 +2134,12 @@ fun DownloaderSettingsBottomSheet(
     val scope = rememberCoroutineScope()
     val videoQuality by downloaderPrefs.videoQualityCap.collectAsState(initial = DownloaderVideoQuality.BEST)
     val audioOnly by downloaderPrefs.audioOnlyMode.collectAsState(initial = false)
+    val preferredAudioFormat by downloaderPrefs.preferredAudioFormat.collectAsState(initial = "M4A")
     val subfolderMode by downloaderPrefs.subfolderMode.collectAsState(initial = DownloaderSubfolderMode.FLAT)
+    val filenameTemplate by downloaderPrefs.filenameTemplate.collectAsState(initial = DownloaderPreferencesManager.DEFAULT_FILENAME_TEMPLATE)
     val wifiOnly by downloaderPrefs.wifiOnlyDownloads.collectAsState(initial = false)
+    val maxConcurrent by downloaderPrefs.maxConcurrentDownloads.collectAsState(initial = 3)
+    val enabledProviders by downloaderPrefs.enabledProviders.collectAsState(initial = DownloaderPreferencesManager.DEFAULT_PROVIDERS)
     val searchEngine by downloaderPrefs.searchEngine.collectAsState(initial = BrowserSearchEngine.DUCKDUCKGO)
 
     ModalBottomSheet(
@@ -2138,7 +2200,7 @@ fun DownloaderSettingsBottomSheet(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Extract best audio stream (.m4a/.mp3) from social videos",
+                        text = "Extract native audio stream (M4A / Opus) from social videos",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2244,7 +2306,212 @@ fun DownloaderSettingsBottomSheet(
                 }
             }
 
+            // 6. Preferred Native Audio Format (M4A / Opus)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Preferred Audio Format",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("M4A" to "M4A (AAC)", "OPUS" to "Opus (WebM)").forEach { (fmt, label) ->
+                        FilterChip(
+                            selected = preferredAudioFormat.equals(fmt, ignoreCase = true),
+                            onClick = { scope.launch { downloaderPrefs.setPreferredAudioFormat(fmt) } },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
+
+            // 7. Max Concurrent Downloads
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Max Concurrent Downloads",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1, 2, 3, 4, 6).forEach { count ->
+                        FilterChip(
+                            selected = maxConcurrent == count,
+                            onClick = { scope.launch { downloaderPrefs.setMaxConcurrentDownloads(count) } },
+                            label = { Text("$count") }
+                        )
+                    }
+                }
+            }
+
+            // 8. Enabled Extraction Providers
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Active Extraction Engines",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("yt-dlp" to "yt-dlp", "gallery-dl" to "gallery-dl", "static" to "HTML", "browser" to "Browser")) { (key, label) ->
+                        val active = key in enabledProviders
+                        FilterChip(
+                            selected = active,
+                            onClick = {
+                                val next = if (active && enabledProviders.size > 1) enabledProviders - key else enabledProviders + key
+                                scope.launch { downloaderPrefs.setEnabledProviders(next) }
+                            },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
+
+            // 9. Filename Template
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Filename Format",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("{title}_{hash}" to "Title + ID", "{domain}_{title}" to "Domain + Title", "{title}" to "Title Only")) { (tpl, label) ->
+                        FilterChip(
+                            selected = filenameTemplate == tpl,
+                            onClick = { scope.launch { downloaderPrefs.setFilenameTemplate(tpl) } },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/**
+ * Full-screen in-place preview modal for inspecting a scraped image, video thumbnail, or audio item before downloading.
+ */
+@Composable
+fun DownloaderMediaPreviewDialog(
+    item: ScrapedMediaItem,
+    dynamicDimensions: Map<String, Pair<Int, Int>>,
+    onDismiss: () -> Unit,
+    onDownloadNow: () -> Unit
+) {
+    val dimText = formatScrapedMediaDimensionOrSize(item, dynamicDimensions)
+    val durationLabel = remember(item.durationSeconds) { formatMediaDuration(item.durationSeconds) }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 24.dp)
+                .testTag("downloader_media_preview_dialog")
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = item.title.ifBlank { "Media Preview" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close preview", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp, max = 420.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val isAudioWithoutArt = (item.isAudio || item.category == MediaCategory.AUDIO) && item.thumbnailUrl.isNullOrBlank()
+                    if (isAudioWithoutArt) {
+                        Icon(
+                            imageVector = Icons.Default.Audiotrack,
+                            contentDescription = item.title,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(64.dp)
+                        )
+                    } else {
+                        AsyncImage(
+                            model = item.thumbnailUrl ?: item.url,
+                            contentDescription = item.title,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    if (durationLabel != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Black.copy(alpha = 0.74f),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)
+                        ) {
+                            Text(
+                                text = durationLabel,
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = listOfNotNull(
+                            item.format.uppercase(Locale.ROOT).takeIf { it.isNotBlank() },
+                            dimText.takeIf { it.isNotBlank() },
+                            item.source.takeIf { it.isNotBlank() }
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = onDownloadNow,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.onSurface,
+                            contentColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Download")
+                    }
+                }
+            }
         }
     }
 }
@@ -2261,7 +2528,8 @@ fun DownloaderMediaCard(
     dynamicDimensions: Map<String, Pair<Int, Int>>,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    isDownloaded: Boolean = false
+    isDownloaded: Boolean = false,
+    onPreview: (() -> Unit)? = null
 ) {
     val dimText = formatScrapedMediaDimensionOrSize(item, dynamicDimensions)
     val categoryText = when {
@@ -2374,6 +2642,29 @@ fun DownloaderMediaCard(
                             tint = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.size(13.dp)
                         )
+                    }
+                }
+
+                // Bottom-Left Preview Lightbox Trigger
+                if (onPreview != null) {
+                    Surface(
+                        onClick = onPreview,
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.58f),
+                        modifier = Modifier
+                            .padding(start = 6.dp, bottom = 6.dp)
+                            .align(Alignment.BottomStart)
+                            .size(22.dp)
+                            .testTag("scraped_media_preview_btn_${item.id}")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInFull,
+                                contentDescription = "Preview media",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                     }
                 }
 

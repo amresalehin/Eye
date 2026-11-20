@@ -37,6 +37,17 @@ SOCIAL_VIDEO_HOSTS = [
     "instagram.com", "reddit.com", "redd.it", "v.redd.it", "twitter.com", "x.com"
 ]
 
+def _parse_duration_seconds(raw_val):
+    if raw_val is None or isinstance(raw_val, bool):
+        return None
+    try:
+        val = float(raw_val)
+        if not (val > 0.0) or val != val or val == float("inf"):
+            return None
+        return int(round(val))
+    except Exception:
+        return None
+
 def _notify_progress(callback, bytes_read, total_bytes, speed=0):
     if callback is None:
         return
@@ -248,11 +259,7 @@ def extract_gallery_dl(url, options_json="{}"):
                     except Exception:
                         size_bytes = None
 
-                    raw_dur = kwdict.get("duration")
-                    try:
-                        duration_sec = int(round(float(raw_dur))) if raw_dur and float(raw_dur) > 0 else None
-                    except Exception:
-                        duration_sec = None
+                    duration_sec = _parse_duration_seconds(kwdict.get("duration"))
 
                     thumb = kwdict.get("thumbnail") or kwdict.get("thumb") or (item_url if category == "IMAGES" else None)
 
@@ -558,7 +565,7 @@ def extract_yt_dlp(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
-                        "durationSeconds": (int(round(float(entry.get("duration")))) if entry.get("duration") and float(entry.get("duration")) > 0 else None),
+                        "durationSeconds": _parse_duration_seconds(entry.get("duration")),
                         "source": "yt-dlp"
                     })
     except Exception as e:

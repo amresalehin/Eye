@@ -114,7 +114,7 @@ class DownloaderPreferencesManager(private val context: Context) {
     }
 
     suspend fun setPreferredAudioFormat(format: String) {
-        val clean = format.trim().uppercase(Locale.ROOT).takeIf { it in setOf("M4A", "MP3", "OPUS") } ?: "M4A"
+        val clean = format.trim().uppercase(Locale.ROOT).takeIf { it in setOf("M4A", "OPUS") } ?: "M4A"
         syncPrefs.edit().putString(PREF_AUDIO_FORMAT, clean).apply()
         appContext.galleryDataStore.edit { it[KEY_AUDIO_FORMAT] = clean }
     }
@@ -166,6 +166,7 @@ class DownloaderPreferencesManager(private val context: Context) {
 
     suspend fun setEnabledProviders(providers: Set<String>) {
         val safe = providers.ifEmpty { setOf("static") }
+        syncPrefs.edit().putStringSet(PREF_ENABLED_PROVIDERS, safe).apply()
         appContext.galleryDataStore.edit { it[KEY_ENABLED_PROVIDERS] = safe }
     }
 
@@ -191,6 +192,7 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_WIFI_ONLY = "wifi_only_downloads"
         private const val PREF_MAX_CONCURRENT = "max_concurrent_downloads"
         private const val PREF_SEARCH_ENGINE = "browser_search_engine"
+        private const val PREF_ENABLED_PROVIDERS = "enabled_providers"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -229,7 +231,7 @@ class DownloaderPreferencesManager(private val context: Context) {
             val raw = context.applicationContext
                 .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(PREF_AUDIO_FORMAT, "M4A")
-            return raw?.trim()?.uppercase(Locale.ROOT)?.takeIf { it in setOf("M4A", "MP3", "OPUS") } ?: "M4A"
+            return raw?.trim()?.uppercase(Locale.ROOT)?.takeIf { it in setOf("M4A", "OPUS") } ?: "M4A"
         }
 
         fun getSubfolderModeSync(context: Context): DownloaderSubfolderMode {
@@ -237,6 +239,29 @@ class DownloaderPreferencesManager(private val context: Context) {
                 .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(PREF_SUBFOLDER_MODE, "FLAT")
             return DownloaderSubfolderMode.fromId(raw)
+        }
+
+        fun getEnabledProvidersSync(context: Context): Set<String> {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getStringSet(PREF_ENABLED_PROVIDERS, DEFAULT_PROVIDERS)
+                ?.ifEmpty { setOf("static") }
+                ?: DEFAULT_PROVIDERS
+        }
+
+        fun getMaxConcurrentDownloadsSync(context: Context): Int {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(PREF_MAX_CONCURRENT, 3)
+                .coerceIn(1, 6)
+        }
+
+        fun getFilenameTemplateSync(context: Context): String {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(PREF_FILENAME_TEMPLATE, DEFAULT_FILENAME_TEMPLATE)
+                ?.ifBlank { DEFAULT_FILENAME_TEMPLATE }
+                ?: DEFAULT_FILENAME_TEMPLATE
         }
 
         fun getSearchEngineSync(context: Context): BrowserSearchEngine {

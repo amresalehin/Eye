@@ -54,7 +54,9 @@ data class DownloadActivityItem(
     val stackId: String? = null,
     val stackTitle: String? = null,
     val sourceDomain: String? = null,
-    val sourceUrl: String? = null
+    val sourceUrl: String? = null,
+    val sourceEngine: String? = null,
+    val downloadHeaders: Map<String, String> = emptyMap()
 ) {
     val isFailed: Boolean get() = status == DownloadActivityStatus.FAILED
     val isDownloading: Boolean get() = status == DownloadActivityStatus.DOWNLOADING
@@ -162,6 +164,7 @@ object DownloadActivityManager {
                     put("stackTitle", item.stackTitle ?: "")
                     put("sourceDomain", item.sourceDomain ?: "")
                     put("sourceUrl", item.sourceUrl ?: "")
+                    put("sourceEngine", item.sourceEngine ?: "")
                 }
                 jsonArray.put(obj)
             }
@@ -226,7 +229,8 @@ object DownloadActivityManager {
                             stackId = obj.optString("stackId").takeIf { it.isNotBlank() },
                             stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
                             sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
-                            sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() }
+                            sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() },
+                            sourceEngine = obj.optString("sourceEngine").takeIf { it.isNotBlank() }
                         )
                     )
                 } catch (e: Exception) {
@@ -316,7 +320,9 @@ object DownloadActivityManager {
         stackId: String? = null,
         stackTitle: String? = null,
         sourceDomain: String? = null,
-        sourceUrl: String? = null
+        sourceUrl: String? = null,
+        sourceEngine: String? = null,
+        downloadHeaders: Map<String, String> = emptyMap()
     ) {
         val current = _activities.value.toMutableList()
         val existing = current.firstOrNull { it.id == id }
@@ -377,7 +383,9 @@ object DownloadActivityManager {
                 stackId = stackId,
                 stackTitle = stackTitle,
                 sourceDomain = sourceDomain,
-                sourceUrl = sourceUrl
+                sourceUrl = sourceUrl,
+                sourceEngine = item.provenance.extractorEngine,
+                downloadHeaders = item.downloadHeaders
             )
         }
         val newIds = newItems.map { it.id }.toSet()
@@ -581,7 +589,10 @@ object DownloadActivityManager {
             isVideo = item.isVideo,
             isAudio = item.isAudio,
             isStream = item.isStream,
-            format = item.format
+            format = item.format,
+            source = item.sourceEngine ?: "Static HTML",
+            provenance = MediaProvenance(extractorEngine = item.sourceEngine ?: "Static HTML", pageUrl = item.sourceUrl ?: item.mediaUrl),
+            downloadHeaders = item.downloadHeaders
         )
         val workId = DownloadQueueManager.enqueueDownload(
             context = context,
@@ -662,7 +673,10 @@ object DownloadActivityManager {
                 isVideo = item.isVideo,
                 isAudio = item.isAudio,
                 isStream = item.isStream,
-                format = item.format
+                format = item.format,
+                source = item.sourceEngine ?: "Static HTML",
+                provenance = MediaProvenance(extractorEngine = item.sourceEngine ?: "Static HTML", pageUrl = item.sourceUrl ?: item.mediaUrl),
+                downloadHeaders = item.downloadHeaders
             )
             val newWorkId = DownloadQueueManager.enqueueDownload(
                 context = context,

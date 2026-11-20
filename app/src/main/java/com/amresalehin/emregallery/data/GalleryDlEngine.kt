@@ -361,6 +361,47 @@ object GalleryDlEngine {
      * Rewrites video/container extensions to the preferred audio extension (e.g., .m4a, .mp3, .opus)
      * when Audio-Only Mode is active so saved audio files never retain a misleading .mp4/.webm extension.
      */
+    /**
+     * Inspects the file's magic header bytes and aligns a misleading `.mp4` extension to `.webm`
+     * when AndroidMediaMuxer or yt-dlp wrote an EBML/WebM container (magic bytes 0x1A 0x45 0xDF 0xA3).
+     */
+    fun alignContainerExtension(file: File, audioOnly: Boolean = false): File {
+        if (!file.exists() || file.length() < 8L) return file
+        val header = runCatching {
+            val buf = ByteArray(8)
+            val read = file.inputStream().use { it.read(buf) }
+            if (read >= 8) buf else null
+        }.getOrNull() ?: return file
+
+        val isEbmlWebm = header[0] == 0x1A.toByte() &&
+            header[1] == 0x45.toByte() &&
+            header[2] == 0xDF.toByte() &&
+            header[3] == 0xA3.toByte()
+        val isIsoMp4 = header[4] == 'f'.code.toByte() &&
+            header[5] == 't'.code.toByte() &&
+            header[6] == 'y'.code.toByte() &&
+            header[7] == 'p'.code.toByte()
+
+        val ext = file.extension.lowercase(java.util.Locale.ROOT)
+        val desiredExt = when {
+            isEbmlWebm && ext in setOf("mp4", "m4a", "mp3") -> if (audioOnly) "opus" else "webm"
+            isIsoMp4 && ext in setOf("opus", "mp3", "webm") -> if (audioOnly) "m4a" else "mp4"
+            else -> return file
+        }
+
+        val alignedTarget = File(file.parentFile, "${file.nameWithoutExtension}.$desiredExt")
+        return runCatching {
+            if (alignedTarget.exists()) alignedTarget.delete()
+            if (file.renameTo(alignedTarget)) {
+                alignedTarget
+            } else {
+                file.copyTo(alignedTarget, overwrite = true)
+                file.delete()
+                alignedTarget
+            }
+        }.getOrDefault(file)
+    }
+
     fun resolveDownloadFileName(
         fileName: String,
         audioOnly: Boolean,
@@ -370,16 +411,18 @@ object GalleryDlEngine {
         if (!audioOnly) return trimmed
 
         val targetExt = preferredAudioFormat.trim().lowercase(java.util.Locale.ROOT)
-            .takeIf { it in setOf("m4a", "mp3", "opus") } ?: "m4a"
+            .takeIf { it in setOf("m4a", "opus") } ?: "m4a"
+        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "avif", "svg", "bmp", "heic", "heif", "ico")
         val audioExts = setOf("m4a", "mp3", "opus", "aac", "wav", "ogg", "flac", "wma")
         val videoOrStreamExts = setOf("mp4", "webm", "mkv", "mov", "m4v", "avi", "flv", "3gp", "ts", "m3u8", "mpd")
 
         val currentExt = trimmed.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
         return when {
+            currentExt in imageExts -> trimmed
             currentExt in audioExts -> trimmed
             currentExt in videoOrStreamExts -> "${trimmed.substringBeforeLast('.')}.$targetExt"
-            trimmed.contains('.') -> "${trimmed.substringBeforeLast('.')}.$targetExt"
-            else -> "$trimmed.$targetExt"
+            !trimmed.contains('.') -> "$trimmed.$targetExt"
+            else -> trimmed
         }
     }
 
@@ -458,7 +501,8 @@ object GalleryDlEngine {
                 }
 
                 if (success && targetFile.exists() && targetFile.length() > 0L) {
-                    val finalizedFile = if (audioOnly) targetFile else ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                    val muxedFile = if (audioOnly) targetFile else ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                    val finalizedFile = alignContainerExtension(muxedFile, audioOnly = audioOnly)
                     android.media.MediaScannerConnection.scanFile(
                         context,
                         arrayOf(finalizedFile.absolutePath),
@@ -479,6 +523,7 @@ object GalleryDlEngine {
                 referer = referer,
                 downloadId = downloadId,
                 headers = headers,
+                subfolder = subfolder,
                 onProgress = if (onProgress != null) { bytesRead, totalBytes ->
                     val now = System.currentTimeMillis()
                     val dt = (now - lastTick) / 1000.0

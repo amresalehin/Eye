@@ -69,11 +69,16 @@ fun DirectBrowserView(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
+    val browserContext = LocalContext.current
+    val downloaderPrefs = remember { com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager(browserContext) }
+    val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(
+        initial = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getSearchEngineSync(browserContext)
+    )
 
     val startUrl = remember {
         val trimmed = initialUrl.trim()
         if (trimmed.isNotBlank()) {
-            MediaClassifier.formatQueryOrUrl(trimmed)
+            MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
         } else {
             "" // Empty home page by default
         }
@@ -113,7 +118,7 @@ fun DirectBrowserView(
     fun navigateToUrl(target: String) {
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
-        val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
+        val formatted = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
         addressInput = formatted
         currentUrl = formatted
         onUrlChange?.invoke(formatted)

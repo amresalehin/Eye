@@ -462,6 +462,8 @@ fun DownloaderActivityPage(
 
     var selectedFilter by remember { mutableStateOf("All") }
     var showControlsSheet by remember { mutableStateOf(false) }
+    var showDownloaderSettings by remember { mutableStateOf(false) }
+    val downloaderPrefs = remember { com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager(context) }
 
     var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(activities) {
@@ -522,15 +524,27 @@ fun DownloaderActivityPage(
                         )
                     }
 
-                    IconButton(
-                        onClick = { showControlsSheet = true },
-                        modifier = Modifier.size(44.dp).testTag("activity_controls_tune_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = "Activity Controls",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { showDownloaderSettings = true },
+                            modifier = Modifier.size(44.dp).testTag("activity_downloader_settings_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Downloader Settings",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(
+                            onClick = { showControlsSheet = true },
+                            modifier = Modifier.size(44.dp).testTag("activity_controls_tune_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Activity Controls",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
@@ -722,6 +736,13 @@ fun DownloaderActivityPage(
     }
 
     // Controls Modal Bottom Sheet
+    if (showDownloaderSettings) {
+        DownloaderSettingsBottomSheet(
+            downloaderPrefs = downloaderPrefs,
+            onDismiss = { showDownloaderSettings = false }
+        )
+    }
+
     if (showControlsSheet) {
         ModalBottomSheet(
             onDismissRequest = { showControlsSheet = false },

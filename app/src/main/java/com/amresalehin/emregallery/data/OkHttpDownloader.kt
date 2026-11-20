@@ -269,15 +269,26 @@ object OkHttpDownloader {
     /**
      * Generates a deterministic file identifier from URL and file name to persist partial downloads across retries.
      */
-    fun generateDeterministicId(mediaUrl: String, fileName: String): String {
+    fun generateDeterministicId(
+        mediaUrl: String,
+        fileName: String,
+        template: String = "{title}_{hash}",
+        sourceDomain: String = ""
+    ): String {
         val hash = runCatching {
             val md = java.security.MessageDigest.getInstance("SHA-256")
             val bytes = md.digest(mediaUrl.toByteArray(Charsets.UTF_8))
             bytes.take(8).joinToString("") { "%02x".format(it) }
         }.getOrDefault(Integer.toHexString(mediaUrl.hashCode()))
-        val base = fileName.substringBeforeLast('.').replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32)
+        val base = fileName.substringBeforeLast('.').replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32).ifBlank { "media" }
+        val domainClean = sourceDomain.trim().removePrefix("www.").replace(Regex("[^a-zA-Z0-9_-]"), "_").take(24)
         val ext = fileName.substringAfterLast('.', "")
-        return if (ext.isNotEmpty()) "${base}_$hash.$ext" else "${base}_$hash"
+        val renderedBase = when (template.trim()) {
+            "{domain}_{title}" -> if (domainClean.isNotBlank()) "${domainClean}_${base}_$hash" else "${base}_$hash"
+            "{title}" -> base
+            else -> "${base}_$hash"
+        }
+        return if (ext.isNotEmpty()) "$renderedBase.$ext" else renderedBase
     }
 
     /**
@@ -896,9 +907,19 @@ object OkHttpDownloader {
         referer: String? = null,
         downloadId: String? = null,
         headers: Map<String, String>? = null,
+        subfolder: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): File? {
-        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, headers, onProgress)
+        val res = downloadMediaFileDetailed(
+            context = context,
+            mediaUrl = mediaUrl,
+            fileName = fileName,
+            referer = referer,
+            downloadId = downloadId,
+            headers = headers,
+            subfolder = subfolder,
+            onProgress = onProgress
+        )
         return res.file
     }
 }

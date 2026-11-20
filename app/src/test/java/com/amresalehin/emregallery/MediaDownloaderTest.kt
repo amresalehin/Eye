@@ -1990,6 +1990,26 @@ class MediaDownloaderTest {
             "concert_4k.mp4",
             com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("concert_4k.mp4", audioOnly = false, preferredAudioFormat = "M4A")
         )
+        // Image extensions MUST NOT be rewritten to .m4a when audioOnly is true
+        assertEquals(
+            "wallpaper.jpg",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("wallpaper.jpg", audioOnly = true, preferredAudioFormat = "M4A")
+        )
+        assertEquals(
+            "diagram.png",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("diagram.png", audioOnly = true, preferredAudioFormat = "OPUS")
+        )
+
+        // Filename templates, enabledProviders, and maxConcurrentDownloads sync
+        prefs.setEnabledProviders(setOf("yt-dlp", "static"))
+        assertEquals(setOf("yt-dlp", "static"), com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getEnabledProvidersSync(context))
+        prefs.setMaxConcurrentDownloads(4)
+        assertEquals(4, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getMaxConcurrentDownloadsSync(context))
+        val domainId = OkHttpDownloader.generateDeterministicId("https://reddit.com/v/123.mp4", "clip.mp4", "{domain}_{title}", "www.reddit.com")
+        assertTrue(domainId.startsWith("reddit_com_clip_"))
+        assertTrue(domainId.endsWith(".mp4"))
+        prefs.setEnabledProviders(com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.DEFAULT_PROVIDERS)
+        prefs.setMaxConcurrentDownloads(3)
 
         prefs.setPreferredAudioFormat("OPUS")
         assertEquals(
@@ -2047,6 +2067,22 @@ class MediaDownloaderTest {
         val (_, durItems) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(durJson, "https://youtu.be/abc123")
         assertEquals(222L, durItems[0].durationSeconds)
         assertEquals(3665L, durItems[1].durationSeconds)
+
+        // 7. alignContainerExtension renames EBML/WebM payload saved with .mp4 extension to .webm
+        val tmpDir = File(context.cacheDir, "align_ext_test").apply { mkdirs() }
+        val fakeWebmAsMp4 = File(tmpDir, "clip_4k.mp4")
+        fakeWebmAsMp4.writeBytes(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte(), 0x01, 0x02, 0x03, 0x04))
+        val alignedWebm = com.amresalehin.emregallery.data.GalleryDlEngine.alignContainerExtension(fakeWebmAsMp4)
+        assertEquals("clip_4k.webm", alignedWebm.name)
+        assertTrue(alignedWebm.exists())
+        alignedWebm.delete()
+
+        val realMp4 = File(tmpDir, "clip_h264.mp4")
+        realMp4.writeBytes(byteArrayOf(0x00, 0x00, 0x00, 0x18, 'f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte()))
+        val alignedMp4 = com.amresalehin.emregallery.data.GalleryDlEngine.alignContainerExtension(realMp4)
+        assertEquals("clip_h264.mp4", alignedMp4.name)
+        alignedMp4.delete()
+        tmpDir.deleteRecursively()
 
         // Reset defaults
         prefs.setPreferredAudioFormat("M4A")

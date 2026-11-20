@@ -9,6 +9,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -32,6 +33,22 @@ object DownloadQueueManager {
     val inMemoryDownloading: kotlinx.coroutines.flow.StateFlow<Boolean> = _inMemoryDownloading
 
     private val activeDownloadCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var configuredMaxConcurrent = 3
+    @Volatile
+    private var downloadConcurrencySemaphore = kotlinx.coroutines.sync.Semaphore(3)
+    private val semaphoreLock = Any()
+
+    suspend fun <T> withConcurrencyLimit(context: Context, block: suspend () -> T): T {
+        val desiredMax = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getMaxConcurrentDownloadsSync(context)
+        val sem = synchronized(semaphoreLock) {
+            if (desiredMax != configuredMaxConcurrent && activeDownloadCount.get() <= 1) {
+                configuredMaxConcurrent = desiredMax
+                downloadConcurrencySemaphore = kotlinx.coroutines.sync.Semaphore(desiredMax)
+            }
+            downloadConcurrencySemaphore
+        }
+        return sem.withPermit { block() }
+    }
     private val activeItemIds = ConcurrentHashMap.newKeySet<String>()
     private val activeWorkIdsByUniqueName = ConcurrentHashMap<String, UUID>()
     private val uniqueNameByItemId = ConcurrentHashMap<String, String>()
@@ -157,7 +174,9 @@ object DownloadQueueManager {
             stackId = sId,
             stackTitle = sTitle,
             sourceDomain = domain,
-            sourceUrl = url
+            sourceUrl = url,
+            sourceEngine = item.provenance.extractorEngine,
+            downloadHeaders = item.downloadHeaders
         )
 
         return finalWorkId

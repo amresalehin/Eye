@@ -508,10 +508,17 @@ class DualMediaExtractor(private val context: Context) {
                     return@launch
                 }
 
+                val enabledProviders = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getEnabledProvidersSync(appContext)
+                val useGalleryDl = "gallery-dl" in enabledProviders
+                val useYtDlp = "yt-dlp" in enabledProviders
+                val useStatic = "static" in enabledProviders
+                val useBrowser = "browser" in enabledProviders
+
                 val galleryDlProvider = GalleryDlProvider()
                 val ytDlpProvider = YtDlpProvider(appContext)
                 val staticHtmlProvider = StaticHtmlProvider()
-                val isStructuredApplicable = galleryDlProvider.isApplicable(requestContext) || ytDlpProvider.isApplicable(requestContext)
+                val isStructuredApplicable = (useGalleryDl && galleryDlProvider.isApplicable(requestContext)) ||
+                    (useYtDlp && ytDlpProvider.isApplicable(requestContext))
 
                 var gdlResult: MediaExtractionResult? = null
                 var ytdlpResult: MediaExtractionResult? = null
@@ -524,7 +531,7 @@ class DualMediaExtractor(private val context: Context) {
                     coroutineScope {
                         val gdlDeferred = async(Dispatchers.IO) {
                             try {
-                                if (galleryDlProvider.isApplicable(requestContext)) {
+                                if (useGalleryDl && galleryDlProvider.isApplicable(requestContext)) {
                                     galleryDlProvider.extract(
                                         context = requestContext,
                                         onItemDiscovered = { item ->
@@ -543,7 +550,7 @@ class DualMediaExtractor(private val context: Context) {
 
                         val ytdlpDeferred = async(Dispatchers.IO) {
                             try {
-                                if (ytDlpProvider.isApplicable(requestContext)) {
+                                if (useYtDlp && ytDlpProvider.isApplicable(requestContext)) {
                                     ytDlpProvider.extract(
                                         context = requestContext,
                                         onItemDiscovered = { item ->
@@ -562,7 +569,7 @@ class DualMediaExtractor(private val context: Context) {
 
                         val staticDeferred = async(Dispatchers.IO) {
                             try {
-                                staticHtmlProvider.extract(
+                                if (useStatic) staticHtmlProvider.extract(
                                     context = requestContext,
                                     onItemDiscovered = { item ->
                                         launch { updateItems(listOf(item)) }
@@ -570,7 +577,7 @@ class DualMediaExtractor(private val context: Context) {
                                     onStatusUpdate = { status ->
                                         launch { updateStatus(status) }
                                     }
-                                )
+                                ) else null
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
                                 null
@@ -593,7 +600,7 @@ class DualMediaExtractor(private val context: Context) {
                                 updateItems(staticResult.items, title = staticResult.pageTitle)
                             }
 
-                            if (!shouldSkipHeadlessBrowser(requestContext.url, isStructuredApplicable, gdlResult, ytdlpResult)) {
+                            if (useBrowser && !shouldSkipHeadlessBrowser(requestContext.url, isStructuredApplicable, gdlResult, ytdlpResult)) {
                                 val browserProvider = BrowserProvider(context)
                                 activeBrowserProvider = browserProvider
                                 browserResult = try {

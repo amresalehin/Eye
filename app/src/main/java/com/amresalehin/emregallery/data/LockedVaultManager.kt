@@ -191,4 +191,21 @@ class LockedVaultManager(private val context: Context) {
         }
         saveVaultItems(currentVaultItems)
     }
+
+    companion object {
+        /**
+         * Returns true only when a file URI resolves inside this app's private vault directory.
+         * Canonical paths prevent traversal and sibling-prefix paths from being treated as vault files.
+         */
+        fun isVaultFileUri(context: Context, uriString: String): Boolean {
+            val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return false
+            if (!uri.scheme.equals("file", ignoreCase = true)) return false
+            val path = uri.path ?: return false
+            return runCatching {
+                val vaultRoot = File(context.applicationContext.filesDir, "locked_vault").canonicalFile
+                val candidate = File(path).canonicalFile
+                candidate.path.startsWith(vaultRoot.path + File.separator)
+            }.getOrDefault(false)
+        }
+    }
 }

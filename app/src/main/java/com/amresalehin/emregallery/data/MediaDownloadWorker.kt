@@ -366,6 +366,33 @@ class MediaDownloadWorker(
     } }
 
     companion object {
+        /**
+         * Validates the streams reported by FFprobe before a completed download is published.
+         * A missing probe result is treated as unverifiable rather than silently accepted.
+         */
+        fun validateMediaStreams(
+            isVideo: Boolean,
+            isAudio: Boolean,
+            isStream: Boolean,
+            requireAudioWithVideo: Boolean,
+            mediaInfo: com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo?
+        ): String? {
+            if (mediaInfo == null) return "Unable to verify downloaded media streams"
+
+            val hasVideo = !mediaInfo.videoCodec.isNullOrBlank()
+            val hasAudio = !mediaInfo.audioCodec.isNullOrBlank()
+
+            if (isVideo && !hasVideo) return "Downloaded file does not contain a video stream"
+            if (isAudio && !hasAudio) return "Downloaded file does not contain an audio stream"
+            if (requireAudioWithVideo && hasVideo && !hasAudio) {
+                return "Downloaded video is missing its required audio stream"
+            }
+            if (isStream && !hasVideo && !hasAudio) {
+                return "Downloaded stream contains neither audio nor video"
+            }
+            return null
+        }
+
         const val TAG = "MediaDownloadWorker"
         const val WORK_TAG_DOWNLOAD = "media_download"
 

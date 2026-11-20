@@ -348,7 +348,12 @@ object MediaCaptureEngine {
         poster: String? = null,
         resolutionHint: String? = null,
         mimeHint: String? = null,
-        indexHint: Int = 0
+        indexHint: Int = 0,
+        titleHint: String? = null,
+        domSelector: String? = null,
+        declaredWidth: Int? = null,
+        declaredHeight: Int? = null,
+        customId: String? = null
     ): ScrapedMediaItem? {
         val trimmed = rawUrl.trim()
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
@@ -366,7 +371,13 @@ object MediaCaptureEngine {
 
         val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
         val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
-        val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
+        val title = titleHint?.takeIf { it.isNotBlank() }
+            ?: resolvedInfo.cleanTitle
+            ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
+        val width = declaredWidth?.takeIf { it > 0 }
+            ?: extractDimension(resolutionHint, cleanedUrl, isWidth = true)
+        val height = declaredHeight?.takeIf { it > 0 }
+            ?: extractDimension(resolutionHint, cleanedUrl, isWidth = false)
 
         if (ContentAwareMediaFilter.isUiChromeUrl(
                 url = cleanedUrl,
@@ -391,9 +402,12 @@ object MediaCaptureEngine {
         resolutionHint?.let { metadataMap["resolution"] = it }
         mimeHint?.let { metadataMap["mime_hint"] = it }
         metadataMap["source_url"] = baseUrl
+        width?.let { metadataMap["width"] = it.toString() }
+        height?.let { metadataMap["height"] = it.toString() }
+        domSelector?.takeIf { it.isNotBlank() }?.let { metadataMap["dom_selector"] = it }
 
         return ScrapedMediaItem(
-            id = "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}",
+            id = customId?.takeIf { it.isNotBlank() } ?: "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}",
             url = cleanedUrl,
             title = title,
             isVideo = classification.isVideo,
@@ -405,10 +419,12 @@ object MediaCaptureEngine {
             source = source.label,
             mimeType = classification.mimeType,
             resolutionHint = resolutionHint,
+            width = width,
+            height = height,
             provenance = MediaProvenance(
                 extractorEngine = "MediaCaptureEngine (${source.label})",
                 pageUrl = baseUrl,
-                domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
+                domSelector = domSelector ?: if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
             ),
             metadata = metadataMap,
             downloadHeaders = headers

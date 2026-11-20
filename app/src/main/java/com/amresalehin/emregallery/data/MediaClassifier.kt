@@ -14,7 +14,9 @@ enum class MediaCategory(val label: String) {
     IMAGES("Images"),
     VIDEOS("Videos"),
     AUDIO("Audio"),
-    STREAMS("Streams")
+    STREAMS("Streams"),
+    SUBTITLES("Subtitles"),
+    FILES("Files")
 }
 
 /**
@@ -398,7 +400,9 @@ object MediaClassifier {
     val KNOWN_MEDIA_EXTENSIONS = setOf(
         "jpg", "jpeg", "png", "webp", "gif", "svg", "avif", "bmp", "heic", "heif", "ico",
         "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "m3u8", "mpd",
-        "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma"
+        "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma",
+        "vtt", "srt", "ass", "ssa", "ttml", "dfxp",
+        "pdf", "zip", "rar", "7z", "epub", "docx", "xlsx", "pptx", "apk"
     )
 
     /**
@@ -1321,7 +1325,62 @@ object MediaClassifier {
             )
         }
 
-        // 4. Image formats
+        // 4. Subtitle formats
+        val subtitleFormat = when {
+            cleanPath.endsWith(".vtt") || mimeLower.contains("text/vtt") -> "VTT"
+            cleanPath.endsWith(".srt") || mimeLower.contains("subrip") -> "SRT"
+            cleanPath.endsWith(".ass") -> "ASS"
+            cleanPath.endsWith(".ssa") -> "SSA"
+            cleanPath.endsWith(".ttml") || cleanPath.endsWith(".dfxp") -> "TTML"
+            else -> null
+        }
+        if (subtitleFormat != null) {
+            val subtitleMime = when (subtitleFormat) {
+                "VTT" -> "text/vtt"
+                "SRT" -> "application/x-subrip"
+                else -> "application/xml"
+            }
+            return ClassificationResult(
+                category = MediaCategory.SUBTITLES,
+                format = subtitleFormat,
+                mimeType = mimeLower.ifBlank { subtitleMime },
+                isVideo = false,
+                isAudio = false,
+                isStream = false
+            )
+        }
+
+        // 5. Generic downloadable document/archive formats
+        val fileFormat = when {
+            cleanPath.endsWith(".pdf") || mimeLower == "application/pdf" -> "PDF"
+            cleanPath.endsWith(".zip") || mimeLower == "application/zip" -> "ZIP"
+            cleanPath.endsWith(".rar") -> "RAR"
+            cleanPath.endsWith(".7z") -> "7Z"
+            cleanPath.endsWith(".epub") -> "EPUB"
+            cleanPath.endsWith(".docx") -> "DOCX"
+            cleanPath.endsWith(".xlsx") -> "XLSX"
+            cleanPath.endsWith(".pptx") -> "PPTX"
+            cleanPath.endsWith(".apk") -> "APK"
+            else -> null
+        }
+        if (fileFormat != null) {
+            val fileMime = when (fileFormat) {
+                "PDF" -> "application/pdf"
+                "ZIP" -> "application/zip"
+                "APK" -> "application/vnd.android.package-archive"
+                else -> "application/octet-stream"
+            }
+            return ClassificationResult(
+                category = MediaCategory.FILES,
+                format = fileFormat,
+                mimeType = mimeLower.ifBlank { fileMime },
+                isVideo = false,
+                isAudio = false,
+                isStream = false
+            )
+        }
+
+        // 6. Image formats
         val format = when {
             lower.contains(".webp") || mimeLower.contains("webp") -> "WEBP"
             lower.contains(".png") || mimeLower.contains("png") -> "PNG"

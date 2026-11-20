@@ -6,60 +6,86 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.system.Os
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+
+/**
+ * Encrypted, app-private media vault.
+ *
+ * Locking is deliberately two phase: encrypt and verify every source, then atomically
+ * commit encrypted metadata. The caller receives source URIs only after that commit and
+ * is responsible for deleting/hiding those originals. A failed vault commit never deletes
+ * the source media.
+ */
+data class VaultLockResult(
+    val lockedItems: List<MediaItem>,
+    val pendingDeleteUris: List<String>
+)
 
 class LockedVaultManager(private val context: Context) {
 
-    private val vaultDir: File = File(context.filesDir, "locked_vault").apply {
-        if (!exists()) mkdirs()
-    }
+    private val vaultDir = File(context.filesDir, "locked_vault").apply { mkdirs() }
+    private val metaFile = File(vaultDir, "vault_metadata.json.enc")
+    private val legacyMetaFile = File(vaultDir, "vault_metadata.json")
 
-    private val metaFile: File = File(vaultDir, "vault_metadata.json")
-
-    fun getVaultItems(): List<MediaItem> {
-        if (!metaFile.exists()) return emptyList()
-        return try {
-            val jsonStr = metaFile.readText()
-            val array = JSONArray(jsonStr)
-            val list = mutableListOf<MediaItem>()
+    fun getVaultItems(): List<MediaItem> = runCatching {
+        val array = readMetadata()
+        buildList {
             for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val uriStr = obj.getString("uri")
-                val file = File(Uri.parse(uriStr).path ?: "")
-                if (file.exists()) {
-                    list.add(
-                        MediaItem(
-                            id = obj.getLong("id"),
-                            uri = uriStr,
-                            name = obj.getString("name"),
-                            mimeType = if (obj.has("mimeType") && !obj.isNull("mimeType")) obj.getString("mimeType") else null,
-                            dateAddedSeconds = obj.optLong("dateAddedSeconds", System.currentTimeMillis() / 1000L),
-                            dateTakenMillis = obj.optLong("dateTakenMillis", 0L),
-                            sizeBytes = file.length(),
-                            width = obj.optInt("width", 0),
-                            height = obj.optInt("height", 0),
-                            relativePath = "Locked",
-                            isVideo = obj.optBoolean("isVideo", false),
-                            durationMillis = obj.optLong("durationMillis", 0L),
-                            isTrashed = false
-                        )
-                    )
+                val obj = array.optJSONObject(i) ?: continue
+                val uriString = obj.optString("uri").takeIf { it.isNotBlank() } ?: continue
+                val file = vaultFileFor(uriString) ?: continue
+                if (!file.isFile || file.length() <= 0L) continue
+                if (VaultCrypto.isEncryptedVaultFile(file)) {
+                    // Reading the header validates structure; opening the reader validates the key.
+                    VaultCrypto.openChunkReader(file)?.close() ?: continue
+                } else if (!legacyMetaFile.exists()) {
+                    // New-format metadata must never point to an unencrypted media file.
+                    continue
                 }
+                add(
+                    MediaItem(
+                        id = obj.optLong("id"),
+                        uri = uriString,
+                        name = obj.optString("name", file.name),
+                        mimeType = obj.optString("mimeType").takeIf { it.isNotBlank() && it != "null" },
+                        dateAddedSeconds = obj.optLong("dateAddedSeconds", System.currentTimeMillis() / 1000L),
+                        dateTakenMillis = obj.optLong("dateTakenMillis", 0L),
+                        sizeBytes = VaultCrypto.getVaultFilePlaintextLength(file),
+                        width = obj.optInt("width", 0),
+                        height = obj.optInt("height", 0),
+                        relativePath = "Locked",
+                        isVideo = obj.optBoolean("isVideo", false),
+                        durationMillis = obj.optLong("durationMillis", 0L),
+                        isTrashed = false
+                    )
+                )
             }
-            list.sortedByDescending { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }
-        } catch (e: Exception) {
-            emptyList()
+        }.sortedByDescending {
+            if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
         }
+    }.getOrDefault(emptyList())
+
+    private fun readMetadata(): JSONArray {
+        if (metaFile.isFile) {
+            val plain = VaultCrypto.decryptBytes(metaFile.readBytes(), METADATA_AAD)
+            return JSONArray(plain.toString(Charsets.UTF_8))
+        }
+        // Backward compatibility only. The next successful mutation migrates metadata.
+        if (legacyMetaFile.isFile) return JSONArray(legacyMetaFile.readText())
+        return JSONArray()
     }
 
     private fun saveVaultItems(items: List<MediaItem>) {
         val array = JSONArray()
-        for (item in items) {
-            val obj = JSONObject().apply {
+        items.forEach { item ->
+            array.put(JSONObject().apply {
                 put("id", item.id)
                 put("uri", item.uri)
                 put("name", item.name)
@@ -70,141 +96,162 @@ class LockedVaultManager(private val context: Context) {
                 put("height", item.height)
                 put("isVideo", item.isVideo)
                 put("durationMillis", item.durationMillis)
-            }
-            array.put(obj)
+            })
         }
-        metaFile.writeText(array.toString())
+        val encrypted = VaultCrypto.encryptBytes(array.toString().toByteArray(Charsets.UTF_8), METADATA_AAD)
+        val temp = File(vaultDir, "vault_metadata.${UUID.randomUUID()}.tmp")
+        FileOutputStream(temp).use { stream ->
+            stream.write(encrypted)
+            stream.fd.sync()
+        }
+        // Same-directory rename is atomic on Android/Linux filesystems.
+        Os.rename(temp.absolutePath, metaFile.absolutePath)
+        if (legacyMetaFile.exists()) legacyMetaFile.delete()
     }
 
-    /**
-     * Copies media from mainline storage into app-private locked vault
-     * and deletes the original file from mainline storage (MediaStore).
-     */
-    suspend fun lockItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
-        val currentVaultItems = getVaultItems().toMutableList()
-        val lockedList = mutableListOf<MediaItem>()
-
-        for (item in items) {
+    suspend fun lockItemsWithPendingDeletes(items: List<MediaItem>): VaultLockResult =
+        withContext(Dispatchers.IO) {
+            val current = getVaultItems().toMutableList()
+            val createdFiles = mutableListOf<File>()
+            val locked = mutableListOf<MediaItem>()
             try {
-                val safeName = item.name.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
-                val destFile = File(vaultDir, "vault_${item.id}_$safeName")
-                val srcUri = Uri.parse(item.uri)
-
-                // Copy stream to isolated vault file
-                context.contentResolver.openInputStream(srcUri)?.use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                for (item in items.distinctBy { it.uri }) {
+                    val sourceUri = Uri.parse(item.uri)
+                    val safeName = item.name.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+                    val dest = File(vaultDir, "vault_${UUID.randomUUID()}_$safeName.enc")
+                    val input = context.contentResolver.openInputStream(sourceUri) ?: continue
+                    input.use { VaultCrypto.encryptStreamToFile(it, dest) }
+                    if (!dest.isFile || !VaultCrypto.isEncryptedVaultFile(dest) ||
+                        VaultCrypto.getVaultFilePlaintextLength(dest) <= 0L
+                    ) {
+                        dest.delete()
+                        throw IllegalStateException("Vault encryption verification failed for ${item.name}")
                     }
-                }
-
-                if (destFile.exists() && destFile.length() > 0) {
-                    val lockedItem = item.copy(
-                        uri = Uri.fromFile(destFile).toString(),
-                        relativePath = "Locked",
-                        sizeBytes = destFile.length()
+                    // Verify the encrypted file can actually be decrypted before committing it.
+                    VaultCrypto.openDecryptedInputStream(dest).use { stream ->
+                        val firstByte = stream.read()
+                        if (firstByte < 0) throw IllegalStateException("Empty source media: ${item.name}")
+                    }
+                    createdFiles.add(dest)
+                    locked.add(
+                        item.copy(
+                            uri = Uri.fromFile(dest).toString(),
+                            relativePath = "Locked",
+                            sizeBytes = VaultCrypto.getVaultFilePlaintextLength(dest)
+                        )
                     )
-                    currentVaultItems.removeAll { it.id == item.id || it.uri == lockedItem.uri }
-                    currentVaultItems.add(lockedItem)
-                    lockedList.add(lockedItem)
-
-                    // Remove original from device mainline storage
-                    runCatching {
-                        context.contentResolver.delete(srcUri, null, null)
-                    }
                 }
-            } catch (_: Exception) {
+
+                if (locked.isNotEmpty()) {
+                    current.addAll(locked)
+                    saveVaultItems(current)
+                }
+                VaultLockResult(lockedItems = locked, pendingDeleteUris = locked.mapNotNull { lockedItem ->
+                    // The source is matched by the stable input URI, never by MediaStore numeric ID.
+                    items.firstOrNull { source ->
+                        source.id == lockedItem.id && source.name == lockedItem.name &&
+                            source.isVideo == lockedItem.isVideo
+                    }?.uri
+                }.distinct())
+            } catch (failure: Throwable) {
+                createdFiles.forEach { it.delete() }
+                throw failure
             }
         }
 
-        saveVaultItems(currentVaultItems)
-        lockedList
+    /** Compatibility entry point: commit to the vault before attempting source deletion. */
+    suspend fun lockItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
+        val result = lockItemsWithPendingDeletes(items)
+        result.pendingDeleteUris.forEach { uri ->
+            runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
+        }
+        result.lockedItems
     }
 
-    /**
-     * Restores media items back from locked vault to mainline storage
-     */
     suspend fun unlockItems(items: List<MediaItem>): List<String> = withContext(Dispatchers.IO) {
-        val currentVaultItems = getVaultItems().toMutableList()
+        val current = getVaultItems().toMutableList()
         val restoredUris = mutableListOf<String>()
+        val successfullyRestored = mutableListOf<MediaItem>()
 
-        for (item in items) {
+        for (item in items.distinctBy { it.uri }) {
+            val srcFile = vaultFileFor(item.uri) ?: continue
+            if (!srcFile.isFile) continue
+            val collection = if (item.isVideo) {
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType ?: if (item.isVideo) "video/mp4" else "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Restored")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            val target = context.contentResolver.insert(collection, values) ?: continue
             try {
-                val srcFile = File(Uri.parse(item.uri).path ?: "")
-                if (!srcFile.exists()) continue
-
-                val collection = if (item.isVideo) {
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                } else {
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                var copied = 0L
+                VaultCrypto.openDecryptedInputStream(srcFile).use { input ->
+                    val output = context.contentResolver.openOutputStream(target, "w")
+                        ?: throw IllegalStateException("Unable to open restored media destination")
+                    output.use { copied = input.copyTo(it) }
                 }
-
-                val cv = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
-                    put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType ?: if (item.isVideo) "video/mp4" else "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Restored")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                if (copied <= 0L) throw IllegalStateException("Restored media is empty")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val publish = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                    if (context.contentResolver.update(target, publish, null, null) <= 0) {
+                        throw IllegalStateException("Unable to publish restored media")
                     }
                 }
-
-                val insertedUri = context.contentResolver.insert(collection, cv)
-                if (insertedUri != null) {
-                    var bytesCopied = 0L
-                    srcFile.inputStream().use { input ->
-                        context.contentResolver.openOutputStream(insertedUri)?.use { output ->
-                            bytesCopied = input.copyTo(output)
-                        }
-                    }
-                    if (bytesCopied > 0L) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            cv.clear()
-                            cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            context.contentResolver.update(insertedUri, cv, null, null)
-                        }
-                        srcFile.delete()
-                        currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
-                        restoredUris.add(insertedUri.toString())
-                    } else {
-                        runCatching { context.contentResolver.delete(insertedUri, null, null) }
-                    }
-                }
+                restoredUris.add(target.toString())
+                successfullyRestored.add(item)
             } catch (_: Exception) {
+                runCatching { context.contentResolver.delete(target, null, null) }
             }
         }
 
-        saveVaultItems(currentVaultItems)
+        if (successfullyRestored.isNotEmpty()) {
+            val remaining = current.filterNot { old -> successfullyRestored.any { it.uri == old.uri } }
+            // Keep encrypted originals until metadata removal is durably committed.
+            saveVaultItems(remaining)
+            successfullyRestored.forEach { item -> vaultFileFor(item.uri)?.delete() }
+        }
         restoredUris
     }
 
-    /**
-     * Permanently deletes items from the locked vault
-     */
     suspend fun deletePermanently(items: List<MediaItem>) = withContext(Dispatchers.IO) {
-        val currentVaultItems = getVaultItems().toMutableList()
-        for (item in items) {
-            try {
-                val file = File(Uri.parse(item.uri).path ?: "")
-                if (file.exists()) file.delete()
-                currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
-            } catch (_: Exception) {
-            }
+        val current = getVaultItems().toMutableList()
+        val deletable = items.distinctBy { it.uri }.filter { item ->
+            val file = vaultFileFor(item.uri) ?: return@filter false
+            !file.exists() || file.delete()
         }
-        saveVaultItems(currentVaultItems)
+        if (deletable.isNotEmpty()) {
+            saveVaultItems(current.filterNot { old -> deletable.any { it.uri == old.uri } })
+        }
+    }
+
+    private fun vaultFileFor(uriString: String): File? {
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("file", ignoreCase = true)) return null
+        val path = uri.path ?: return null
+        return runCatching {
+            val root = vaultDir.canonicalFile
+            val candidate = File(path).canonicalFile
+            if (candidate.path.startsWith(root.path + File.separator)) candidate else null
+        }.getOrNull()
     }
 
     companion object {
-        /**
-         * Returns true only when a file URI resolves inside this app's private vault directory.
-         * Canonical paths prevent traversal and sibling-prefix paths from being treated as vault files.
-         */
+        private val METADATA_AAD = "Eye.LockedVault.Metadata.v1".toByteArray(Charsets.UTF_8)
+
         fun isVaultFileUri(context: Context, uriString: String): Boolean {
             val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return false
             if (!uri.scheme.equals("file", ignoreCase = true)) return false
             val path = uri.path ?: return false
             return runCatching {
-                val vaultRoot = File(context.applicationContext.filesDir, "locked_vault").canonicalFile
-                val candidate = File(path).canonicalFile
-                candidate.path.startsWith(vaultRoot.path + File.separator)
+                val root = File(context.applicationContext.filesDir, "locked_vault").canonicalFile
+                File(path).canonicalFile.path.startsWith(root.path + File.separator)
             }.getOrDefault(false)
         }
     }

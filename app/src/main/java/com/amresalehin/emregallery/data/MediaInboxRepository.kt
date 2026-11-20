@@ -19,7 +19,9 @@ data class MediaInboxItem(
     val isStream: Boolean = false,
     val format: String = "",
     val sizeBytes: Long = 0L,
-    val dateAddedMillis: Long = System.currentTimeMillis()
+    val dateAddedMillis: Long = System.currentTimeMillis(),
+    val width: Int = 0,
+    val height: Int = 0
 )
 
 data class MediaInboxStack(
@@ -29,7 +31,10 @@ data class MediaInboxStack(
     val sourceUrl: String,
     val items: List<MediaInboxItem>,
     val timestampMillis: Long = System.currentTimeMillis(),
-    val description: String = ""
+    val description: String = "",
+    val previewImageUrl: String = "",
+    val tagIds: List<String> = emptyList(),
+    val notes: String = ""
 )
 
 class MediaInboxRepository(private val context: Context) {
@@ -61,6 +66,13 @@ class MediaInboxRepository(private val context: Context) {
                 val sourceUrl = stackObj.optString("sourceUrl", "")
                 val timestamp = stackObj.optLong("timestampMillis", System.currentTimeMillis())
                 val description = stackObj.optString("description", "")
+                val previewImageUrl = stackObj.optString("previewImageUrl", "")
+                val notes = stackObj.optString("notes", "")
+                val tagIdsArray = stackObj.optJSONArray("tagIds") ?: JSONArray()
+                val tagIds = (0 until tagIdsArray.length())
+                    .map { index -> tagIdsArray.optString(index) }
+                    .filter { it.isNotBlank() }
+                    .distinct()
 
                 val itemsArray = stackObj.optJSONArray("items") ?: JSONArray()
                 val itemsList = mutableListOf<MediaInboxItem>()
@@ -77,7 +89,9 @@ class MediaInboxRepository(private val context: Context) {
                             isStream = itmObj.optBoolean("isStream", false),
                             format = itmObj.optString("format", ""),
                             sizeBytes = itmObj.optLong("sizeBytes", 0L),
-                            dateAddedMillis = itmObj.optLong("dateAddedMillis", timestamp)
+                            dateAddedMillis = itmObj.optLong("dateAddedMillis", timestamp),
+                            width = itmObj.optInt("width", 0),
+                            height = itmObj.optInt("height", 0)
                         )
                     )
                 }
@@ -90,7 +104,10 @@ class MediaInboxRepository(private val context: Context) {
                         sourceUrl = sourceUrl,
                         items = itemsList,
                         timestampMillis = timestamp,
-                        description = description
+                        description = description,
+                        previewImageUrl = previewImageUrl,
+                        tagIds = tagIds,
+                        notes = notes
                     )
                 )
             }
@@ -143,6 +160,9 @@ class MediaInboxRepository(private val context: Context) {
                     put("sourceUrl", stack.sourceUrl)
                     put("timestampMillis", stack.timestampMillis)
                     put("description", stack.description)
+                    put("previewImageUrl", stack.previewImageUrl)
+                    put("tagIds", JSONArray(stack.tagIds))
+                    put("notes", stack.notes)
 
                     val itemsArr = JSONArray()
                     stack.items.forEach { itm ->
@@ -157,6 +177,8 @@ class MediaInboxRepository(private val context: Context) {
                             put("format", itm.format)
                             put("sizeBytes", itm.sizeBytes)
                             put("dateAddedMillis", itm.dateAddedMillis)
+                            put("width", itm.width)
+                            put("height", itm.height)
                         }
                         itemsArr.put(itmObj)
                     }

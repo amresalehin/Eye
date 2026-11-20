@@ -55,6 +55,8 @@ object DownloadQueueManager {
     // Allows cancellation of work that has not started yet to release its reservation.
     // Worker completion and cancellation race through activeItemIds so only one wins.
     private val itemIdByWorkId = ConcurrentHashMap<UUID, String>()
+    private val activeWorkIds = ConcurrentHashMap.newKeySet<UUID>()
+    private val activeWorkIdsByItemId = ConcurrentHashMap<String, MutableSet<UUID>>()
 
     fun isDownloading(itemId: String): Boolean {
         if (activeItemIds.contains(itemId)) return true
@@ -63,21 +65,49 @@ object DownloadQueueManager {
     }
 
     fun markDownloadStarted(count: Int = 1, itemId: String? = null, workId: UUID? = null) {
-        if (itemId != null) {
-            // A repeated enqueue for the same item must not reserve another active slot.
+        if (workId != null) {
+            // WorkManager may replace a running request with a retry for the same item.
+            // Track each request independently so the old worker cannot complete the new one.
+            if (!activeWorkIds.add(workId)) return
+            if (itemId != null) {
+                itemIdByWorkId[workId] = itemId
+                activeWorkIdsByItemId.computeIfAbsent(itemId) {
+                    ConcurrentHashMap.newKeySet<UUID>()
+                }.add(workId)
+                activeItemIds.add(itemId)
+            }
+            activeDownloadCount.incrementAndGet()
+        } else if (itemId != null) {
             if (!activeItemIds.add(itemId)) return
-            if (workId != null) itemIdByWorkId[workId] = itemId
+            activeDownloadCount.incrementAndGet()
+        } else {
+            activeDownloadCount.addAndGet(count)
         }
-        activeDownloadCount.addAndGet(if (itemId == null) count else 1)
         _inMemoryDownloading.value = activeDownloadCount.get() > 0
     }
 
-    fun markDownloadCompleted(itemId: String? = null) {
-        if (itemId != null) {
-            // Cancellation and the Worker's finally block may both complete the same item.
-            // Only the call that removes the active reservation is allowed to decrement.
+    fun markDownloadCompleted(itemId: String? = null, workId: UUID? = null) {
+        if (workId != null) {
+            // Cancellation and Worker completion can race. Only the request that owns this
+            // reservation can release it, and an older replaced request cannot release a retry.
+            if (!activeWorkIds.remove(workId)) return
+            val mappedItemId = itemIdByWorkId.remove(workId)
+            val resolvedItemId = itemId ?: mappedItemId
+            if (resolvedItemId != null) {
+                val itemWorkIds = activeWorkIdsByItemId[resolvedItemId]
+                itemWorkIds?.remove(workId)
+                if (itemWorkIds.isNullOrEmpty()) {
+                    activeWorkIdsByItemId.remove(resolvedItemId, itemWorkIds)
+                    activeItemIds.remove(resolvedItemId)
+                    uniqueNameByItemId.remove(resolvedItemId)?.let { uniqueName ->
+                        activeWorkIdsByUniqueName.remove(uniqueName)
+                    }
+                }
+            }
+        } else if (itemId != null) {
             if (!activeItemIds.remove(itemId)) return
             itemIdByWorkId.entries.removeIf { it.value == itemId }
+            activeWorkIdsByItemId.remove(itemId)?.forEach(activeWorkIds::remove)
             uniqueNameByItemId.remove(itemId)?.let { uniqueName ->
                 activeWorkIdsByUniqueName.remove(uniqueName)
             }
@@ -282,7 +312,7 @@ object DownloadQueueManager {
         // If the worker has already started, its finally block will complete the item.
         // If it has not started, release the reservation here. The keyed completion guard
         // makes this safe when cancellation races with worker shutdown.
-        itemIdByWorkId[workId]?.let(::markDownloadCompleted)
+        itemIdByWorkId[workId]?.let { itemId -> markDownloadCompleted(itemId, workId) }
     }
 
     fun cancelAll(context: Context) {
@@ -293,6 +323,8 @@ object DownloadQueueManager {
         activeWorkIdsByUniqueName.clear()
         uniqueNameByItemId.clear()
         itemIdByWorkId.clear()
+        activeWorkIds.clear()
+        activeWorkIdsByItemId.clear()
         activeDownloadCount.set(0)
         _inMemoryDownloading.value = false
     }

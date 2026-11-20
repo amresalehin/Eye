@@ -1385,19 +1385,36 @@ fun GalleryApp() {
                     } else {
                         scope.launch {
                             if (!isAlreadyLocked) {
-                                val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(listOf(currentItem)) }
+                                val lockResult = withContext(Dispatchers.IO) {
+                                    lockedVaultManager.lockItemsWithPendingDeletes(listOf(currentItem))
+                                }
+                                val lockedItem = lockResult.lockedItems.firstOrNull()
+                                if (lockedItem == null) {
+                                    snackbarHostState.showSnackbar("Could not encrypt this item")
+                                    return@launch
+                                }
+                                val originalDeleted = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        context.contentResolver.delete(Uri.parse(currentItem.uri), null, null) > 0
+                                    }.getOrDefault(false)
+                                }
                                 lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                                prefs.setHidden(currentItem.uri, true)
                                 refreshMedia()
                                 val res = snackbarHostState.showSnackbar(
-                                    message = "Moved to Locked folder",
+                                    message = if (originalDeleted) "Moved to Locked folder"
+                                    else "Encrypted in Locked folder; original remains in gallery",
                                     actionLabel = "Undo",
                                     duration = SnackbarDuration.Short
                                 )
                                 if (res == SnackbarResult.ActionPerformed) {
-                                    withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(lockedList) }
+                                    withContext(Dispatchers.IO) {
+                                        if (originalDeleted) {
+                                            lockedVaultManager.unlockItems(listOf(lockedItem))
+                                        } else {
+                                            lockedVaultManager.deletePermanently(listOf(lockedItem))
+                                        }
+                                    }
                                     lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                                    prefs.setHidden(currentItem.uri, false)
                                     refreshMedia()
                                 }
                             } else {

@@ -183,7 +183,6 @@ class MediaDownloadWorker(
             var okHttpResult: OkHttpDownloader.DownloadResult? = null
             if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
                 var lastProgressUpdate = System.currentTimeMillis()
-                var lastBytes = 0L
                 val speedBoostEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
                     .isSpeedBoostEnabledSync(applicationContext)
                 val maxConnections = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
@@ -201,8 +200,7 @@ class MediaDownloadWorker(
                     onProgress = { bytesRead, totalBytes, speed, boostActive ->
                         val now = System.currentTimeMillis()
                         if (now - lastProgressUpdate > 250 || bytesRead >= totalBytes && totalBytes > 0L) {
-                            lastBytes = bytesRead
-                            lastProgressUpdate = now
+                                lastProgressUpdate = now
                             reportLiveProgress(
                                 bytesRead,
                                 totalBytes,

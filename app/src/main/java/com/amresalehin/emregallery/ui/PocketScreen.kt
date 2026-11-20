@@ -101,6 +101,8 @@ import com.amresalehin.emregallery.data.LinkMetadataFetcher
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.MediaInboxItem
+import com.amresalehin.emregallery.data.ScrapedMediaItem
 import com.amresalehin.emregallery.data.PocketRepository
 import kotlinx.coroutines.launch
 import java.io.File
@@ -253,6 +255,8 @@ fun PocketScreen(
 
     var showFullScreenBrowser by remember { mutableStateOf(false) }
     var browserUrl by remember { mutableStateOf("") }
+    var browserPageTitle by remember { mutableStateOf("") }
+    var browserDiscoveredMedia by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -758,9 +762,51 @@ fun PocketScreen(
                 DirectBrowserView(
                     initialUrl = browserUrl,
                     onClose = { showFullScreenBrowser = false },
-                    onMediaExtracted = {},
-                    onBatchExtracted = { _, _, _ -> },
-                    onSwitchToMediaTab = onOpenDiscoveredMedia,
+                    onUrlChange = { browserUrl = it },
+                    onPageTitleChanged = { browserPageTitle = it },
+                    discoveredCount = browserDiscoveredMedia.size,
+                    onMediaExtracted = { item ->
+                        scope.launch {
+                            browserDiscoveredMedia = (browserDiscoveredMedia + item).distinctBy { it.url }
+                        }
+                    },
+                    onBatchExtracted = { items, title, _ ->
+                        scope.launch {
+                            browserDiscoveredMedia = (browserDiscoveredMedia + items).distinctBy { it.url }
+                            if (!title.isNullOrBlank()) browserPageTitle = title
+                        }
+                    },
+                    onSwitchToMediaTab = {
+                        val sourceUrl = browserUrl.trim()
+                        if (sourceUrl.isNotBlank() && browserDiscoveredMedia.isNotEmpty()) {
+                            val savedItems = browserDiscoveredMedia.map { item ->
+                                MediaInboxItem(
+                                    id = item.id,
+                                    title = item.title,
+                                    localUri = "",
+                                    sourceUrl = item.url,
+                                    isVideo = item.isVideo,
+                                    isAudio = item.isAudio,
+                                    isStream = item.isStream,
+                                    format = item.format,
+                                    sizeBytes = item.sizeBytes ?: 0L,
+                                    width = item.width ?: 0,
+                                    height = item.height ?: 0
+                                )
+                            }
+                            val savedStack = pocketRepo.addBookmark(
+                                title = browserPageTitle.ifBlank { sourceUrl },
+                                url = sourceUrl,
+                                initialItems = savedItems,
+                                autoFetchMetadata = false
+                            )
+                            browserDiscoveredMedia = emptyList()
+                            showFullScreenBrowser = false
+                            onOpenBookmarkDetail(savedStack)
+                        } else {
+                            onOpenDiscoveredMedia()
+                        }
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             }

@@ -52,6 +52,9 @@ object DownloadQueueManager {
     private val activeItemIds = ConcurrentHashMap.newKeySet<String>()
     private val activeWorkIdsByUniqueName = ConcurrentHashMap<String, UUID>()
     private val uniqueNameByItemId = ConcurrentHashMap<String, String>()
+    // Allows cancellation of work that has not started yet to release its reservation.
+    // Worker completion and cancellation race through activeItemIds so only one wins.
+    private val itemIdByWorkId = ConcurrentHashMap<UUID, String>()
 
     fun isDownloading(itemId: String): Boolean {
         if (activeItemIds.contains(itemId)) return true
@@ -59,24 +62,29 @@ object DownloadQueueManager {
         return activity?.status == DownloadActivityStatus.DOWNLOADING || activity?.status == DownloadActivityStatus.RETRYING
     }
 
-    fun markDownloadStarted(count: Int = 1, itemId: String? = null) {
-        if (itemId != null) activeItemIds.add(itemId)
-        activeDownloadCount.addAndGet(count)
-        _inMemoryDownloading.value = true
+    fun markDownloadStarted(count: Int = 1, itemId: String? = null, workId: UUID? = null) {
+        if (itemId != null) {
+            // A repeated enqueue for the same item must not reserve another active slot.
+            if (!activeItemIds.add(itemId)) return
+            if (workId != null) itemIdByWorkId[workId] = itemId
+        }
+        activeDownloadCount.addAndGet(if (itemId == null) count else 1)
+        _inMemoryDownloading.value = activeDownloadCount.get() > 0
     }
 
     fun markDownloadCompleted(itemId: String? = null) {
         if (itemId != null) {
-            activeItemIds.remove(itemId)
+            // Cancellation and the Worker's finally block may both complete the same item.
+            // Only the call that removes the active reservation is allowed to decrement.
+            if (!activeItemIds.remove(itemId)) return
+            itemIdByWorkId.entries.removeIf { it.value == itemId }
             uniqueNameByItemId.remove(itemId)?.let { uniqueName ->
                 activeWorkIdsByUniqueName.remove(uniqueName)
             }
         }
-        val remaining = activeDownloadCount.decrementAndGet()
-        if (remaining <= 0) {
-            activeDownloadCount.set(0)
-            _inMemoryDownloading.value = false
-        }
+        val remaining = activeDownloadCount.decrementAndGet().coerceAtLeast(0)
+        activeDownloadCount.set(remaining)
+        _inMemoryDownloading.value = remaining > 0
     }
 
     private fun serializeHeaders(headers: Map<String, String>): String? {
@@ -155,7 +163,7 @@ object DownloadQueueManager {
                 if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 request
             )
-            markDownloadStarted(count = 1, itemId = item.id)
+            markDownloadStarted(count = 1, itemId = item.id, workId = request.id)
             request.id
         }
 
@@ -244,7 +252,7 @@ object DownloadQueueManager {
                     ExistingWorkPolicy.KEEP,
                     request
                 )
-                markDownloadStarted(count = 1, itemId = item.id)
+                markDownloadStarted(count = 1, itemId = item.id, workId = request.id)
                 request.id
             }
         }
@@ -271,7 +279,10 @@ object DownloadQueueManager {
         runCatching {
             WorkManager.getInstance(context).cancelWorkById(workId)
         }
-        markDownloadCompleted()
+        // If the worker has already started, its finally block will complete the item.
+        // If it has not started, release the reservation here. The keyed completion guard
+        // makes this safe when cancellation races with worker shutdown.
+        itemIdByWorkId[workId]?.let(::markDownloadCompleted)
     }
 
     fun cancelAll(context: Context) {
@@ -281,6 +292,7 @@ object DownloadQueueManager {
         activeItemIds.clear()
         activeWorkIdsByUniqueName.clear()
         uniqueNameByItemId.clear()
+        itemIdByWorkId.clear()
         activeDownloadCount.set(0)
         _inMemoryDownloading.value = false
     }

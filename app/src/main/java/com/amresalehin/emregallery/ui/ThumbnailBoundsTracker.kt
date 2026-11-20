@@ -91,21 +91,3 @@ fun Modifier.destinationTopBarEntrance(progress: Float): Modifier = this.graphic
         alpha = (1f - progress * 1.15f).coerceIn(0f, 1f)
     }
 }
-
-/**
- * Coordinated bottom bar entrance modifier with progress provider.
- */
-fun Modifier.destinationBottomBarEntrance(progressProvider: () -> Float): Modifier = this.graphicsLayer {
-    val progress = progressProvider()
-    if (progress > 0.001f) {
-        translationY = (size.height + 60.dp.toPx()) * progress
-        alpha = (1f - progress * 1.15f).coerceIn(0f, 1f)
-    }
-}
-
-fun Modifier.destinationBottomBarEntrance(progress: Float): Modifier = this.graphicsLayer {
-    if (progress > 0.001f) {
-        translationY = (size.height + 60.dp.toPx()) * progress
-        alpha = (1f - progress * 1.15f).coerceIn(0f, 1f)
-    }
-}

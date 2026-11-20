@@ -8,13 +8,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.data.BrowserSession
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
-import com.amresalehin.emregallery.data.RamGovernor
 import com.amresalehin.emregallery.data.VaultCrypto
 import com.amresalehin.emregallery.data.galleryDataStore
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.preferences.RedditDlConfig
 import com.amresalehin.emregallery.data.preferences.VaultPreferencesManager
-import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
@@ -226,14 +224,7 @@ class VaultSecurityTest {
     }
 
     @Test
-    fun ramGovernor_ffmpegStatusAndJsBridgeValidation() {
-        assertEquals(0.80, RamGovernor.MAX_RAM_FRACTION, 0.0001)
-
-        // Native library is absent on JVM host tests -> status must report unavailable cleanly
-        val ffmpegStatus = FfmpegKitEngine.getStatus()
-        assertFalse(ffmpegStatus.isAvailable)
-        assertFalse(ffmpegStatus.isFfprobeAvailable)
-
+    fun jsBridgeValidation() {
         val captured = mutableListOf<String>()
         val bridge = BrowserSession.EmreMediaBridge { captured.add(it) }
         bridge.reportMedia("javascript:alert(1)")

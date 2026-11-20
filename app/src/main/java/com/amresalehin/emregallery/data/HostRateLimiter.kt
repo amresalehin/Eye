@@ -10,7 +10,7 @@ import kotlin.math.min
 /**
  * Shared per-host rate limiter, cooldown circuit breaker, and error classifier
  * used across both the general downloader (ExtractionCoordinator, MediaDownloadWorker,
- * RecursiveSiteCrawler) and YTDLnis (YtdlnisEngine, YtdlnisDownloadWorker).
+ * RecursiveSiteCrawler).
  *
  * Prevents cascading 429 / anti-bot storms without restricting extractor capabilities.
  */

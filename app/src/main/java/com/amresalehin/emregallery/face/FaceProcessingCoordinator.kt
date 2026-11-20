@@ -38,8 +38,6 @@ interface ProcessingHandle : Closeable {
  * while operations are active, closing races between checking busy status and
  * starting new operations.
  */
-typealias OperationType = FaceProcessingOperation
-
 object FaceProcessingCoordinator {
     private val lock = Any()
     private val activeOperationsMap = ConcurrentHashMap<String, ActiveOperation>()

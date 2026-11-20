@@ -32,12 +32,6 @@ const val SINGLE_PHOTO_ZOOM = 15.0
 
 /** Center of the full-world view used when there is no saved camera. */
 val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
-val WORLD_VIEW_BOUNDS = BoundingBox(
-    WORLD_VIEW_LAT_NORTH,
-    WORLD_VIEW_LON_EAST,
-    WORLD_VIEW_LAT_SOUTH,
-    WORLD_VIEW_LON_WEST
-)
 
 private const val PHOTO_MAP_CAMERA_PREFERENCES = "photo_map_camera"
 private const val CAMERA_LATITUDE_KEY = "latitude"
@@ -88,11 +82,6 @@ internal fun persistPhotoMapCamera(context: Context, map: MapView) {
             .apply()
     }
 }
-
-/**
- * Returns the default world overview zoom level.
- */
-fun calculateWorldFitZoom(map: MapView): Double = DEFAULT_WORLD_ZOOM
 
 /**
  * Frames the entire world, centered, so any geotagged media is visible at a glance.

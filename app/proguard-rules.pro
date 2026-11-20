@@ -76,16 +76,3 @@
 -keep class androidx.media3.** { *; }
 -dontwarn androidx.media3.**
 
-# FFmpegKit Maintained (com.arthenica.ffmpegkit JNI & callbacks)
--keep class com.arthenica.ffmpegkit.** { *; }
--keep class com.arthenica.smartexception.** { *; }
--dontwarn com.arthenica.ffmpegkit.**
--dontwarn com.arthenica.smartexception.**
-
-# YTDLnis WorkManager worker & engine reflective instantiation
--keep class com.amresalehin.emregallery.ytdlnis.YtdlnisDownloadWorker {
-    public <init>(android.content.Context, androidx.work.WorkerParameters);
-}
--keep class com.amresalehin.emregallery.ytdlnis.YtdlnisObserveWorker {
-    public <init>(android.content.Context, androidx.work.WorkerParameters);
-}

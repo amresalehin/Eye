@@ -119,9 +119,23 @@ class MediaDownloadWorker(
 
         setProgress(workDataOf(KEY_PROGRESS to 0.05f, KEY_STATUS to "Initializing download for $title..."))
 
-        fun reportLiveProgress(bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) {
+        fun reportLiveProgress(
+            bytesRead: Long,
+            totalBytes: Long,
+            speedBytesPerSec: Long,
+            isSpeedBoostActive: Boolean? = null,
+            activeConnections: Int? = null
+        ) {
             val pct = if (totalBytes > 0) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0.05f, 0.99f) else 0.5f
-            DownloadActivityManager.updateProgress(itemId, pct, bytesRead, totalBytes, speedBytesPerSec)
+            DownloadActivityManager.updateProgress(
+                itemId,
+                pct,
+                bytesRead,
+                totalBytes,
+                speedBytesPerSec,
+                isSpeedBoostActive,
+                activeConnections
+            )
             setProgressAsync(
                 workDataOf(
                     KEY_PROGRESS to pct,
@@ -170,25 +184,44 @@ class MediaDownloadWorker(
             if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
                 var lastProgressUpdate = System.currentTimeMillis()
                 var lastBytes = 0L
-                val result = OkHttpDownloader.downloadMediaFileDetailed(
+                val speedBoostEnabled = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
+                    .isSpeedBoostEnabledSync(applicationContext)
+                val maxConnections = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
+                    .getMaxConcurrentDownloadsSync(applicationContext)
+                val boostResult = SpeedBoostDownloader.downloadWithSpeedBoost(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
                     referer = referer,
                     downloadId = itemId,
                     headers = downloadHeaders,
-                    subfolder = resolvedSubfolder,
-                    onProgress = { bytesRead, totalBytes ->
+                    domain = resolvedSubfolder,
+                    speedBoostEnabled = speedBoostEnabled,
+                    connections = maxConnections,
+                    onProgress = { bytesRead, totalBytes, speed, boostActive ->
                         val now = System.currentTimeMillis()
-                        if (now - lastProgressUpdate > 250) {
-                            val dt = (now - lastProgressUpdate) / 1000.0
-                            val db = bytesRead - lastBytes
-                            val speed = if (dt > 0) (db / dt).toLong() else 0L
+                        if (now - lastProgressUpdate > 250 || bytesRead >= totalBytes && totalBytes > 0L) {
                             lastBytes = bytesRead
                             lastProgressUpdate = now
-                            reportLiveProgress(bytesRead, totalBytes, speed)
+                            reportLiveProgress(
+                                bytesRead,
+                                totalBytes,
+                                speed,
+                                isSpeedBoostActive = boostActive,
+                                activeConnections = if (boostActive) maxConnections else 1
+                            )
                         }
                     }
+                )
+                val result = boostResult.downloadResult
+                DownloadActivityManager.updateProgress(
+                    itemId,
+                    if (result.isSuccessful && result.totalBytes > 0L) 1f else 0.05f,
+                    result.bytesDownloaded,
+                    result.totalBytes,
+                    0L,
+                    isSpeedBoostActive = boostResult.usedSpeedBoost,
+                    activeConnections = boostResult.connectionsUsed
                 )
                 okHttpResult = result
 

@@ -130,10 +130,21 @@ class LockedVaultManager(private val context: Context) {
                         dest.delete()
                         throw IllegalStateException("Vault encryption verification failed for ${item.name}")
                     }
-                    // Verify the encrypted file can actually be decrypted before committing it.
+                    // Authenticate every encrypted chunk before metadata commit. Checking only
+                    // the header or first byte would allow a truncated/corrupt tail to be locked.
+                    val expectedPlaintextLength = VaultCrypto.getVaultFilePlaintextLength(dest)
+                    var verifiedPlaintextLength = 0L
                     VaultCrypto.openDecryptedInputStream(dest).use { stream ->
-                        val firstByte = stream.read()
-                        if (firstByte < 0) throw IllegalStateException("Empty source media: ${item.name}")
+                        val buffer = ByteArray(128 * 1024)
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            if (count == 0) continue
+                            verifiedPlaintextLength += count
+                        }
+                    }
+                    if (verifiedPlaintextLength <= 0L || verifiedPlaintextLength != expectedPlaintextLength) {
+                        throw IllegalStateException("Encrypted media integrity check failed for ${item.name}")
                     }
                     locked.add(
                         item.copy(

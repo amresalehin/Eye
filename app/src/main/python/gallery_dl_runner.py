@@ -684,6 +684,226 @@ def extract_media(url, options_json="{}"):
         "items": all_items
     })
 
+
+def fetch_page_html(url, options_json="{}"):
+    """
+    Fetches webpage HTML (or headers for direct media URLs) for static DOM scraping
+    using the Python engines (yt-dlp urlopen and gallery-dl session).
+    """
+    clean_url = url.strip() if url else ""
+    if not clean_url:
+        return json.dumps({
+            "success": False,
+            "status_code": -1,
+            "content_type": "",
+            "final_url": "",
+            "body": None,
+            "error": "URL cannot be empty",
+            "engine": ""
+        })
+
+    if not YTDLP_AVAILABLE and not GALLERY_DL_AVAILABLE:
+        return json.dumps({
+            "success": False,
+            "status_code": -1,
+            "content_type": "",
+            "final_url": clean_url,
+            "body": None,
+            "error": "Python yt-dlp / gallery-dl engine is not available",
+            "engine": ""
+        })
+
+    try:
+        opts = json.loads(options_json) if options_json else {}
+    except Exception:
+        opts = {}
+
+    user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    cookies = opts.get("cookies")
+    timeout_sec = int(opts.get("timeout") or 20)
+    max_bytes = int(opts.get("max_bytes") or (2 * 1024 * 1024))
+
+    http_headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/*;q=0.8,video/*;q=0.8,audio/*;q=0.8,*/*;q=0.7"
+    }
+    if cookies:
+        http_headers["Cookie"] = cookies
+
+    last_code = -1
+    last_err = "Network request failed"
+    last_final_url = clean_url
+
+    # 1. Try yt-dlp networking stack (urlopen handles cookies, redirects, compression, TLS)
+    if YTDLP_AVAILABLE:
+        try:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "socket_timeout": timeout_sec,
+                "user_agent": user_agent,
+                "http_headers": http_headers
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                resp = ydl.urlopen(clean_url)
+                try:
+                    code = int(getattr(resp, "status", None) or getattr(resp, "code", None) or 200)
+                    final_url = str(getattr(resp, "url", None) or clean_url)
+                    last_final_url = final_url
+                    headers_obj = getattr(resp, "headers", None)
+                    raw_ct = ""
+                    if headers_obj is not None:
+                        raw_ct = str(headers_obj.get("Content-Type") or headers_obj.get("content-type") or "").lower()
+
+                    if 200 <= code < 300:
+                        if raw_ct.startswith(("image/", "video/", "audio/")) or "mpegurl" in raw_ct or "dash" in raw_ct:
+                            return json.dumps({
+                                "success": True,
+                                "status_code": code,
+                                "content_type": raw_ct,
+                                "final_url": final_url,
+                                "body": "",
+                                "error": None,
+                                "engine": "yt-dlp"
+                            })
+                        raw_bytes = resp.read(max_bytes)
+                        charset = "utf-8"
+                        m = re.search(r"charset=([a-zA-Z0-9._-]+)", raw_ct)
+                        if m:
+                            charset = m.group(1)
+                        try:
+                            text = raw_bytes.decode(charset, errors="replace")
+                        except Exception:
+                            text = raw_bytes.decode("utf-8", errors="replace")
+                        return json.dumps({
+                            "success": True,
+                            "status_code": code,
+                            "content_type": raw_ct,
+                            "final_url": final_url,
+                            "body": text,
+                            "error": None,
+                            "engine": "yt-dlp"
+                        })
+                    else:
+                        last_code = code
+                        last_err = f"Server returned HTTP status {code}"
+                finally:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            err_str = f"{e.__class__.__name__}: {e}"
+            direct_code = getattr(e, "status", None) or getattr(e, "code", None)
+            if direct_code is not None:
+                try:
+                    last_code = int(direct_code)
+                except Exception:
+                    pass
+            else:
+                extracted_code = _extract_http_status_from_error(err_str)
+                if extracted_code != -1:
+                    last_code = extracted_code
+            last_err = err_str
+
+    # 2. Fallback to gallery-dl extractor session
+    if GALLERY_DL_AVAILABLE:
+        try:
+            gdl_session = None
+            with _gdl_lock:
+                gdl_config.set(("extractor",), "user-agent", user_agent)
+                gdl_config.set(("extractor",), "headers", dict(http_headers))
+                gdl_config.set(("output",), "mode", "null")
+                if cookies:
+                    cookie_dict = _parse_cookie_dict(cookies)
+                    if cookie_dict:
+                        gdl_config.set(("extractor",), "cookies", cookie_dict)
+                ext = gdl_extractor.find(clean_url)
+                if ext is not None:
+                    try:
+                        ext.initialize()
+                    except Exception:
+                        pass
+                    gdl_session = getattr(ext, "session", None)
+
+            if gdl_session is None:
+                import requests
+                gdl_session = requests.Session()
+                gdl_session.headers.update(http_headers)
+                if cookies:
+                    gdl_session.cookies.update(_parse_cookie_dict(cookies))
+
+            resp = gdl_session.get(clean_url, headers=http_headers, stream=True, timeout=timeout_sec)
+            try:
+                code = int(resp.status_code)
+                final_url = str(resp.url or clean_url)
+                last_final_url = final_url
+                raw_ct = (resp.headers.get("content-type") or "").lower()
+
+                if 200 <= code < 300:
+                    if raw_ct.startswith(("image/", "video/", "audio/")) or "mpegurl" in raw_ct or "dash" in raw_ct:
+                        return json.dumps({
+                            "success": True,
+                            "status_code": code,
+                            "content_type": raw_ct,
+                            "final_url": final_url,
+                            "body": "",
+                            "error": None,
+                            "engine": "gallery-dl"
+                        })
+                    chunks = []
+                    total_read = 0
+                    for chunk in resp.iter_content(chunk_size=32768):
+                        if not chunk:
+                            continue
+                        remaining = max_bytes - total_read
+                        if remaining <= 0:
+                            break
+                        if len(chunk) > remaining:
+                            chunks.append(chunk[:remaining])
+                            break
+                        chunks.append(chunk)
+                        total_read += len(chunk)
+                    raw_bytes = b"".join(chunks)
+                    charset = getattr(resp, "encoding", None) or "utf-8"
+                    try:
+                        text = raw_bytes.decode(charset, errors="replace")
+                    except Exception:
+                        text = raw_bytes.decode("utf-8", errors="replace")
+                    return json.dumps({
+                        "success": True,
+                        "status_code": code,
+                        "content_type": raw_ct,
+                        "final_url": final_url,
+                        "body": text,
+                        "error": None,
+                        "engine": "gallery-dl"
+                    })
+                else:
+                    last_code = code
+                    last_err = f"Server returned HTTP status {code}"
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            err_str = f"{e.__class__.__name__}: {e}"
+            extracted_code = _extract_http_status_from_error(err_str)
+            if extracted_code != -1:
+                last_code = extracted_code
+            last_err = err_str
+
+    return json.dumps({
+        "success": False,
+        "status_code": last_code,
+        "content_type": "",
+        "final_url": last_final_url,
+        "body": None,
+        "error": last_err,
+        "engine": ""
+    })
+
 def _validate_media_file_payload(file_path):
     """
     Verifies a downloaded file is non-empty and does not contain HTML, Cloudflare challenges,

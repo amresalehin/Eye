@@ -21,8 +21,6 @@ import com.amresalehin.emregallery.ui.detectPlatform
 import com.amresalehin.emregallery.ui.NavBackStackEntry
 import com.amresalehin.emregallery.ui.passesDimensionFilter
 import kotlinx.coroutines.runBlocking
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -525,20 +523,20 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testOkHttpDirectMediaDownloadRemoved() {
+    fun testOkHttpDirectMediaDownloadAndGetHtmlRemoved() {
         val methods = OkHttpDownloader::class.java.declaredMethods.map { it.name }.toSet()
         assertFalse("OkHttpDownloader must not expose downloadMediaFileDetailed", "downloadMediaFileDetailed" in methods)
         assertFalse("OkHttpDownloader must not expose downloadMediaFile", "downloadMediaFile" in methods)
-        assertTrue("OkHttpDownloader must retain getHtml for DOM scraping", "getHtml" in methods)
+        assertFalse("OkHttpDownloader must not expose getHtml", "getHtml" in methods)
         assertTrue("OkHttpDownloader must retain getTargetStorageDir", "getTargetStorageDir" in methods)
         assertTrue("OkHttpDownloader must retain generateDeterministicId", "generateDeterministicId" in methods)
     }
 
     @Test
-    fun testGalleryDlEngineRoutesDownloadsThroughPythonOnly() = runBlocking {
+    fun testGalleryDlEngineRoutesDownloadsAndStaticScrapingThroughPythonOnly() = runBlocking {
         val context: Context = ApplicationProvider.getApplicationContext()
-        // Outside Android Chaquopy runtime, downloadMediaDetailed must fail clearly with Python engine notice
-        // instead of falling back to direct OkHttp downloads.
+        // Outside Android Chaquopy runtime, both downloadMediaDetailed and fetchPageHtml/StaticMediaScraper
+        // must fail clearly with Python engine notice instead of falling back to OkHttp.
         val result = com.amresalehin.emregallery.data.GalleryDlEngine.downloadMediaDetailed(
             context = context,
             mediaUrl = "https://example.com/media/photo.jpg",
@@ -547,27 +545,15 @@ class MediaDownloaderTest {
         assertFalse(result.isSuccessful)
         assertNull(result.file)
         assertTrue(result.errorMessage?.contains("yt-dlp") == true || result.errorMessage?.contains("gallery-dl") == true)
-    }
 
-    @Test
-    fun testOkHttpGetHtmlStillServesStaticScrapingAndParseRetryAfter() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "text/html; charset=utf-8")
-                    .setBody("<html><head><title>Gallery Page</title></head><body><img src='/a.jpg'/></body></html>")
-            )
-            val url = server.url("/gallery").toString()
-            val htmlRes = OkHttpDownloader.getHtml(url)
-            assertTrue(htmlRes.isSuccessful)
-            assertEquals(200, htmlRes.statusCode)
-            assertTrue(htmlRes.bodyString?.contains("Gallery Page") == true)
-        } finally {
-            server.shutdown()
-        }
+        val pageRes = com.amresalehin.emregallery.data.GalleryDlEngine.fetchPageHtml("https://example.com/gallery")
+        assertFalse(pageRes.isSuccessful)
+        assertNull(pageRes.bodyString)
+        assertTrue(pageRes.errorMessage?.contains("yt-dlp") == true || pageRes.errorMessage?.contains("gallery-dl") == true)
+
+        val scrapeRes = com.amresalehin.emregallery.data.StaticMediaScraper().scrape("https://example.com/gallery")
+        assertTrue(scrapeRes.items.isEmpty())
+        assertTrue(scrapeRes.errorMessage?.contains("yt-dlp") == true || scrapeRes.errorMessage?.contains("gallery-dl") == true)
 
         assertEquals(45L, OkHttpDownloader.parseRetryAfterHeader("45"))
         assertEquals(1L, OkHttpDownloader.parseRetryAfterHeader("0"))

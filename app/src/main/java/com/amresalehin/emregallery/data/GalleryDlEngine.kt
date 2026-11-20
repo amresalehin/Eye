@@ -63,6 +63,16 @@ data class GalleryDlDownloadResult(
     val engineUsed: String? = null
 )
 
+data class PythonPageResponse(
+    val isSuccessful: Boolean,
+    val statusCode: Int,
+    val contentType: String,
+    val finalUrl: String,
+    val bodyString: String? = null,
+    val errorMessage: String? = null,
+    val engineUsed: String = ""
+)
+
 /**
  * Callback bridge invoked from Python (`gallery_dl_runner.py`) during yt-dlp and requests downloads.
  */
@@ -329,6 +339,58 @@ object GalleryDlEngine {
 
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
+
+    /**
+     * Fetches page HTML (or direct media content headers) using the Python engines
+     * (`yt-dlp` and `gallery-dl`), replacing direct OkHttp HTML scraping.
+     */
+    suspend fun fetchPageHtml(
+        url: String,
+        options: GalleryDlOptions = GalleryDlOptions(),
+        maxBytes: Long = 2L * 1024L * 1024L
+    ): PythonPageResponse = withContext(Dispatchers.IO) {
+        if (!isAvailable()) {
+            return@withContext PythonPageResponse(
+                isSuccessful = false,
+                statusCode = -1,
+                contentType = "",
+                finalUrl = url,
+                errorMessage = "Python yt-dlp / gallery-dl engine is not available"
+            )
+        }
+
+        try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            val optsJson = JSONObject().apply {
+                options.userAgent?.let { put("user_agent", it) }
+                options.cookies?.let { put("cookies", it) }
+                put("timeout", options.timeoutSeconds)
+                put("max_bytes", maxBytes)
+            }.toString()
+
+            val raw = runner.callAttr("fetch_page_html", url.trim(), optsJson).toString()
+            val json = JSONObject(raw)
+            PythonPageResponse(
+                isSuccessful = json.optBoolean("success", false),
+                statusCode = json.optInt("status_code", -1),
+                contentType = json.optString("content_type", ""),
+                finalUrl = json.optString("final_url", url).ifBlank { url },
+                bodyString = if (json.isNull("body")) null else json.optString("body", ""),
+                errorMessage = json.optString("error").takeIf { it.isNotBlank() && it != "null" },
+                engineUsed = json.optString("engine", "")
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchPageHtml failed for $url", e)
+            PythonPageResponse(
+                isSuccessful = false,
+                statusCode = -1,
+                contentType = "",
+                finalUrl = url,
+                errorMessage = e.localizedMessage ?: "Python engine request failed"
+            )
+        }
+    }
 
     /**
      * Decodes and stores high-resolution Base64 inline data URIs directly to persistent media storage

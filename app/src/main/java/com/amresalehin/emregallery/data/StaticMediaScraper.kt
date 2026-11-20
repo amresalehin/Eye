@@ -8,7 +8,7 @@ import java.net.URL
 import java.util.UUID
 
 /**
- * High-speed static HTML / DOM extractor powered by OkHttp and Jsoup.
+ * High-speed static HTML / DOM extractor powered by the Python engines (yt-dlp / gallery-dl) and Jsoup.
  * Reliably parses document metadata, OpenGraph tags, HTML5 video/audio/picture tags,
  * srcset, lazy-loaded attributes, CSS backgrounds, direct links, and iframes with shared session handling.
  */
@@ -72,7 +72,14 @@ class StaticMediaScraper {
         }
 
         try {
-            val response = OkHttpDownloader.getHtml(normalizedUrl)
+            val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(normalizedUrl).takeIf { it.isNotBlank() }
+            val response = GalleryDlEngine.fetchPageHtml(
+                url = normalizedUrl,
+                options = GalleryDlOptions(
+                    userAgent = OkHttpDownloader.DEFAULT_USER_AGENT,
+                    cookies = cookies
+                )
+            )
             if (!response.isSuccessful) {
                 return@withContext StaticScrapeResult(
                     sourceUrl = normalizedUrl,

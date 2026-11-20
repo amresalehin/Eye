@@ -2,28 +2,24 @@ package com.amresalehin.emregallery.data
 
 import android.content.Context
 import android.os.Environment
-import android.util.Log
 import android.webkit.CookieManager
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * Shared session HTTP client, cookie synchronization bridge, HTML page fetcher (for DOM scraping),
+ * Shared session HTTP client, cookie synchronization bridge,
  * and deterministic download storage helpers.
- * All actual media file downloads are routed exclusively through yt-dlp and gallery-dl in [GalleryDlEngine].
+ * All HTML scraping and media downloads are routed exclusively through the Python engines
+ * (yt-dlp and gallery-dl) in [GalleryDlEngine].
  */
 object OkHttpDownloader {
 
-    private const val TAG = "OkHttpDownloader"
     const val DEFAULT_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
@@ -154,15 +150,6 @@ object OkHttpDownloader {
             .build()
     }
 
-    data class HttpResponse(
-        val isSuccessful: Boolean,
-        val statusCode: Int,
-        val contentType: String,
-        val finalUrl: String,
-        val bodyString: String? = null,
-        val errorMessage: String? = null
-    )
-
     /**
      * Parses the HTTP 'Retry-After' header (RFC 7231/9110) as seconds or HTTP-date.
      */
@@ -182,66 +169,6 @@ object OkHttpDownloader {
             } else null
         } catch (_: Exception) {
             null
-        }
-    }
-
-    /**
-     * Executes an HTTP GET request with OkHttp, following redirects and utilizing shared session cookies.
-     */
-    suspend fun getHtml(
-        url: String,
-        referer: String? = null,
-        maxBytes: Long = 2 * 1024 * 1024
-    ): HttpResponse = withContext(Dispatchers.IO) {
-        val reqBuilder = Request.Builder().url(url)
-        if (!referer.isNullOrBlank()) {
-            reqBuilder.header("Referer", referer)
-        }
-
-        try {
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                val code = response.code
-                val contentType = response.header("Content-Type")?.lowercase() ?: ""
-                val finalUrl = response.request.url.toString()
-
-                if (!response.isSuccessful) {
-                    return@withContext HttpResponse(
-                        isSuccessful = false,
-                        statusCode = code,
-                        contentType = contentType,
-                        finalUrl = finalUrl,
-                        errorMessage = "Server returned HTTP status $code"
-                    )
-                }
-
-                val body = response.body
-                val responseString = if (body != null) {
-                    val source = body.source()
-                    source.request(maxBytes)
-                    val buffer = source.buffer
-                    val toRead = minOf(buffer.size, maxBytes)
-                    buffer.clone().readUtf8(toRead)
-                } else {
-                    ""
-                }
-
-                HttpResponse(
-                    isSuccessful = true,
-                    statusCode = code,
-                    contentType = contentType,
-                    finalUrl = finalUrl,
-                    bodyString = responseString
-                )
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "getHtml failed for $url", e)
-            HttpResponse(
-                isSuccessful = false,
-                statusCode = -1,
-                contentType = "",
-                finalUrl = url,
-                errorMessage = e.message ?: "Network request failed"
-            )
         }
     }
 

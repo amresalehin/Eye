@@ -71,10 +71,12 @@ object DownloadQueueManager {
             if (!activeWorkIds.add(workId)) return
             if (itemId != null) {
                 itemIdByWorkId[workId] = itemId
-                activeWorkIdsByItemId.computeIfAbsent(itemId) {
-                    ConcurrentHashMap.newKeySet<UUID>()
-                }.add(workId)
-                activeItemIds.add(itemId)
+                activeWorkIdsByItemId.compute(itemId) { _, current ->
+                    (current ?: ConcurrentHashMap.newKeySet<UUID>()).also {
+                        it.add(workId)
+                        activeItemIds.add(itemId)
+                    }
+                }
             }
             activeDownloadCount.incrementAndGet()
         } else if (itemId != null) {
@@ -94,13 +96,20 @@ object DownloadQueueManager {
             val mappedItemId = itemIdByWorkId.remove(workId)
             val resolvedItemId = itemId ?: mappedItemId
             if (resolvedItemId != null) {
-                val itemWorkIds = activeWorkIdsByItemId[resolvedItemId]
-                itemWorkIds?.remove(workId)
-                if (itemWorkIds.isNullOrEmpty()) {
-                    activeWorkIdsByItemId.remove(resolvedItemId, itemWorkIds)
-                    activeItemIds.remove(resolvedItemId)
+                var lastWorkForItem = false
+                activeWorkIdsByItemId.compute(resolvedItemId) { _, itemWorkIds ->
+                    itemWorkIds?.remove(workId)
+                    if (itemWorkIds.isNullOrEmpty()) {
+                        lastWorkForItem = true
+                        activeItemIds.remove(resolvedItemId)
+                        null
+                    } else {
+                        itemWorkIds
+                    }
+                }
+                if (lastWorkForItem) {
                     uniqueNameByItemId.remove(resolvedItemId)?.let { uniqueName ->
-                        activeWorkIdsByUniqueName.remove(uniqueName)
+                        activeWorkIdsByUniqueName.remove(uniqueName, workId)
                     }
                 }
             }

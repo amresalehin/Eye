@@ -211,12 +211,18 @@ object DownloadQueueManager {
         } else {
             activeWorkIdsByUniqueName[uniqueWorkName] = request.id
             uniqueNameByItemId[item.id] = uniqueWorkName
-            workManager.enqueueUniqueWork(
-                uniqueWorkName,
-                if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-                request
-            )
-            markDownloadStarted(count = 1, itemId = item.id, workId = request.id)
+            // Reserve before enqueue: a fast worker must never finish before its reservation exists.
+            markDownloadStarted(itemId = item.id, workId = request.id)
+            try {
+                workManager.enqueueUniqueWork(
+                    uniqueWorkName,
+                    if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                    request
+                )
+            } catch (failure: Throwable) {
+                markDownloadCompleted(item.id, request.id)
+                throw failure
+            }
             request.id
         }
 
@@ -300,12 +306,18 @@ object DownloadQueueManager {
             } else {
                 activeWorkIdsByUniqueName[uniqueWorkName] = request.id
                 uniqueNameByItemId[item.id] = uniqueWorkName
-                workManager.enqueueUniqueWork(
-                    uniqueWorkName,
-                    ExistingWorkPolicy.KEEP,
-                    request
-                )
-                markDownloadStarted(count = 1, itemId = item.id, workId = request.id)
+                // Register before scheduling so an immediately-started worker can release it.
+                markDownloadStarted(itemId = item.id, workId = request.id)
+                try {
+                    workManager.enqueueUniqueWork(
+                        uniqueWorkName,
+                        ExistingWorkPolicy.KEEP,
+                        request
+                    )
+                } catch (failure: Throwable) {
+                    markDownloadCompleted(item.id, request.id)
+                    throw failure
+                }
                 request.id
             }
         }

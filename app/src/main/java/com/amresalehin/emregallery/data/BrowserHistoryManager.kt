@@ -26,7 +26,16 @@ data class BrowserShortcut(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
     val url: String
-)
+) {
+    val iconKey: String
+        get() = when {
+            url.contains("youtube.com", ignoreCase = true) || url.contains("youtu.be", ignoreCase = true) -> "youtube"
+            url.contains("wikipedia.org", ignoreCase = true) -> "wikipedia"
+            url.contains("github.com", ignoreCase = true) -> "github"
+            url.contains("drive.google.com", ignoreCase = true) -> "drive"
+            else -> ""
+        }
+}
 
 data class BrowserTabItem(
     val id: String = java.util.UUID.randomUUID().toString(),

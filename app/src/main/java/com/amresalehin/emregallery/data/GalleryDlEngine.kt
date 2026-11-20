@@ -60,13 +60,13 @@ data class GalleryDlOptions(
     val retries: Int = 3
 )
 
-    val pageDescription: String = "",
-    val previewImageUrl: String = "",
 data class GalleryDlExtractResult(
     val success: Boolean,
     val extractorName: String = "",
     val category: String = "",
     val pageTitle: String = "",
+    val pageDescription: String = "",
+    val previewImageUrl: String = "",
     val items: List<ScrapedMediaItem> = emptyList(),
     val errorMessage: String? = null
 )

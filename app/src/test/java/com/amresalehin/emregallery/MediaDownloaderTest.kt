@@ -11,6 +11,7 @@ import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import com.amresalehin.emregallery.data.ScrapeResult
 import com.amresalehin.emregallery.ui.Destination

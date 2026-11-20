@@ -26,32 +26,6 @@ enum class DownloaderVideoQuality(val id: String, val label: String, val maxHeig
     Q144P("144P", "144p Minimal", 144);
 
 
-    val speedBoostEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
-        prefs[KEY_SPEED_BOOST] ?: syncPrefs.getBoolean(PREF_SPEED_BOOST, true)
-    }.distinctUntilChanged()
-
-    val recursiveCrawlEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
-        prefs[KEY_RECURSIVE_CRAWL] ?: syncPrefs.getBoolean(PREF_RECURSIVE_CRAWL, false)
-    }.distinctUntilChanged()
-
-    val formatMode: Flow<DownloaderFormatMode> = appContext.galleryDataStore.data.map { prefs ->
-        DownloaderFormatMode.fromId(prefs[KEY_FORMAT_MODE] ?: syncPrefs.getString(PREF_FORMAT_MODE, DownloaderFormatMode.VIDEO_AUDIO.id))
-    }.distinctUntilChanged()
-
-    suspend fun setSpeedBoostEnabled(enabled: Boolean) {
-        syncPrefs.edit().putBoolean(PREF_SPEED_BOOST, enabled).apply()
-        appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST] = enabled }
-    }
-
-    suspend fun setRecursiveCrawlEnabled(enabled: Boolean) {
-        syncPrefs.edit().putBoolean(PREF_RECURSIVE_CRAWL, enabled).apply()
-        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL] = enabled }
-    }
-
-    suspend fun setFormatMode(mode: DownloaderFormatMode) {
-        syncPrefs.edit().putString(PREF_FORMAT_MODE, mode.id).apply()
-        appContext.galleryDataStore.edit { it[KEY_FORMAT_MODE] = mode.id }
-    }
 
     suspend fun setRedditConfig(config: RedditDlConfig) {
         val encSecret = if (config.clientSecret.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.clientSecret) else ""
@@ -120,6 +94,18 @@ data class RedditDlConfig(
 
 class DownloaderPreferencesManager(private val context: Context) {
 
+    val speedBoostEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_SPEED_BOOST] ?: syncPrefs.getBoolean(PREF_SPEED_BOOST, true)
+    }.distinctUntilChanged()
+
+    val recursiveCrawlEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_RECURSIVE_CRAWL] ?: syncPrefs.getBoolean(PREF_RECURSIVE_CRAWL, false)
+    }.distinctUntilChanged()
+
+    val formatMode: Flow<DownloaderFormatMode> = appContext.galleryDataStore.data.map { prefs ->
+        DownloaderFormatMode.fromId(prefs[KEY_FORMAT_MODE] ?: syncPrefs.getString(PREF_FORMAT_MODE, DownloaderFormatMode.VIDEO_AUDIO.id))
+    }.distinctUntilChanged()
+
     private val appContext = context.applicationContext
     private val syncPrefs = appContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -175,6 +161,21 @@ class DownloaderPreferencesManager(private val context: Context) {
         val raw = prefs[KEY_SEARCH_ENGINE] ?: syncPrefs.getString(PREF_SEARCH_ENGINE, BrowserSearchEngine.DUCKDUCKGO.name)
         BrowserSearchEngine.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: BrowserSearchEngine.DUCKDUCKGO
     }.distinctUntilChanged()
+
+    suspend fun setSpeedBoostEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_SPEED_BOOST, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST] = enabled }
+    }
+
+    suspend fun setRecursiveCrawlEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_RECURSIVE_CRAWL, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL] = enabled }
+    }
+
+    suspend fun setFormatMode(mode: DownloaderFormatMode) {
+        syncPrefs.edit().putString(PREF_FORMAT_MODE, mode.id).apply()
+        appContext.galleryDataStore.edit { it[KEY_FORMAT_MODE] = mode.id }
+    }
 
     suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) {
         syncPrefs.edit().putString(PREF_VIDEO_QUALITY, quality.id).apply()
@@ -266,6 +267,9 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_MAX_CONCURRENT = "max_concurrent_downloads"
         private const val PREF_SEARCH_ENGINE = "browser_search_engine"
         private const val PREF_ENABLED_PROVIDERS = "enabled_providers"
+        private const val PREF_SPEED_BOOST = "downloader_speed_boost_enabled"
+        private const val PREF_RECURSIVE_CRAWL = "downloader_recursive_crawl_enabled"
+        private const val PREF_FORMAT_MODE = "downloader_format_mode"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)

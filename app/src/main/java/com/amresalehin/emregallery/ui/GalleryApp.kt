@@ -1185,46 +1185,6 @@ fun GalleryApp() {
                         onBack = { performBackNavigation() },
                         onRefresh = { refreshMedia(userInitiated = true) }
                     )
-                    Destination.INDEXING_STATUS -> IndexingStatusScreen(
-                        media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
-                        ocrLanguages = ocrLanguagesPref,
-                        ocrModel = ocrModelPref,
-                        ocrEngine = ocrEnginePref,
-                        mlKitLanguages = mlKitLanguagesPref,
-                        onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
-                        onEngineChange = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
-                        onToggleLanguage = { code ->
-                            val updated = ocrLanguagesPref.toMutableSet()
-                            if (code in updated) {
-                                if (updated.size > 1) updated.remove(code)
-                            } else {
-                                updated.add(code)
-                            }
-                            scope.launch { prefs.setOcrLanguages(updated) }
-                        },
-                        onToggleMlKitLanguage = { code ->
-                            val updated = mlKitLanguagesPref.toMutableSet()
-                            when (code) {
-                                "all" -> updated.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
-                                "latin_only" -> {
-                                    updated.clear()
-                                    updated.add("latin")
-                                }
-                                else -> {
-                                    if (code in updated) {
-                                        if (updated.size > 1) updated.remove(code)
-                                    } else {
-                                        updated.add(code)
-                                    }
-                                }
-                            }
-                            scope.launch { prefs.setMlKitLanguages(updated) }
-                        },
-                        onOpenMap = {
-                            navigateTo(Destination.MAP)
-                        },
-                        onBack = { performBackNavigation() }
-                    )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         currentEngine = ocrEnginePref,
                         currentModel = ocrModelPref,

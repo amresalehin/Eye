@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.platform.LocalContext
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.PlatformHealthResult
 import com.amresalehin.emregallery.data.PlatformNetworkMonitor
@@ -35,6 +36,7 @@ import kotlinx.coroutines.launch
 fun NetworkStatusDialog(
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var results by remember { mutableStateOf<List<PlatformHealthResult>>(emptyList()) }
     var isChecking by remember { mutableStateOf(true) }
@@ -102,7 +104,7 @@ fun NetworkStatusDialog(
                 }
 
                 // Active proxy banner
-                val activeProxy = OkHttpDownloader.activeProxyUrl
+                val activeProxy = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getActiveProxyUrlSync(context)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),

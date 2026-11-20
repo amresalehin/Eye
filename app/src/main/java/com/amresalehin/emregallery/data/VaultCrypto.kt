@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.data
 
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.io.ByteArrayOutputStream
@@ -75,8 +76,13 @@ object VaultCrypto {
                     .build()
                 keyGen.init(spec)
                 return keyGen.generateKey()
-            } catch (_: Throwable) {
-                // Only hit when AndroidKeyStore is absent (e.g., plain JVM / Robolectric host tests).
+            } catch (failure: Exception) {
+                // A process-memory key is acceptable only in Robolectric tests. In production,
+                // silently generating one would make previously encrypted media unrecoverable
+                // after process death, so the vault must fail closed instead.
+                if (Build.FINGERPRINT != "robolectric") {
+                    throw IllegalStateException("Android Keystore is unavailable; refusing insecure vault fallback", failure)
+                }
                 jvmFallbackKey?.let { return it }
                 val raw = ByteArray(32)
                 secureRandom.nextBytes(raw)

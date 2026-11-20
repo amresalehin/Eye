@@ -68,7 +68,11 @@ data class NavBackStackEntry(
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS,
     val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
-    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
+    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
+    val selectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
+    val selectedBookmarkDeckIndex: Int = 0,
+    val selectedBookmarkFullScreenIndex: Int? = null,
+    val browserInitialUrl: String = ""
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }

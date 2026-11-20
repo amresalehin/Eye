@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.data
 
 import android.content.Context
+import androidx.annotation.Keep
 import android.os.Environment
 import android.util.Log
 import com.chaquo.python.Python
@@ -10,7 +11,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.URL
 
 data class GalleryDlStatus(
     val available: Boolean,
@@ -31,36 +31,16 @@ data class GalleryDlSupportInfo(
     val category: String,
     val subcategory: String,
     val extractorName: String,
-    val displayName: String,
-    val extractorEngine: String = "yt-dlp"
+    val displayName: String
 )
 
 data class GalleryDlOptions(
     val userAgent: String? = null,
     val cookies: String? = null,
     val timeoutSeconds: Int = 30,
-    val limit: Int? = null,
-    val afterDate: String? = null,
-    val beforeDate: String? = null,
-    val includeComments: Boolean = false,
-    val includePostAuthors: Boolean = false,
-    val redditClientId: String? = null,
-    val redditClientSecret: String? = null,
-    val redditUsername: String? = null,
-    val redditPassword: String? = null,
-    val redditRefreshToken: String? = null,
-    val proxy: String? = null,
     val maxHeight: Int = 0,
-    val formatMode: String = "video_audio",
-    val downloadPlaylist: Boolean = false,
-    val downloadSubtitles: Boolean = false,
-    val includeAutoSubtitles: Boolean = true,
-    val subtitleLanguages: Set<String> = setOf("en"),
-    val retries: Int = 3,
-    val maxDepth: Int = 3,
-    val maxPages: Int = 20,
-    val sameDomainOnly: Boolean = true,
-    val crawlDelayMs: Long = 500L
+    val audioOnly: Boolean = false,
+    val preferredAudioFormat: String = "M4A"
 )
 
 data class GalleryDlExtractResult(
@@ -68,138 +48,53 @@ data class GalleryDlExtractResult(
     val extractorName: String = "",
     val category: String = "",
     val pageTitle: String = "",
-    val pageDescription: String = "",
-    val previewImageUrl: String = "",
     val items: List<ScrapedMediaItem> = emptyList(),
     val errorMessage: String? = null
 )
 
 /**
+ * Callback bridge invoked from Python (`gallery_dl_runner.py`) during yt-dlp and requests downloads.
+ */
+@Keep
+class PythonProgressBridge(
+    private val onUpdate: (bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit
+) {
+    @Keep
+    @Suppress("unused")
+    fun onProgress(bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) {
+        onUpdate(bytesRead, totalBytes, speedBytesPerSec)
+    }
+}
+
+/**
  * Gallery-dl and yt-dlp integration service powered by Chaquopy Python SDK on Android.
- * yt-dlp is the primary engine; gallery-dl serves as secondary for galleries and image hosts.
+ * Enables extracting multi-image galleries, videos, high-resolution original artwork,
+ * and direct downloads from 280+ supported websites (Reddit, Imgur, X/Twitter, Pinterest,
+ * ArtStation, DeviantArt, Booru boards, Flickr, Tumblr, Wikimedia Commons, etc.).
  */
 object GalleryDlEngine {
     private const val TAG = "GalleryDlEngine"
-    @Volatile
     private var isInitialized = false
-    @Volatile
-    private var appContext: Context? = null
-    private val initLock = Any()
 
     fun init(context: Context) {
-        appContext = context.applicationContext
         if (isInitialized) return
-        synchronized(initLock) {
-            if (isInitialized) return
-            try {
-                if (!Python.isStarted()) {
-                    Python.start(AndroidPlatform(context.applicationContext))
-                }
-                runCatching {
-                    Python.getInstance().getModule("ytdlnis_engine").callAttr("install_android_subproc_guard")
-                }
-                isInitialized = true
-                Log.d(TAG, "Chaquopy Python SDK and yt-dlp/gallery-dl runtime initialized successfully")
-            } catch (t: Throwable) {
-                Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
+        try {
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(context.applicationContext))
             }
+            isInitialized = true
+            Log.d(TAG, "Chaquopy Python SDK and gallery-dl runtime initialized successfully")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
         }
     }
 
-    fun isPythonStarted(): Boolean {
+    fun isAvailable(): Boolean {
         return try {
             Python.isStarted()
         } catch (_: Throwable) {
             false
         }
-    }
-
-    fun isYtDlpAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_ytdlp_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking yt-dlp availability", e)
-            false
-        }
-    }
-
-    fun isGalleryDlAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_gallery_dl_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking gallery-dl availability", e)
-            false
-        }
-    }
-
-    fun isInstaloaderAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_instaloader_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking Instaloader availability", e)
-            false
-        }
-    }
-
-    fun isRedditDlAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_reddit_dl_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking reddit-dl availability", e)
-            false
-        }
-    }
-
-    fun isPinterestDlAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_pinterest_dl_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking pinterest-dl availability", e)
-            false
-        }
-    }
-
-    fun isMediaDownloaderAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_media_downloader_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking media_downloader availability", e)
-            false
-        }
-    }
-
-    fun isMediaScraperAvailable(): Boolean {
-        if (!isPythonStarted()) return false
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            runner.callAttr("is_media_scraper_available").toBoolean()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed checking media_scraper availability", e)
-            false
-        }
-    }
-
-    fun isAvailable(): Boolean {
-        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable() || isInstaloaderAvailable() || isRedditDlAvailable() || isPinterestDlAvailable() || isMediaDownloaderAvailable() || isMediaScraperAvailable())
     }
 
     /**
@@ -210,7 +105,7 @@ object GalleryDlEngine {
             return GalleryDlStatus(
                 available = false,
                 version = "Unavailable",
-                engineName = "yt-dlp (Primary) / gallery-dl (Secondary)",
+                engineName = "gallery-dl (Chaquopy Python required)",
                 supportedExtractorsCount = 0,
                 popularSites = defaultPopularSites()
             )
@@ -243,35 +138,32 @@ object GalleryDlEngine {
             GalleryDlStatus(
                 available = json.optBoolean("available", true),
                 version = json.optString("version", "1.32.19"),
-                engineName = json.optString("engine", "yt-dlp (Primary) / gallery-dl (Secondary)"),
+                engineName = json.optString("engine", "gallery-dl (Chaquopy)"),
                 supportedExtractorsCount = json.optInt("supported_categories_count", 287),
                 popularSites = if (sitesList.isNotEmpty()) sitesList else defaultPopularSites()
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get gallery-dl status", e)
             GalleryDlStatus(
-                available = false,
-                version = "Unavailable",
-                engineName = "yt-dlp (Primary) / gallery-dl (Secondary)",
-                supportedExtractorsCount = 0,
+                available = true,
+                version = "1.32.19",
+                engineName = "gallery-dl 1.32.19",
+                supportedExtractorsCount = 287,
                 popularSites = defaultPopularSites()
             )
         }
     }
 
     /**
-     * Checks whether the target URL matches a site-specific yt-dlp or gallery-dl extractor.
+     * Checks whether the target URL matches a site-specific gallery-dl or yt-dlp extractor.
      */
     fun checkSupport(url: String): GalleryDlSupportInfo {
         if (url.isBlank()) {
-            return GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
-        }
-
-        if (!isInitialized) {
-            appContext?.let { init(it) }
+            return GalleryDlSupportInfo(false, "", "", "", "")
         }
 
         if (!isAvailable()) {
+            // Heuristic check if Python isn't active
             val lower = url.lowercase()
             for (site in defaultPopularSites()) {
                 if (site.domains.any { lower.contains(it) }) {
@@ -280,12 +172,11 @@ object GalleryDlEngine {
                         category = site.name.lowercase(),
                         subcategory = "",
                         extractorName = "${site.name}Extractor",
-                        displayName = site.name,
-                        extractorEngine = "gallery-dl"
+                        displayName = site.name
                     )
                 }
             }
-            return GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
+            return GalleryDlSupportInfo(false, "", "", "", "")
         }
 
         return try {
@@ -298,68 +189,20 @@ object GalleryDlEngine {
                 category = json.optString("category", ""),
                 subcategory = json.optString("subcategory", ""),
                 extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", "")),
-                extractorEngine = json.optString("engine", "yt-dlp")
+                displayName = json.optString("display_name", json.optString("category", ""))
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
-            GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
+            GalleryDlSupportInfo(false, "", "", "", "")
         }
     }
 
     /**
-     * Specifically checks whether gallery-dl supports this URL.
+     * Parses extracted JSON items while preserving each item's exact source engine ("yt-dlp" or "gallery-dl").
      */
-    fun checkGalleryDlSupport(url: String): GalleryDlSupportInfo {
-        if (url.isBlank()) {
-            return GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
-        }
-
-        if (!isInitialized) {
-            appContext?.let { init(it) }
-        }
-
-        if (!isAvailable()) {
-            val lower = url.lowercase()
-            for (site in defaultPopularSites()) {
-                if (site.domains.any { lower.contains(it) }) {
-                    return GalleryDlSupportInfo(
-                        isSupported = true,
-                        category = site.name.lowercase(),
-                        subcategory = "",
-                        extractorName = "${site.name}Extractor",
-                        displayName = site.name,
-                        extractorEngine = "gallery-dl"
-                    )
-                }
-            }
-            return GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
-        }
-
-        return try {
-            val py = Python.getInstance()
-            val runner = py.getModule("gallery_dl_runner")
-            val checkJson = runner.callAttr("check_gallery_dl_support", url.trim()).toString()
-            val json = JSONObject(checkJson)
-            GalleryDlSupportInfo(
-                isSupported = json.optBoolean("supported", false),
-                category = json.optString("category", ""),
-                subcategory = json.optString("subcategory", ""),
-                extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", "")),
-                extractorEngine = "gallery-dl"
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "checkGalleryDlSupport error", e)
-            GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
-        }
-    }
-
-    private fun parseExtractedItems(root: JSONObject, pageUrl: String): Pair<String, List<ScrapedMediaItem>> {
+    internal fun parseExtractedItems(root: JSONObject, pageUrl: String): Pair<String, List<ScrapedMediaItem>> {
         val pageTitle = root.optString("pageTitle", "")
-        // Some extractors expose the page poster only at the response level. Reuse it
-        // when an individual video item has no thumbnail, rather than rendering a blank tile.
-        val responsePreview = root.optString("previewImageUrl", "").takeIf { it.isNotBlank() }
+        val defaultEngine = root.optString("engine", "gallery-dl").ifBlank { "gallery-dl" }
         val itemsArray = root.optJSONArray("items") ?: JSONArray()
         val itemsList = mutableListOf<ScrapedMediaItem>()
 
@@ -370,40 +213,16 @@ object GalleryDlEngine {
                 "VIDEOS" -> MediaCategory.VIDEOS
                 "AUDIO" -> MediaCategory.AUDIO
                 "STREAMS" -> MediaCategory.STREAMS
-                "SUBTITLES" -> MediaCategory.SUBTITLES
-                "FILES" -> MediaCategory.FILES
                 else -> MediaCategory.IMAGES
             }
 
             val isVideo = obj.optBoolean("isVideo", false)
             val isAudio = obj.optBoolean("isAudio", false)
             val isStream = obj.optBoolean("isStream", false)
-
-            val itemPageUrl = obj.optString("pageUrl").takeIf { it.isNotBlank() } ?: pageUrl
-            val parsedMeta = mutableMapOf("source_url" to itemPageUrl)
-            obj.optJSONObject("metadata")?.let { metaObj ->
-                val keys = metaObj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    val v = metaObj.optString(k)
-                    if (v.isNotBlank()) parsedMeta[k] = v
-                }
-            }
-            val parsedHeaders = mutableMapOf(
-                "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                "Referer" to itemPageUrl
-            )
-            obj.optJSONObject("downloadHeaders")?.let { hdrObj ->
-                val keys = hdrObj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    val v = hdrObj.optString(k)
-                    if (v.isNotBlank()) parsedHeaders[k] = v
-                }
-            }
+            val itemSource = obj.optString("source", defaultEngine).ifBlank { defaultEngine }
 
             val item = ScrapedMediaItem(
-                id = obj.optString("id", "dl_${System.currentTimeMillis()}_$i"),
+                id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
                 title = obj.optString("title", "media_${i + 1}"),
                 isVideo = isVideo,
@@ -412,18 +231,19 @@ object GalleryDlEngine {
                 category = mediaCategory,
                 format = obj.optString("format", "IMAGE"),
                 mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
-                thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() } ?: responsePreview,
-                source = obj.optString("source", "yt-dlp"),
+                thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
+                source = itemSource,
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
-                    extractorEngine = obj.optString("source", "yt-dlp / gallery-dl"),
-                    pageUrl = itemPageUrl
+                    extractorEngine = itemSource,
+                    pageUrl = pageUrl
                 ),
-                metadata = parsedMeta,
-                downloadHeaders = parsedHeaders,
-                width = obj.optInt("width", 0).takeIf { it > 0 },
-                height = obj.optInt("height", 0).takeIf { it > 0 }
+                metadata = mapOf("source_url" to pageUrl),
+                downloadHeaders = mapOf(
+                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                    "Referer" to pageUrl
+                )
             )
             itemsList.add(item)
         }
@@ -435,17 +255,6 @@ object GalleryDlEngine {
         url: String,
         options: GalleryDlOptions
     ): GalleryDlExtractResult = withContext(Dispatchers.IO) {
-        if (!isInitialized) {
-            appContext?.let { init(it) }
-        }
-        if (!isAvailable()) {
-            var waitCount = 0
-            while (!isAvailable() && waitCount < 15) {
-                appContext?.let { init(it) }
-                kotlinx.coroutines.delay(100L)
-                waitCount++
-            }
-        }
         if (!isAvailable()) {
             return@withContext GalleryDlExtractResult(
                 success = false,
@@ -457,42 +266,13 @@ object GalleryDlEngine {
             val py = Python.getInstance()
             val runner = py.getModule("gallery_dl_runner")
 
-            val effectiveUa = options.userAgent ?: BotDetectionMitigator.STEALTH_USER_AGENT
-            val rawCookies = options.cookies
-                ?: appContext?.let { ctx ->
-                    runCatching { com.amresalehin.emregallery.ytdlnis.YtdlnisRepository.getInstance(ctx).findCookiesForUrl(url.trim()) }.getOrNull()
-                }
-                ?: runCatching { android.webkit.CookieManager.getInstance().getCookie(url.trim()) }.getOrNull()
-            val effectiveCookies = sanitizeCookiesForUrl(url.trim(), rawCookies)
-
             val optsJson = JSONObject().apply {
-                put("user_agent", effectiveUa)
-                effectiveCookies?.let { put("cookies", it) }
+                options.userAgent?.let { put("user_agent", it) }
+                options.cookies?.let { put("cookies", it) }
                 put("timeout", options.timeoutSeconds)
-                options.limit?.let { put("limit", it) }
-                options.afterDate?.takeIf { it.isNotBlank() }?.let { put("after", it) }
-                options.beforeDate?.takeIf { it.isNotBlank() }?.let { put("before", it) }
-                if (options.includeComments) put("comments", true)
-                if (options.includePostAuthors) put("post_authors", true)
-                options.redditClientId?.takeIf { it.isNotBlank() }?.let { put("reddit_client_id", it) }
-                options.redditClientSecret?.takeIf { it.isNotBlank() }?.let { put("reddit_client_secret", it) }
-                options.redditUsername?.takeIf { it.isNotBlank() }?.let { put("reddit_username", it) }
-                options.redditPassword?.takeIf { it.isNotBlank() }?.let { put("reddit_password", it) }
-                options.redditRefreshToken?.takeIf { it.isNotBlank() }?.let { put("reddit_refresh_token", it) }
-                options.proxy?.takeIf { it.isNotBlank() }?.let { put("proxy", it) }
                 if (options.maxHeight > 0) put("max_height", options.maxHeight)
-                put("format_mode", options.formatMode)
-                if (options.downloadPlaylist) put("download_playlist", true)
-                if (options.downloadSubtitles) {
-                    put("download_subtitles", true)
-                    put("include_auto_subtitles", options.includeAutoSubtitles)
-                    put("subtitle_languages", JSONArray(options.subtitleLanguages.toList()))
-                }
-                put("retries", options.retries)
-                put("maxDepth", options.maxDepth)
-                put("maxPages", options.maxPages)
-                put("sameDomainOnly", options.sameDomainOnly)
-                put("scrollPause", options.crawlDelayMs / 1000.0)
+                if (options.audioOnly) put("audio_only", true)
+                put("preferred_audio_format", options.preferredAudioFormat)
             }.toString()
 
             val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
@@ -509,15 +289,11 @@ object GalleryDlEngine {
 
             val extractorName = root.optString("extractor", root.optString("engine", methodName))
             val (pageTitle, itemsList) = parseExtractedItems(root, url.trim())
-            val pageDescription = root.optString("pageDescription", "")
-            val previewImageUrl = root.optString("previewImageUrl", "")
 
             GalleryDlExtractResult(
                 success = true,
                 extractorName = extractorName,
                 pageTitle = pageTitle,
-                pageDescription = pageDescription,
-                previewImageUrl = previewImageUrl,
                 items = itemsList
             )
         } catch (e: Exception) {
@@ -535,176 +311,202 @@ object GalleryDlEngine {
     suspend fun extractYtDlp(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_yt_dlp", url, options)
 
-    suspend fun extractInstagram(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_instagram", url, options)
-
-    suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_reddit", url, options)
-
-    suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_pinterest", url, options)
-
-    suspend fun extractSpotify(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_spotify", url, options)
-
-    suspend fun extractRadioJavan(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_radiojavan", url, options)
-
-    suspend fun extractXSpace(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_x_space", url, options)
-
-    suspend fun scrapeSiteRecursive(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("scrape_site_recursive", url, options)
-
-    suspend fun extractTumblr(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_tumblr", url, options)
-
-    suspend fun extractPixiv(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_pixiv", url, options)
-
-    suspend fun extractTwitterMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_twitter_media_scraper", url, options)
-
-    suspend fun extractFacebookMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_facebook_media_scraper", url, options)
-
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
 
     /**
-     * Downloads a media file exclusively using yt-dlp (primary) and gallery-dl (secondary fallback).
+     * Ensures a downloaded Reddit `v.redd.it` video file contains its companion audio track,
+     * probing and muxing the separate DASH audio stream if needed.
      */
+    suspend fun ensureRedditAudioMuxed(
+        context: Context,
+        videoFile: File,
+        mediaUrl: String,
+        referer: String?,
+        headers: Map<String, String>?
+    ): File = withContext(Dispatchers.IO) {
+        if (!videoFile.exists() || videoFile.length() <= 0L) return@withContext videoFile
+        if (!mediaUrl.contains("v.redd.it/", ignoreCase = true)) return@withContext videoFile
+        if (AndroidMediaMuxer.hasAudioTrack(videoFile)) return@withContext videoFile
+
+        val candidateAudioUrls = AndroidMediaMuxer.tryResolveRedditAudioUrls(mediaUrl)
+        for (audioUrl in candidateAudioUrls) {
+            val audioTempName = "${videoFile.nameWithoutExtension}_reddit_audio.m4a"
+            val audioRes = OkHttpDownloader.downloadMediaFileDetailed(
+                context = context,
+                mediaUrl = audioUrl,
+                fileName = audioTempName,
+                referer = referer,
+                headers = headers
+            )
+            val audioFile = audioRes.file
+            if (audioRes.isSuccessful && audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
+                val muxed = AndroidMediaMuxer.muxVideoAndAudio(videoFile, audioFile, videoFile)
+                runCatching { if (audioFile.exists()) audioFile.delete() }
+                if (muxed) {
+                    Log.d(TAG, "Successfully muxed companion Reddit DASH audio from $audioUrl")
+                    break
+                }
+            }
+        }
+        videoFile
+    }
+
+    /**
+     * Downloads a media file with deterministic filename generation, live progress callbacks,
+     * split DASH video+audio muxing via [AndroidMediaMuxer], and OkHttp fallback.
+     */
+    /**
+     * Rewrites video/container extensions to the preferred audio extension (e.g., .m4a, .mp3, .opus)
+     * when Audio-Only Mode is active so saved audio files never retain a misleading .mp4/.webm extension.
+     */
+    fun resolveDownloadFileName(
+        fileName: String,
+        audioOnly: Boolean,
+        preferredAudioFormat: String = "M4A"
+    ): String {
+        val trimmed = fileName.trim().ifBlank { "media" }
+        if (!audioOnly) return trimmed
+
+        val targetExt = preferredAudioFormat.trim().lowercase(java.util.Locale.ROOT)
+            .takeIf { it in setOf("m4a", "mp3", "opus") } ?: "m4a"
+        val audioExts = setOf("m4a", "mp3", "opus", "aac", "wav", "ogg", "flac", "wma")
+        val videoOrStreamExts = setOf("mp4", "webm", "mkv", "mov", "m4v", "avi", "flv", "3gp", "ts", "m3u8", "mpd")
+
+        val currentExt = trimmed.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+        return when {
+            currentExt in audioExts -> trimmed
+            currentExt in videoOrStreamExts -> "${trimmed.substringBeforeLast('.')}.$targetExt"
+            trimmed.contains('.') -> "${trimmed.substringBeforeLast('.')}.$targetExt"
+            else -> "$trimmed.$targetExt"
+        }
+    }
+
     suspend fun downloadMedia(
         context: Context,
         mediaUrl: String,
         fileName: String,
         referer: String? = null,
+        downloadId: String? = null,
         headers: Map<String, String>? = null,
         cookies: String? = null,
-        domain: String? = null,
-        mediaMode: String = "best",
-        proxy: String? = null,
-        maxHeight: Int = 0,
-        timeoutSeconds: Int = 35,
-        retries: Int = 3
+        subfolder: String? = null,
+        onProgress: ((bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit)? = null
     ): File? = withContext(Dispatchers.IO) {
-        var stagingFile: File? = null
         try {
-            val effectiveDomain = domain?.replace(Regex("[^a-zA-Z0-9.-]"), "_")?.trim()?.takeIf { it.isNotBlank() }
-                ?: OkHttpDownloader.extractDomain(referer ?: mediaUrl)
-            val dir = OkHttpDownloader.getTargetStorageDir(context, effectiveDomain)
+            val qualityCap = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
+            val audioOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context)
+            val preferredAudioFormat = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getPreferredAudioFormatSync(context)
 
-            val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            val stableName = OkHttpDownloader.stableDownloadBaseName(mediaUrl, sanitizedName, null)
-            val extension = stableName.substringAfterLast('.', "").takeIf { it.isNotBlank() }
-            val baseName = stableName.substringBeforeLast('.', stableName)
-            val stagingName = if (extension != null) "$baseName.staging.$extension" else "$stableName.staging"
-            val targetFile = File(dir, stableName)
-            val stagingOutputFile = File(dir, stagingName)
-            stagingFile = stagingOutputFile
-            stagingOutputFile.delete()
-            File(dir, stagingOutputFile.name + ".part").delete()
+            val effectiveFileName = resolveDownloadFileName(fileName, audioOnly, preferredAudioFormat)
+            val dir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
+            val sanitizedName = effectiveFileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val deterministicBase = if (!downloadId.isNullOrBlank()) {
+                val cleanId = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                val ext = sanitizedName.substringAfterLast('.', "")
+                if (ext.isNotEmpty() && !cleanId.endsWith(".$ext", ignoreCase = true)) {
+                    "$cleanId.$ext"
+                } else {
+                    cleanId
+                }
+            } else {
+                OkHttpDownloader.generateDeterministicId(mediaUrl, sanitizedName)
+            }
+            val targetFile = File(dir, deterministicBase)
 
-            val userAgent = headers?.get("User-Agent") ?: BotDetectionMitigator.STEALTH_USER_AGENT
-            val rawCookies = cookies ?: headers?.get("Cookie")
-                ?: runCatching {
-                    val cm = android.webkit.CookieManager.getInstance()
-                    cm.getCookie(mediaUrl) ?: referer?.let { cm.getCookie(it) }
-                }.getOrNull()
-            val effectiveCookies = sanitizeCookiesForUrl(referer ?: mediaUrl, rawCookies)
-            val headersJson = if (!headers.isNullOrEmpty()) {
+            val userAgent = headers?.get("User-Agent") ?: OkHttpDownloader.DEFAULT_USER_AGENT
+            val effectiveCookies = cookies ?: headers?.get("Cookie")
+            val headersJson = run {
                 val json = JSONObject()
-                headers.forEach { (k, v) -> json.put(k, v) }
+                headers?.forEach { (k, v) -> json.put(k, v) }
+                if (qualityCap.maxHeight > 0) json.put("__max_height", qualityCap.maxHeight)
+                if (audioOnly) {
+                    json.put("__audio_only", true)
+                    json.put("__audio_format", preferredAudioFormat.lowercase(java.util.Locale.ROOT))
+                }
                 json.toString()
-            } else ""
+            }
 
+            val progressBridge = if (onProgress != null) {
+                PythonProgressBridge(onProgress)
+            } else null
+
+            // Try Python download if available
             if (isAvailable()) {
                 val py = Python.getInstance()
                 val runner = py.getModule("gallery_dl_runner")
-                val normalizedMode = mediaMode.lowercase().takeIf {
-                    it == "audio" || it == "video" || it == "video_only"
-                } ?: "best"
                 val success = runner.callAttr(
                     "download_media_file",
                     mediaUrl,
-                    stagingOutputFile.absolutePath,
+                    targetFile.absolutePath,
                     referer ?: "",
                     userAgent,
                     effectiveCookies ?: "",
                     headersJson,
-                    normalizedMode,
-                    proxy ?: "",
-                    maxHeight,
-                    timeoutSeconds,
-                    retries
+                    progressBridge
                 ).toBoolean()
 
-                if (success && stagingOutputFile.exists() && stagingOutputFile.length() > 0L) {
-                    try {
-                        java.nio.file.Files.move(
-                            stagingOutputFile.toPath(),
-                            targetFile.toPath(),
-                            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
-                        )
-                    } catch (_: Exception) {
-                        val commitSuffix = if (extension != null) ".$extension" else ""
-                        val commitFile = File(dir, baseName + ".commit" + commitSuffix)
-                        commitFile.delete()
-                        stagingOutputFile.copyTo(commitFile, overwrite = true)
-                        if (commitFile.length() != stagingOutputFile.length()) {
-                            commitFile.delete()
-                            throw IllegalStateException("Extractor output staging copy was incomplete")
-                        }
-                        java.nio.file.Files.move(
-                            commitFile.toPath(),
-                            targetFile.toPath(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
-                        )
-                        stagingOutputFile.delete()
-                    }
+                val mp4VideoPart = File("${targetFile.absolutePath}.video_part.mp4")
+                val mp4AudioPart = File("${targetFile.absolutePath}.audio_part.m4a")
+                val webmVideoPart = File("${targetFile.absolutePath}.video_part.webm")
+                val webmAudioPart = File("${targetFile.absolutePath}.audio_part.webm")
+                if (mp4VideoPart.exists() && mp4AudioPart.exists()) {
+                    AndroidMediaMuxer.muxVideoAndAudio(mp4VideoPart, mp4AudioPart, targetFile)
+                } else if (webmVideoPart.exists() && webmAudioPart.exists()) {
+                    AndroidMediaMuxer.muxVideoAndAudio(webmVideoPart, webmAudioPart, targetFile)
+                }
 
-                    if (targetFile.exists() && targetFile.length() > 0L) {
-                        OkHttpDownloader.publishToDownloadsMediaStoreIfAppPrivate(
-                            context = context,
-                            file = targetFile,
-                            domain = effectiveDomain
-                        )
-                        return@withContext targetFile
-                    }
+                if (success && targetFile.exists() && targetFile.length() > 0L) {
+                    val finalizedFile = if (audioOnly) targetFile else ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(finalizedFile.absolutePath),
+                        null,
+                        null
+                    )
+                    return@withContext finalizedFile
                 }
             }
 
+            // Fallback to OkHttp download with shared session cookies and headers
+            var lastTick = System.currentTimeMillis()
+            var lastBytes = 0L
+            val fallbackFile = OkHttpDownloader.downloadMediaFile(
+                context = context,
+                mediaUrl = mediaUrl,
+                fileName = fileName,
+                referer = referer,
+                downloadId = downloadId,
+                headers = headers,
+                onProgress = if (onProgress != null) { bytesRead, totalBytes ->
+                    val now = System.currentTimeMillis()
+                    val dt = (now - lastTick) / 1000.0
+                    val speed = if (dt > 0) ((bytesRead - lastBytes) / dt).toLong() else 0L
+                    lastTick = now
+                    lastBytes = bytesRead
+                    onProgress(bytesRead, totalBytes, speed)
+                } else null
+            )
+            if (fallbackFile != null && fallbackFile.exists() && fallbackFile.length() > 0L) {
+                return@withContext ensureRedditAudioMuxed(context, fallbackFile, mediaUrl, referer, headers)
+            }
             null
         } catch (e: Exception) {
-            Log.e(TAG, "downloadMedia failed for $mediaUrl", e)
+            Log.e(TAG, "downloadMedia failed", e)
             null
-        } finally {
-            stagingFile?.let { file ->
-                runCatching { file.delete() }
-                runCatching { File(file.parentFile, file.name + ".part").delete() }
-            }
         }
     }
 
     fun defaultPopularSites(): List<GalleryDlSite> = listOf(
-        GalleryDlSite("YouTube", listOf("youtube.com", "youtu.be"), "smart_display"),
-        GalleryDlSite("TikTok", listOf("tiktok.com"), "music_note"),
-        GalleryDlSite("Instagram", listOf("instagram.com"), "camera"),
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
-        GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
         GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
+        GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
         GalleryDlSite("Pinterest", listOf("pinterest.com", "i.pinimg.com"), "pin"),
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
-        GalleryDlSite("Vimeo", listOf("vimeo.com"), "movie"),
-        GalleryDlSite("SoundCloud", listOf("soundcloud.com", "on.soundcloud.com"), "audiotrack"),
-        GalleryDlSite("Spotify", listOf("open.spotify.com", "spotify.link", "spoti.fi"), "music_note"),
-        GalleryDlSite("RadioJavan", listOf("radiojavan.com", "play.radiojavan.com", "rj.app"), "radio"),
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),
         GalleryDlSite("Flickr", listOf("flickr.com"), "photo_camera"),
         GalleryDlSite("Tumblr", listOf("tumblr.com"), "feed"),
-        GalleryDlSite("Pixiv", listOf("pixiv.net"), "palette"),
         GalleryDlSite("Wikimedia", listOf("wikimedia.org", "wikipedia.org"), "public"),
         GalleryDlSite("Bluesky", listOf("bsky.app"), "cloud"),
         GalleryDlSite("500px", listOf("500px.com"), "camera_alt"),
@@ -712,80 +514,4 @@ object GalleryDlEngine {
         GalleryDlSite("Bilibili", listOf("bilibili.com"), "smart_display"),
         GalleryDlSite("4chan", listOf("4chan.org", "4channel.org", "i.4cdn.org"), "forum")
     )
-
-    private val YOUTUBE_AUTH_COOKIE_KEYS = setOf(
-        "SAPISID",
-        "__Secure-3PSID",
-        "__Secure-1PSID",
-        "LOGIN_INFO",
-        "SSID",
-        "HSID"
-    )
-
-    fun isYouTubeUrl(url: String?): Boolean {
-        if (url.isNullOrBlank()) return false
-        val lower = url.trim().lowercase(java.util.Locale.ROOT)
-        if (lower.startsWith("ytsearch")) return true
-        return lower.contains("youtube.com/") ||
-            lower.contains("youtu.be/") ||
-            lower.contains("youtube-nocookie.com/")
-    }
-
-    fun hasAuthenticatedYouTubeCookies(cookiesText: String?): Boolean {
-        if (cookiesText.isNullOrBlank()) return false
-        val text = cookiesText.trim()
-        for (key in YOUTUBE_AUTH_COOKIE_KEYS) {
-            if (text.contains("$key=") || text.contains("\t$key\t")) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /**
-     * Strips anonymous YouTube guest cookies (e.g. VISITOR_INFO1_LIVE, YSC, GPS) so yt-dlp
-     * does not disable its unauthenticated android_vr / ios / android InnerTube clients.
-     */
-    fun sanitizeCookiesForUrl(url: String?, rawCookies: String?): String? {
-        val trimmed = rawCookies?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        if (isYouTubeUrl(url) && !hasAuthenticatedYouTubeCookies(trimmed)) {
-            return null
-        }
-        return trimmed
-    }
-
-    fun normalizeYouTubeUrl(url: String): String {
-        val trimmed = url.trim()
-        if (!isYouTubeUrl(trimmed) || trimmed.lowercase(java.util.Locale.ROOT).startsWith("ytsearch")) {
-            return trimmed
-        }
-        return runCatching {
-            val uri = java.net.URI(trimmed)
-            val host = (uri.host ?: "").lowercase(java.util.Locale.ROOT).removePrefix("www.")
-            val path = uri.path ?: ""
-            val query = uri.rawQuery ?: ""
-            val params = query.split("&").mapNotNull { part ->
-                val idx = part.indexOf('=')
-                if (idx > 0) part.substring(0, idx) to part.substring(idx + 1) else null
-            }.toMap()
-
-            val videoId = when {
-                host == "youtu.be" -> path.trim('/').substringBefore('/')
-                path.startsWith("/shorts/") -> path.removePrefix("/shorts/").substringBefore('/')
-                path.startsWith("/embed/") -> path.removePrefix("/embed/").substringBefore('/')
-                path.startsWith("/live/") -> path.removePrefix("/live/").substringBefore('/')
-                else -> params["v"].orEmpty()
-            }.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{11}$")) }
-
-            val listId = params["list"]
-            when {
-                videoId != null && !listId.isNullOrBlank() -> "https://www.youtube.com/watch?v=$videoId&list=$listId"
-                videoId != null -> "https://www.youtube.com/watch?v=$videoId"
-                !listId.isNullOrBlank() && path.startsWith("/playlist") -> "https://www.youtube.com/playlist?list=$listId"
-                host == "m.youtube.com" -> trimmed.replaceFirst("m.youtube.com", "www.youtube.com")
-                else -> trimmed
-            }
-        }.getOrDefault(trimmed)
-    }
 }
-

@@ -177,6 +177,7 @@ fun BinScreen(
                     }
                 }
             }
+        }
         val hapticFeedback = LocalHapticFeedback.current
         val pullRefreshState = rememberPullToRefreshState()
 
@@ -266,7 +267,6 @@ fun BinScreen(
                 }
             }
         }
-    }
     }
     }
 

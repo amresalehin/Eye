@@ -11,9 +11,6 @@ import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.OkHttpDownloader
-import com.amresalehin.emregallery.data.MediaDownloadWorker
-import com.amresalehin.emregallery.data.DownloadQueueManager
-import com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import com.amresalehin.emregallery.data.ScrapeResult
 import com.amresalehin.emregallery.ui.Destination
@@ -29,7 +26,6 @@ import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,243 +35,8 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config
+@Config(sdk = [34])
 class MediaDownloaderTest {
-
-    @Test
-    fun videoDownloadsPreferOriginPostUrlWhenDirectMediaUrlIsOnlyAnAsset() {
-        assertTrue(
-            MediaDownloadWorker.shouldUseOriginPageForVideo(
-                mediaUrl = "https://v.redd.it/abc/DASH_720.mp4",
-                sourceUrl = "https://www.reddit.com/r/example/comments/abc/post/",
-                isVideo = true,
-                isStream = false
-            )
-        )
-        assertTrue(
-            MediaDownloadWorker.shouldUseOriginPageForVideo(
-                mediaUrl = "https://cdn.example.com/playlist.m3u8",
-                sourceUrl = "https://example.com/watch/123",
-                isVideo = false,
-                isStream = true
-            )
-        )
-        assertFalse(
-            MediaDownloadWorker.shouldUseOriginPageForVideo(
-                mediaUrl = "https://cdn.example.com/video.mp4",
-                sourceUrl = "https://cdn.example.com/video.mp4",
-                isVideo = true,
-                isStream = false
-            )
-        )
-        assertFalse(
-            MediaDownloadWorker.shouldUseOriginPageForVideo(
-                mediaUrl = "https://cdn.example.com/video.mp4",
-                sourceUrl = "",
-                isVideo = true,
-                isStream = false
-            )
-        )
-    }
-
-    @Test
-    fun downloadIdentityUsesCanonicalUrlInsteadOfCallerId() {
-        val first = OkHttpDownloader.stableDownloadBaseName(
-            "https://cdn.example.com/a/video.mp4?token=one",
-            "video.mp4",
-            "same-item-id"
-        )
-        val second = OkHttpDownloader.stableDownloadBaseName(
-            "https://cdn.example.com/b/video.mp4?token=two",
-            "video.mp4",
-            "same-item-id"
-        )
-        assertNotEquals("Different URLs must never share partial download files", first, second)
-
-        val sameAssetFromAnotherBookmark = OkHttpDownloader.stableDownloadBaseName(
-            "https://cdn.example.com/a/video.mp4?token=one",
-            "video.mp4",
-            "different-bookmark-item-id"
-        )
-        assertEquals("One canonical URL must use one file identity across bookmarks", first, sameAssetFromAnotherBookmark)
-    }
-
-    @Test
-    fun queueIdentityUsesSha256AndCanonicalTrackingNormalization() {
-        val first = "https://example.com/Aa"
-        val second = "https://example.com/BB"
-        assertEquals("Test inputs deliberately collide under 32-bit String.hashCode", first.hashCode(), second.hashCode())
-        assertNotEquals(
-            "Distinct canonical media URLs must not share a WorkManager unique name",
-            DownloadQueueManager.uniqueWorkNameForUrl(first),
-            DownloadQueueManager.uniqueWorkNameForUrl(second)
-        )
-        assertEquals(
-            "Tracking-only URL differences should share one canonical work identity",
-            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4?utm_source=one"),
-            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4?utm_source=two")
-        )
-        assertNotEquals(
-            "Audio-only and video downloads for the same URL must not alias the same worker",
-            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4", "audio"),
-            DownloadQueueManager.uniqueWorkNameForUrl("https://cdn.example.com/video.mp4")
-        )
-        assertEquals(
-            "Retries must not append a duplicate media-mode suffix",
-            "media_audio",
-            DownloadQueueManager.requestItemIdForMode("media_audio", "audio")
-        )
-        assertEquals("media_audio", DownloadQueueManager.requestItemIdForMode("media", "audio"))
-    }
-
-    @Test
-    fun contentRangeParserRejectsMissingOrMalformedHeaders() {
-        val valid = OkHttpDownloader.parseContentRangeHeader("bytes 5-9/10")
-        assertNotNull(valid)
-        assertEquals(5L, valid?.start)
-        assertEquals(9L, valid?.end)
-        assertEquals(10L, valid?.total)
-
-        assertNull(OkHttpDownloader.parseContentRangeHeader(null))
-        val unknownTotal = OkHttpDownloader.parseContentRangeHeader("bytes 5-9/*")
-        assertNotNull("A wildcard total is syntactically valid but not committable", unknownTotal)
-        assertNull(unknownTotal?.total)
-        assertNull(OkHttpDownloader.parseContentRangeHeader("bytes 9-5/10"))
-        assertNull(OkHttpDownloader.parseContentRangeHeader("bytes 5-10/10"))
-        assertNull(OkHttpDownloader.parseContentRangeHeader("5-9/10"))
-    }
-
-    @Test
-    fun workerPreservesAudioOnlyAndRequiresYoutubeVideoAudioTrack() {
-        assertEquals("audio", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = true, isStream = false))
-        assertEquals("video", MediaDownloadWorker.resolveMediaMode(isVideo = true, isAudio = false, isStream = false))
-        assertEquals("best", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = false, isStream = true))
-        assertEquals("best", MediaDownloadWorker.resolveMediaMode(isVideo = false, isAudio = false, isStream = false))
-        assertEquals(
-            "audio",
-            MediaDownloadWorker.resolvePreferredMediaMode(
-                globalFormatMode = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.AUDIO_ONLY,
-                requestedOverride = null,
-                isVideo = true,
-                isAudio = false,
-                isStream = false
-            )
-        )
-        assertEquals(
-            "video",
-            MediaDownloadWorker.resolvePreferredMediaMode(
-                globalFormatMode = com.amresalehin.emregallery.data.preferences.DownloaderFormatMode.AUDIO_ONLY,
-                requestedOverride = "video",
-                isVideo = true,
-                isAudio = false,
-                isStream = false
-            )
-        )
-
-        val videoOnly = FfprobeMediaInfo(
-            format = "mp4",
-            durationSeconds = 12.0,
-            sizeBytes = 1024L,
-            bitrateKbps = 700L,
-            videoCodec = "H264",
-            resolution = "1280x720",
-            frameRate = 30.0,
-            audioCodec = null,
-            audioChannels = null,
-            sampleRateHz = null,
-            streamCount = 1,
-            rawMetadata = emptyMap()
-        )
-        val muxed = videoOnly.copy(
-            audioCodec = "AAC",
-            audioChannels = 2,
-            sampleRateHz = 48000,
-            streamCount = 2
-        )
-
-        assertNull(
-            MediaDownloadWorker.validateMediaStreams(
-                isVideo = true,
-                isAudio = false,
-                isStream = false,
-                requireAudioWithVideo = false,
-                mediaInfo = videoOnly
-            )
-        )
-        assertTrue(
-            MediaDownloadWorker.validateMediaStreams(
-                isVideo = true,
-                isAudio = false,
-                isStream = false,
-                requireAudioWithVideo = true,
-                mediaInfo = videoOnly
-            )?.contains("audio track") == true
-        )
-        assertNull(
-            MediaDownloadWorker.validateMediaStreams(
-                isVideo = true,
-                isAudio = false,
-                isStream = false,
-                requireAudioWithVideo = true,
-                mediaInfo = muxed
-            )
-        )
-        assertTrue(
-            MediaDownloadWorker.validateMediaStreams(
-                isVideo = false,
-                isAudio = true,
-                isStream = false,
-                requireAudioWithVideo = false,
-                mediaInfo = videoOnly
-            )?.contains("audio track") == true
-        )
-
-        val audioOnlyStream = videoOnly.copy(
-            videoCodec = null,
-            resolution = null,
-            audioCodec = "AAC",
-            audioChannels = 2,
-            sampleRateHz = 48000
-        )
-        assertNull(
-            "An audio-only HLS/DASH stream is valid even when the DOM model also has isVideo=true",
-            MediaDownloadWorker.validateMediaStreams(
-                isVideo = true,
-                isAudio = false,
-                isStream = true,
-                requireAudioWithVideo = false,
-                mediaInfo = audioOnlyStream
-            )
-        )
-    }
-
-    @Test
-    fun mockWebServerRejects206WithoutContentRange() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(206)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setBody(Buffer().write(ByteArray(8) { 0x22.toByte() }))
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = "invalid_range_test"
-            )
-            assertFalse("206 without Content-Range must not be committed", result.isSuccessful)
-            assertNull(result.file)
-            assertTrue(result.errorMessage?.contains("Content-Range") == true)
-        } finally {
-            server.shutdown()
-        }
-    }
 
     @Test
     fun destinationEnumContainsMediaInbox() {
@@ -409,16 +170,6 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun mediaClassifierTreatsGifvAsVideoNotAnimatedImage() {
-        val gifv = MediaClassifier.classify("https://i.imgur.com/example.gifv")
-        assertEquals(MediaCategory.VIDEOS, gifv.category)
-        assertEquals("MP4", gifv.format)
-        assertTrue(gifv.isVideo)
-        assertFalse(gifv.isAudio)
-        assertFalse(gifv.isStream)
-    }
-
-    @Test
     fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
         val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
         val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)
@@ -482,6 +233,53 @@ class MediaDownloaderTest {
         val resolvedProto = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(protoRelative)
         assertEquals("https://upload.wikimedia.org/wikipedia/commons/b/ba/Taj_Mahal-10_%28cropped%29.jpg", resolvedProto.mediaUrl)
         assertEquals("Taj_Mahal-10_(cropped).jpg", resolvedProto.cleanTitle)
+    }
+
+    @Test
+    fun testWikimediaTranscodedVideoResolvesToOriginalMasterFileAndDeduplicates() {
+        val masterUrl = "https://upload.wikimedia.org/wikipedia/commons/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm"
+        val transcode480p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.480p.vp9.webm"
+        val transcode240p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.240p.vp9.webm"
+
+        val resolved480 = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(transcode480p)
+        assertEquals(masterUrl, resolved480.mediaUrl)
+        assertEquals(transcode480p, resolved480.thumbnailUrl)
+        assertEquals("Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm", resolved480.cleanTitle)
+
+        // Deduplication keys for transcode variants and master file MUST be identical
+        val keyMaster = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(masterUrl)
+        val key480 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode480p)
+        val key240 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode240p)
+        assertEquals(keyMaster, key480)
+        assertEquals(keyMaster, key240)
+
+        // Deduplicate scraped items list merging DOM item with resolution hint and Network intercepted item
+        val domItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
+            id = "dom_1",
+            url = transcode240p,
+            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
+            isVideo = true,
+            resolutionHint = "250x141",
+            thumbnailUrl = transcode240p,
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Static HTML (DOM Scrape)")
+        )
+        val netItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
+            id = "net_1",
+            url = transcode480p,
+            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
+            isVideo = true,
+            resolutionHint = "Network",
+            thumbnailUrl = transcode480p,
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Browser Chromium (Network Intercept)")
+        )
+
+        val deduplicated = com.amresalehin.emregallery.data.MediaClassifier.deduplicateScrapedItems(listOf(domItem, netItem))
+        assertEquals(1, deduplicated.size)
+        val singleItem = deduplicated[0]
+        assertEquals(masterUrl, singleItem.url)
+        assertEquals("250x141", singleItem.resolutionHint)
+        assertTrue(singleItem.provenance.extractorEngine.contains("DOM Scrape"))
+        assertTrue(singleItem.provenance.extractorEngine.contains("Network Intercept"))
     }
 
     @Test
@@ -589,7 +387,7 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testGalleryDlEngineStatus() {
+    fun testGalleryDlEngineStatusAndSupportedSites() {
         val status = com.amresalehin.emregallery.data.GalleryDlEngine.getStatus()
         assertTrue(status.popularSites.isNotEmpty())
         assertTrue(status.popularSites.any { it.name == "Reddit" })
@@ -777,12 +575,8 @@ class MediaDownloaderTest {
         try {
             val context: Context = ApplicationProvider.getApplicationContext()
             val downloadId = "test_resumable_video"
-            val url = server.url("/video.mp4").toString()
-            val baseName = OkHttpDownloader.stableDownloadBaseName(url, "video.mp4", downloadId)
             val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$baseName.downloading")
-            val metaFile = File(targetDir, "$baseName.meta")
-            metaFile.writeText("etag=test-etag\nlast_modified=")
+            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
             tempFile.writeBytes(ByteArray(5) { 0x41.toByte() })
 
             server.enqueue(
@@ -794,6 +588,7 @@ class MediaDownloaderTest {
                     .setBody(Buffer().write(ByteArray(5) { 0x42.toByte() }))
             )
 
+            val url = server.url("/video.mp4").toString()
             val result = OkHttpDownloader.downloadMediaFileDetailed(
                 context = context,
                 mediaUrl = url,
@@ -820,12 +615,8 @@ class MediaDownloaderTest {
         try {
             val context: Context = ApplicationProvider.getApplicationContext()
             val downloadId = "test_fallback_video"
-            val url = server.url("/video.mp4").toString()
-            val baseName = OkHttpDownloader.stableDownloadBaseName(url, "video.mp4", downloadId)
             val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$baseName.downloading")
-            val metaFile = File(targetDir, "$baseName.meta")
-            metaFile.writeText("etag=test-etag\nlast_modified=")
+            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
             tempFile.writeBytes(ByteArray(8) { 0x55.toByte() })
 
             // Server ignores Range and returns HTTP 200 with full 10 bytes
@@ -837,6 +628,7 @@ class MediaDownloaderTest {
                     .setHeader("Content-Length", "10")
             )
 
+            val url = server.url("/video.mp4").toString()
             val result = OkHttpDownloader.downloadMediaFileDetailed(
                 context = context,
                 mediaUrl = url,
@@ -861,12 +653,8 @@ class MediaDownloaderTest {
         try {
             val context: Context = ApplicationProvider.getApplicationContext()
             val downloadId = "test_416_video"
-            val url = server.url("/video.mp4").toString()
-            val baseName = OkHttpDownloader.stableDownloadBaseName(url, "video.mp4", downloadId)
             val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$baseName.downloading")
-            val metaFile = File(targetDir, "$baseName.meta")
-            metaFile.writeText("etag=test-etag\nlast_modified=")
+            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
             tempFile.writeBytes(ByteArray(50) { 0x11.toByte() })
 
             // First request with Range fails with 416
@@ -884,6 +672,7 @@ class MediaDownloaderTest {
                     .setHeader("Content-Length", "10")
             )
 
+            val url = server.url("/video.mp4").toString()
             val result = OkHttpDownloader.downloadMediaFileDetailed(
                 context = context,
                 mediaUrl = url,
@@ -1171,12 +960,8 @@ class MediaDownloaderTest {
         try {
             val context: Context = ApplicationProvider.getApplicationContext()
             val downloadId = "test_mismatch_resume"
-            val url = server.url("/video.mp4").toString()
-            val baseName = OkHttpDownloader.stableDownloadBaseName(url, "video.mp4", downloadId)
             val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$baseName.downloading")
-            val metaFile = File(targetDir, "$baseName.meta")
-            metaFile.writeText("etag=test-etag\nlast_modified=")
+            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
             // Local file has 10 bytes
             tempFile.writeBytes(ByteArray(10) { 0x11.toByte() })
 
@@ -1197,6 +982,7 @@ class MediaDownloaderTest {
                     .setHeader("Content-Length", "20")
             )
 
+            val url = server.url("/video.mp4").toString()
             val result = OkHttpDownloader.downloadMediaFileDetailed(
                 context = context,
                 mediaUrl = url,
@@ -1220,12 +1006,8 @@ class MediaDownloaderTest {
         try {
             val context: Context = ApplicationProvider.getApplicationContext()
             val downloadId = "test_416_complete"
-            val url = server.url("/video.mp4").toString()
-            val baseName = OkHttpDownloader.stableDownloadBaseName(url, "video.mp4", downloadId)
             val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$baseName.downloading")
-            val metaFile = File(targetDir, "$baseName.meta")
-            metaFile.writeText("etag=test-etag\nlast_modified=")
+            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
             // Local file has full 30 bytes
             tempFile.writeBytes(ByteArray(30) { 0x44.toByte() })
 
@@ -1236,6 +1018,7 @@ class MediaDownloaderTest {
                     .setHeader("Content-Range", "bytes */30")
             )
 
+            val url = server.url("/video.mp4").toString()
             val result = OkHttpDownloader.downloadMediaFileDetailed(
                 context = context,
                 mediaUrl = url,
@@ -1737,15 +1520,15 @@ class MediaDownloaderTest {
 
     @Test
     fun testPlatformDetectionFromUrls() {
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://youtu.be/dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://instagram.com/reel/Cx123456/"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.tiktok.com/@user/video/1234567890"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://x.com/user/status/123456"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://twitter.com/user/status/123456"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://reddit.com/r/pics/comments/xyz123"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://pinterest.com/pin/123456789/"))
-        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.facebook.com/watch/?v=123456"))
+        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://youtu.be/dQw4w9WgXcQ"))
+        assertEquals(DetectedPlatform.INSTAGRAM, detectPlatform("https://instagram.com/reel/Cx123456/"))
+        assertEquals(DetectedPlatform.TIKTOK, detectPlatform("https://www.tiktok.com/@user/video/1234567890"))
+        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://x.com/user/status/123456"))
+        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://twitter.com/user/status/123456"))
+        assertEquals(DetectedPlatform.REDDIT, detectPlatform("https://reddit.com/r/pics/comments/xyz123"))
+        assertEquals(DetectedPlatform.PINTEREST, detectPlatform("https://pinterest.com/pin/123456789/"))
+        assertEquals(DetectedPlatform.FACEBOOK, detectPlatform("https://www.facebook.com/watch/?v=123456"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/videos/stream.m3u8"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/clip.mp4"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/photo.jpg"))
@@ -1925,7 +1708,308 @@ class MediaDownloaderTest {
 
         newFile.delete()
     }
+
+    @Test
+    fun testSection21And22FixesVerification() = runBlocking {
+        // 1. GalleryDlEngine preserves exact source ("yt-dlp" vs "gallery-dl")
+        val sampleJson = org.json.JSONObject(
+            """
+            {
+              "pageTitle": "Reddit Video Post",
+              "engine": "yt-dlp",
+              "items": [
+                {
+                  "id": "ytdlp_0_abc",
+                  "url": "https://www.reddit.com/r/videos/comments/123/clip/",
+                  "title": "clip.mp4",
+                  "category": "VIDEOS",
+                  "format": "MP4",
+                  "mimeType": "video/mp4",
+                  "isVideo": true,
+                  "source": "yt-dlp"
+                },
+                {
+                  "id": "gdl_1_def",
+                  "url": "https://i.redd.it/photo.jpg",
+                  "title": "photo.jpg",
+                  "category": "IMAGES",
+                  "format": "JPG",
+                  "mimeType": "image/jpeg",
+                  "isVideo": false,
+                  "source": "gallery-dl"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val (_, parsedItems) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(
+            sampleJson,
+            "https://www.reddit.com/r/videos/comments/123/clip/"
+        )
+        assertEquals(2, parsedItems.size)
+        assertEquals("yt-dlp", parsedItems[0].provenance.extractorEngine)
+        assertEquals("gallery-dl", parsedItems[1].provenance.extractorEngine)
+
+        // 2. YtDlpProvider.matchesSupportedHost covers Reddit, X/Twitter, and fb.watch
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://www.reddit.com/r/funny/comments/abc/vid/"))
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://v.redd.it/xyz987/DASH_720.mp4"))
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://redd.it/xyz987"))
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://x.com/user/status/123456"))
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://twitter.com/user/status/123456"))
+        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://fb.watch/abc123/"))
+
+        // 3. AndroidMediaMuxer resolves Reddit companion DASH audio URLs
+        val redditAudioCandidates = com.amresalehin.emregallery.data.AndroidMediaMuxer.tryResolveRedditAudioUrls(
+            "https://v.redd.it/k8m9n0p/DASH_1080.mp4?source=fallback"
+        )
+        assertTrue(redditAudioCandidates.contains("https://v.redd.it/k8m9n0p/DASH_AUDIO_128.mp4"))
+        assertTrue(redditAudioCandidates.contains("https://v.redd.it/k8m9n0p/DASH_audio.mp4"))
+        assertTrue(redditAudioCandidates.contains("https://v.redd.it/k8m9n0p/CMAF_AUDIO_128.mp4"))
+
+        // 4. DualMediaExtractor gates headless BrowserProvider when structured extractor succeeds
+        val ytdlpSuccess = com.amresalehin.emregallery.data.MediaExtractionResult(
+            items = listOf(parsedItems[0]),
+            pageTitle = "Reddit Video Post"
+        )
+        assertTrue(
+            com.amresalehin.emregallery.data.DualMediaExtractor.shouldSkipHeadlessBrowser(
+                targetUrl = "https://www.reddit.com/r/videos/comments/123/clip/",
+                isStructuredApplicable = true,
+                gdlResult = null,
+                ytdlpResult = ytdlpSuccess
+            )
+        )
+        assertFalse(
+            com.amresalehin.emregallery.data.DualMediaExtractor.shouldSkipHeadlessBrowser(
+                targetUrl = "https://www.reddit.com/r/videos/comments/123/clip/",
+                isStructuredApplicable = true,
+                gdlResult = null,
+                ytdlpResult = com.amresalehin.emregallery.data.MediaExtractionResult(emptyList())
+            )
+        )
+
+        // 5. MediaClassifier.deduplicationKey preserves itag and mime so video-only and audio-only streams do not collide
+        val videoStream = "https://rr1---sn.googlevideo.com/videoplayback?id=abc&itag=137&mime=video/mp4&range=0-1000"
+        val audioStream = "https://rr1---sn.googlevideo.com/videoplayback?id=abc&itag=140&mime=audio/mp4&range=0-1000"
+        val videoKey = MediaClassifier.deduplicationKey(videoStream)
+        val audioKey = MediaClassifier.deduplicationKey(audioStream)
+        org.junit.Assert.assertNotEquals("Video-only and audio-only streams must not share a deduplication key", videoKey, audioKey)
+
+        // 6. MediaCaptureEngine adaptive scroll uses instant behavior
+        val scrollScript = com.amresalehin.emregallery.data.MediaCaptureEngine.getAdaptiveScrollScript()
+        assertTrue(scrollScript.contains("behavior: 'instant'"))
+        assertFalse(scrollScript.contains("behavior: 'smooth'"))
+    }
+
+    @Test
+    fun testDimensionFallbackLabelsAndAudioViewerMimeTypes() {
+        // 1. formatScrapedMediaDimensionOrSize never returns "40 × 40"
+        val unknownImage = ScrapedMediaItem(
+            id = "img_unknown",
+            url = "https://example.com/assets/photo.jpg",
+            title = "photo.jpg",
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            mimeType = "image/jpeg",
+            resolutionHint = null,
+            sizeBytes = null,
+            source = "DOM"
+        )
+        val labelUnknown = com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(unknownImage)
+        org.junit.Assert.assertNotEquals("40 × 40", labelUnknown)
+        assertEquals("JPG", labelUnknown)
+
+        // Generic resolutionHint ("Network") with known sizeBytes falls back to formatted size
+        val sizedVideo = ScrapedMediaItem(
+            id = "vid_sized",
+            url = "https://example.com/video/clip.mp4",
+            title = "clip.mp4",
+            category = MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4",
+            isVideo = true,
+            resolutionHint = "Network",
+            sizeBytes = 2L * 1024L * 1024L,
+            source = "yt-dlp"
+        )
+        val labelSized = com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(sizedVideo)
+        assertEquals("2.0 MB", labelSized)
+
+        // Probed dynamic dimensions take priority
+        val dynamicMap = mapOf("img_unknown" to (1920 to 1080))
+        assertEquals(
+            "1920 × 1080",
+            com.amresalehin.emregallery.ui.formatScrapedMediaDimensionOrSize(unknownImage, dynamicMap)
+        )
+
+        // 2. MediaClassifier.resolveLocalMediaMimeType maps audio, video, and image files accurately
+        val mp3Class = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/song.mp3")
+        assertTrue(mp3Class.isAudio)
+        assertFalse(mp3Class.isVideo)
+        assertEquals("audio/mpeg", mp3Class.mimeType)
+        assertEquals("MP3", mp3Class.format)
+
+        val m4aClass = MediaClassifier.resolveLocalMediaMimeType("file:///data/user/0/pkg/files/track.m4a")
+        assertTrue(m4aClass.isAudio)
+        assertEquals("audio/mp4", m4aClass.mimeType)
+
+        val opusClass = MediaClassifier.resolveLocalMediaMimeType("voice_note.opus")
+        assertTrue(opusClass.isAudio)
+        assertEquals("audio/opus", opusClass.mimeType)
+
+        val flacClass = MediaClassifier.resolveLocalMediaMimeType("lossless.flac")
+        assertTrue(flacClass.isAudio)
+        assertEquals("audio/flac", flacClass.mimeType)
+
+        val mp4Class = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/movie.mp4")
+        assertTrue(mp4Class.isVideo)
+        assertFalse(mp4Class.isAudio)
+        assertEquals("video/mp4", mp4Class.mimeType)
+
+        val webpClass = MediaClassifier.resolveLocalMediaMimeType("/storage/emulated/0/Download/cover.webp")
+        assertFalse(webpClass.isVideo)
+        assertFalse(webpClass.isAudio)
+        assertEquals("image/webp", webpClass.mimeType)
+
+        assertTrue(MediaClassifier.isAudioMimeOrUri("image/*", "/data/downloads/podcast.mp3"))
+        assertTrue(MediaClassifier.isAudioMimeOrUri("audio/mp4", "/data/downloads/unknown_file"))
+        assertFalse(MediaClassifier.isAudioMimeOrUri("video/mp4", "/data/downloads/video.mp4"))
+    }
+
+    @Test
+    fun testReleaseProguardKeepBridges() {
+        // Verify PythonProgressBridge, AndroidMediaMuxer, and EmreMediaBridge carry @Keep for R8/ProGuard safety
+        assertTrue(
+            com.amresalehin.emregallery.data.PythonProgressBridge::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+        assertTrue(
+            com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+        assertTrue(
+            com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java
+                .isAnnotationPresent(androidx.annotation.Keep::class.java)
+        )
+    }
+
+    @Test
+    fun testDownloaderPreferencesAndSubfolderResolution() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = PreferencesRepository(context)
+
+        // 1. Video Quality Cap & Audio-Only persistence
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q720P)
+        prefs.setAudioOnlyMode(true)
+        assertEquals(
+            com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q720P,
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context)
+        )
+        assertTrue(com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isAudioOnlySync(context))
+
+        // 2. Subfolder organization modes (FLAT, BY_DOMAIN, BY_STACK)
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
+        assertNull(
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips"
+            )
+        )
+
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.BY_DOMAIN)
+        assertEquals(
+            "reddit.com",
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips"
+            )
+        )
+
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.BY_STACK)
+        assertEquals(
+            "Funny Clips",
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
+                context,
+                sourceDomain = "www.reddit.com",
+                stackTitle = "Funny Clips!"
+            )
+        )
+
+        // 3. Wi-Fi Only constraint toggles WorkManager NetworkType between CONNECTED and UNMETERED
+        prefs.setWifiOnlyDownloads(false)
+        assertEquals(
+            androidx.work.NetworkType.CONNECTED,
+            com.amresalehin.emregallery.data.DownloadQueueManager.buildNetworkConstraints(context).requiredNetworkType
+        )
+        prefs.setWifiOnlyDownloads(true)
+        assertEquals(
+            androidx.work.NetworkType.UNMETERED,
+            com.amresalehin.emregallery.data.DownloadQueueManager.buildNetworkConstraints(context).requiredNetworkType
+        )
+
+        // 4. 8K (4320p), 4K (2160p), and 2K (1440p) quality caps and AndroidMediaMuxer container selection
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q8K)
+        assertEquals(4320, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q4K)
+        assertEquals(2160, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.Q2K)
+        assertEquals(1440, com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getVideoQualityCapSync(context).maxHeight)
+
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/x-vnd.on2.vp9", "audio/opus")
+        )
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/hevc", "audio/mp4a-latm")
+        )
+        assertEquals(
+            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            com.amresalehin.emregallery.data.AndroidMediaMuxer.resolveMuxerOutputFormat("video/av01", "audio/mp4a-latm")
+        )
+        assertTrue(com.amresalehin.emregallery.data.AndroidMediaMuxer.DEFAULT_BUFFER_SIZE >= 8 * 1024 * 1024)
+
+        // 5. Audio-Only filename rewriting & GalleryDlOptions extraction preference propagation
+        assertEquals(
+            "concert_4k.m4a",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("concert_4k.mp4", audioOnly = true, preferredAudioFormat = "M4A")
+        )
+        assertEquals(
+            "podcast_clip.opus",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("podcast_clip.webm", audioOnly = true, preferredAudioFormat = "OPUS")
+        )
+        assertEquals(
+            "song_track.mp3",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("song_track.mp3", audioOnly = true, preferredAudioFormat = "M4A")
+        )
+        assertEquals(
+            "concert_4k.mp4",
+            com.amresalehin.emregallery.data.GalleryDlEngine.resolveDownloadFileName("concert_4k.mp4", audioOnly = false, preferredAudioFormat = "M4A")
+        )
+
+        prefs.setPreferredAudioFormat("OPUS")
+        assertEquals(
+            "OPUS",
+            com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getPreferredAudioFormatSync(context)
+        )
+        val dlOpts = com.amresalehin.emregallery.data.GalleryDlOptions(
+            maxHeight = 2160,
+            audioOnly = true,
+            preferredAudioFormat = "OPUS"
+        )
+        assertEquals(2160, dlOpts.maxHeight)
+        assertTrue(dlOpts.audioOnly)
+        assertEquals("OPUS", dlOpts.preferredAudioFormat)
+
+        // Reset defaults
+        prefs.setPreferredAudioFormat("M4A")
+        prefs.setWifiOnlyDownloads(false)
+        prefs.setAudioOnlyMode(false)
+        prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
+        prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST)
+    }
 }
-
-
-

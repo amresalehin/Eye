@@ -1,15 +1,11 @@
 package com.amresalehin.emregallery.ui
 
 import android.app.Activity
-import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewConfiguration
-import android.widget.Toast
-import androidx.core.content.FileProvider
-import com.amresalehin.emregallery.data.LockedVaultManager
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -50,7 +46,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -131,10 +126,15 @@ fun ViewerScreen(
     // Switching videos retains user's paused or playing intent.
     var sessionPlayIntent by remember { mutableStateOf(true) }
 
-    // Video playback management with intent continuity
+    val isAudioItem = remember(item.uri, item.name, item.mimeType) {
+        com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(item.mimeType, item.name.ifBlank { item.uri })
+    }
+    val isPlayableMedia = item.isVideo || isAudioItem
+
+    // Video & Audio playback management with intent continuity
     val videoState = rememberViewerVideoState(
         uri = item.uri,
-        isVideo = item.isVideo,
+        isVideo = isPlayableMedia,
         showControls = showControls,
         sessionPlayIntent = sessionPlayIntent,
         onPlayIntentChange = { sessionPlayIntent = it }
@@ -306,7 +306,10 @@ fun ViewerScreen(
     if (isStoryMode) {
         val currentMediaList = currentStoryItems
         val currentActiveItem = currentMediaList.getOrNull(pagerState.currentPage) ?: item
-        val isCurrentItemVideo = currentActiveItem.isVideo
+        val isCurrentItemVideo = currentActiveItem.isVideo || com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(
+            currentActiveItem.mimeType,
+            currentActiveItem.name.ifBlank { currentActiveItem.uri }
+        )
         val isPaused = isStoryHolding || showDetails || showMore || confirmMoveToBin || confirmPermanentDelete || isCurrentZoomed || isClosing || showEndOfStory || (isCurrentItemVideo && !videoState.isPlaying)
 
         LaunchedEffect(
@@ -358,8 +361,7 @@ fun ViewerScreen(
     }
 
     val shareMedia: () -> Unit = {
-        val current = (if (isStoryMode) currentStoryItems else items).getOrNull(pagerState.currentPage) ?: item
-        shareMediaItem(context, current)
+        shareMediaItem(context, item)
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -452,9 +454,7 @@ fun ViewerScreen(
                 flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
                 userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && !showDetails && !isClosing && transitionProgress.value >= 0.99f,
                 pageSpacing = 16.dp,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(if (showDetails) 16.dp else 0.dp),
+                modifier = Modifier.fillMaxSize(),
                 key = { pageIndex ->
                     val activeList = if (isStoryMode) currentStoryItems else items
                     val uri = activeList.getOrNull(pageIndex)?.uri ?: pageIndex.toString()
@@ -466,11 +466,18 @@ fun ViewerScreen(
                 val isCurrent = pageIndex == pagerState.currentPage
                 val currentBounds = if (isCurrent) (targetBounds ?: ThumbnailBoundsTracker.getBounds(currentItem.uri)) else null
 
+                val isCurrentAudio = com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(
+                    currentItem.mimeType,
+                    currentItem.name.ifBlank { currentItem.uri }
+                )
+                val isCurrentPlayable = currentItem.isVideo || isCurrentAudio
+
                 ZoomableMediaItem(
                     item = currentItem,
                     isCurrentPage = isCurrent,
-                    isVideo = currentItem.isVideo,
-                    videoState = if (currentItem.isVideo && currentItem.uri == item.uri) videoState else null,
+                    isVideo = isCurrentPlayable,
+                    isAudio = isCurrentAudio,
+                    videoState = if (isCurrentPlayable && currentItem.uri == item.uri) videoState else null,
                     touchSlop = viewConfig.scaledTouchSlop.toFloat(),
                     minFlingVelocity = minFlingVelocity,
                     onToggleControls = {
@@ -633,7 +640,7 @@ fun ViewerScreen(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (item.isVideo) {
+                    if (isPlayableMedia) {
                         VideoPlayerControlsBar(
                             videoState = videoState,
                             modifier = Modifier
@@ -803,6 +810,7 @@ private fun ZoomableMediaItem(
     item: MediaItem,
     isCurrentPage: Boolean,
     isVideo: Boolean,
+    isAudio: Boolean = false,
     videoState: ViewerVideoState?,
     touchSlop: Float,
     minFlingVelocity: Float,
@@ -1183,25 +1191,60 @@ private fun ZoomableMediaItem(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = item.name,
-                        onSuccess = { state ->
-                            val d = state.result.drawable
-                            val w = if (d.intrinsicWidth > 0) d.intrinsicWidth.toFloat() else state.painter.intrinsicSize.width
-                            val h = if (d.intrinsicHeight > 0) d.intrinsicHeight.toFloat() else state.painter.intrinsicSize.height
-                            if (w > 0f && h > 0f && !w.isNaN() && !h.isNaN()) {
-                                intrinsicWidth = w.roundToInt()
-                                intrinsicHeight = h.roundToInt()
+                    if (isAudio) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    tonalElevation = 4.dp,
+                                    modifier = Modifier.size(120.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Audiotrack,
+                                            contentDescription = item.name,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(56.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 2
+                                )
                             }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
+                        }
+                    } else {
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = item.name,
+                            onSuccess = { state ->
+                                val d = state.result.drawable
+                                val w = if (d.intrinsicWidth > 0) d.intrinsicWidth.toFloat() else state.painter.intrinsicSize.width
+                                val h = if (d.intrinsicHeight > 0) d.intrinsicHeight.toFloat() else state.painter.intrinsicSize.height
+                                if (w > 0f && h > 0f && !w.isNaN() && !h.isNaN()) {
+                                    intrinsicWidth = w.roundToInt()
+                                    intrinsicHeight = h.roundToInt()
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
 
-                    // Video Surface when current item is a video
-                    if (isVideo && videoState != null) {
-                        VideoPlayerSurface(videoState = videoState)
+                        // Video Surface when current item is a video
+                        if (isVideo && videoState != null) {
+                            VideoPlayerSurface(videoState = videoState)
+                        }
                     }
                 }
             }
@@ -1240,30 +1283,16 @@ private fun Context.findActivity(): Activity? {
 }
 
 private fun shareMediaItem(context: Context, item: MediaItem) {
-    if (item.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, item.uri)) {
-        Toast.makeText(context, "Move out of Locked folder to share", Toast.LENGTH_SHORT).show()
-        return
-    }
     runCatching {
-        val rawUri = Uri.parse(item.uri)
-        val parsedUri = if (rawUri.scheme == "file" && rawUri.path != null) {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(rawUri.path!!))
-        } else {
-            rawUri
-        }
-        val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
-            putExtra(Intent.EXTRA_STREAM, parsedUri)
-            clipData = ClipData.newUri(context.contentResolver, item.name, parsedUri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        val chooser = Intent.createChooser(sendIntent, "Share media").apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (context !is Activity) {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-        context.startActivity(chooser)
+        context.startActivity(
+            Intent.createChooser(
+                Intent(Intent.ACTION_SEND).apply {
+                    type = item.mimeType ?: com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(item.name.ifBlank { item.uri }).mimeType
+                    putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                },
+                "Share media"
+            )
+        )
     }
 }

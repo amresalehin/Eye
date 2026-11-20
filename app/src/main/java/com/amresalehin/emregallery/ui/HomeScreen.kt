@@ -9,9 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -75,10 +73,6 @@ fun HomeScreen(
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
-    archiveCount: Int = 0,
-    onOpenArchive: (() -> Unit)? = null,
-    precomputedGroups: List<DayGroup>? = null,
-    precomputedStories: List<StoryGroup>? = null,
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -116,27 +110,28 @@ fun HomeScreen(
         return
     }
 
-    val sortedMedia = if (precomputedGroups != null) {
-        media
-    } else {
-        remember(media, sortOrder) {
-            sortMediaItems(media, sortOrder)
+    val sortedMedia = remember(media, sortOrder) {
+        when (sortOrder) {
+            "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
+            "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
+            "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
+            "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
+            "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
+            "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
+            "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
+            else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
         }
     }
 
-    val groups = precomputedGroups ?: remember(sortedMedia, groupBy) {
-        val dayGroups = groupMediaByDay(sortedMedia)
-        if (groupBy == "day") {
-            dayGroups
-        } else {
-            when (groupBy) {
-                "month" -> groupMediaByMonth(sortedMedia)
-                "year" -> groupMediaByYear(sortedMedia)
-                "folder" -> groupMediaByFolder(sortedMedia)
-                "initial" -> groupMediaByInitial(sortedMedia)
-                "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-                else -> dayGroups
-            }
+    val groups = remember(sortedMedia, groupBy) {
+        when (groupBy) {
+            "day" -> groupMediaByDay(sortedMedia)
+            "month" -> groupMediaByMonth(sortedMedia)
+            "year" -> groupMediaByYear(sortedMedia)
+            "folder" -> groupMediaByFolder(sortedMedia)
+            "initial" -> groupMediaByInitial(sortedMedia)
+            "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+            else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
         }
     }
 
@@ -362,34 +357,40 @@ fun HomeScreen(
                 }
             }
 
-            if (sortedMedia.isEmpty()) {
-                if (!loading) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 48.dp, horizontal = 24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (albumTitle != null) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.height(12.dp))
-                                    Text("No photos in this album", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                                    Spacer(Modifier.height(6.dp))
-                                    Text("Add photos from your gallery to populate this album.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    if (onAddPhotosToAlbum != null) {
-                                        Spacer(Modifier.height(16.dp))
-                                        Button(onClick = onAddPhotosToAlbum) {
-                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
-                                            Spacer(Modifier.width(6.dp))
-                                            Text("Add photos")
-                                        }
+            if (loading && sortedMedia.isEmpty()) {
+                item {
+                    HomeScreenSkeleton(
+                        gridColumns = pinchGridColumns,
+                        gridStyle = gridStyle,
+                        showMemories = albumTitle == null
+                    )
+                }
+            } else if (sortedMedia.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp, horizontal = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (albumTitle != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(12.dp))
+                                Text("No photos in this album", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Add photos from your gallery to populate this album.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                if (onAddPhotosToAlbum != null) {
+                                    Spacer(Modifier.height(16.dp))
+                                    Button(onClick = onAddPhotosToAlbum) {
+                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Add photos")
                                     }
                                 }
-                            } else {
-                                Text("No photos or videos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                        } else {
+                            Text("No photos or videos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -398,11 +399,12 @@ fun HomeScreen(
                     item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    item(key = "memories_strip") {
-                        MemoriesStrip(
-                            media = sortedMedia,
-                            precomputedStories = precomputedStories,
-                            onOpenMemory = onOpenMemory
+                    item { MemoriesStrip(sortedMedia, onOpenMemory) }
+                    item {
+                        HorizontalDivider(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            thickness = 1.dp
                         )
                     }
                 }

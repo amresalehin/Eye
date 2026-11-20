@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.emregallery.xytkpq"
+        applicationId = "com.amresalehin.emregallery"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -18,11 +18,11 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
-        resourceConfigurations += listOf("en")
     }
 
     buildTypes {
         debug {
+            // Debug build configuration
         }
         release {
             isMinifyEnabled = true
@@ -34,7 +34,6 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += listOf("**/libc++_shared.so")
         }
         resources {
             excludes += listOf(
@@ -44,10 +43,7 @@ android {
                 "/META-INF/DEPENDENCIES",
                 "/META-INF/LICENSE*",
                 "/META-INF/NOTICE*",
-                "/META-INF/*.version",
-                "/META-INF/*.md",
-                "/META-INF/*.txt",
-                "/*.properties"
+                "/META-INF/*.version"
             )
         }
     }
@@ -98,13 +94,10 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Native FFmpeg and FFprobe multimedia processing kit
-    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
-    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
@@ -114,11 +107,10 @@ dependencies {
 
 chaquopy {
     defaultConfig {
-        version = "3.11"
+        version = "3.10"
         pip {
-            install("gallery-dl==1.32.20")
-            install("yt-dlp>=2026.8.19,<2027.0")
-            install("instaloader==4.16")
+            install("gallery-dl")
+            install("yt-dlp")
         }
     }
 }

@@ -413,12 +413,6 @@ fun ViewerDetailsDrawer(
         }
     }
 
-    val handleRemoveTag: (String) -> Unit = { tagToRemove ->
-        coroutineScope.launch {
-            com.amresalehin.emregallery.data.PreferencesRepository(context).removeTagForMedia(item.uri, tagToRemove)
-        }
-    }
-
     val overviewListState = rememberLazyListState()
     val actionsListState = rememberLazyListState()
 
@@ -469,7 +463,6 @@ fun ViewerDetailsDrawer(
                             onAddToAlbum = onAddTo,
                             onAddTag = { showAddTagDialog = true },
                             onEditLocation = { showAddLocationDialog = true },
-                            onRemoveTag = handleRemoveTag,
                             listState = overviewListState,
                             faceUiState = faceUiState,
                             selectedEngineId = selectedDrawerEngineId,
@@ -558,8 +551,6 @@ fun ViewerDetailsDrawer(
                             detailsState = detailsState,
                             onRenameFaceClick = { renamingFace = it },
                             onRescanPhoto = { startScan(false) },
-                            onAddTagClick = { showAddTagDialog = true },
-                            onRemoveTag = handleRemoveTag,
                             listState = actionsListState
                         )
                     }

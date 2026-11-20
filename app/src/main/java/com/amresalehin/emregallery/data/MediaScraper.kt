@@ -38,15 +38,8 @@ data class ScrapedMediaItem(
     val provenance: MediaProvenance = MediaProvenance(extractorEngine = source),
     val metadata: Map<String, String> = emptyMap(),
     val downloadHeaders: Map<String, String> = emptyMap(),
-    val detectedAt: Long = System.currentTimeMillis(),
-    val width: Int? = null,
-    val height: Int? = null
-) {
-    val isSubtitle: Boolean
-        get() = category == MediaCategory.SUBTITLES
-    val isOtherFile: Boolean
-        get() = category == MediaCategory.FILES
-}
+    val detectedAt: Long = System.currentTimeMillis()
+)
 
 data class ScrapeResult(
     val sourceUrl: String,

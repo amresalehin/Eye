@@ -4,7 +4,6 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.os.Build
 import android.util.Log
 import androidx.annotation.Keep
 import java.io.File
@@ -25,37 +24,17 @@ object AndroidMediaMuxer {
 
     /**
      * Determines the appropriate [MediaMuxer.OutputFormat] based on the video and audio MIME types.
-     * Strictly checks video codec compatibility first because MUXER_OUTPUT_WEBM only accepts VP8/VP9 video.
      */
     @JvmStatic
     fun resolveMuxerOutputFormat(videoMime: String?, audioMime: String?): Int {
         val v = videoMime?.lowercase(Locale.ROOT).orEmpty()
         val a = audioMime?.lowercase(Locale.ROOT).orEmpty()
         val isWebmVideo = v.contains("vp9") || v.contains("vp8") || v.contains("x-vnd.on2")
-        val isMp4OnlyVideo = v.contains("avc") || v.contains("hevc") || v.contains("dolby-vision") || v.contains("mp4v") || v.contains("av01")
         val isWebmAudio = a.contains("opus") || a.contains("vorbis")
-        return when {
-            isWebmVideo -> MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
-            isMp4OnlyVideo -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-            isWebmAudio -> MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
-            else -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-        }
-    }
-
-    /**
-     * Checks whether the given video and audio MIME types can be muxed together by Android's native [MediaMuxer].
-     */
-    @JvmStatic
-    fun areTracksMuxable(videoMime: String?, audioMime: String?): Boolean {
-        val v = videoMime?.lowercase(Locale.ROOT).orEmpty()
-        val a = audioMime?.lowercase(Locale.ROOT).orEmpty()
-        val isWebmVideo = v.contains("vp9") || v.contains("vp8") || v.contains("x-vnd.on2")
-        val isWebmAudio = a.contains("opus") || a.contains("vorbis")
-        val isMp4Audio = a.contains("mp4a") || a.contains("aac") || (a.contains("opus") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-        return if (isWebmVideo) {
-            isWebmAudio
+        return if (isWebmVideo || isWebmAudio) {
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
         } else {
-            isMp4Audio
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
         }
     }
 
@@ -171,11 +150,6 @@ object AndroidMediaMuxer {
 
             if (videoTrackIndex < 0 || videoFormat == null || audioTrackIndex < 0 || audioFormat == null) {
                 Log.w(TAG, "Could not find valid video ($videoTrackIndex) or audio ($audioTrackIndex) tracks for muxing")
-                return false
-            }
-
-            if (!areTracksMuxable(videoMime, audioMime)) {
-                Log.w(TAG, "Incompatible video ($videoMime) and audio ($audioMime) tracks for Android MediaMuxer")
                 return false
             }
 

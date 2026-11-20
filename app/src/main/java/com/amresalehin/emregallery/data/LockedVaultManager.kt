@@ -12,23 +12,18 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class VaultLockResult(
-    val lockedItems: List<MediaItem>,
-    val pendingDeleteUris: List<String>
-)
-
 class LockedVaultManager(private val context: Context) {
 
-    private val vaultDir: File = File(context.filesDir, VAULT_DIR_NAME).apply {
+    private val vaultDir: File = File(context.filesDir, "locked_vault").apply {
         if (!exists()) mkdirs()
     }
 
-    private val encryptedMetaFile: File = File(vaultDir, "vault_metadata.json.enc")
-    private val legacyMetaFile: File = File(vaultDir, "vault_metadata.json")
+    private val metaFile: File = File(vaultDir, "vault_metadata.json")
 
     fun getVaultItems(): List<MediaItem> {
-        val jsonStr = readMetadataJson() ?: return emptyList()
+        if (!metaFile.exists()) return emptyList()
         return try {
+            val jsonStr = metaFile.readText()
             val array = JSONArray(jsonStr)
             val list = mutableListOf<MediaItem>()
             for (i in 0 until array.length()) {
@@ -36,7 +31,6 @@ class LockedVaultManager(private val context: Context) {
                 val uriStr = obj.getString("uri")
                 val file = File(Uri.parse(uriStr).path ?: "")
                 if (file.exists()) {
-                    val actualSize = VaultCrypto.getVaultFilePlaintextLength(file)
                     list.add(
                         MediaItem(
                             id = obj.getLong("id"),
@@ -45,7 +39,7 @@ class LockedVaultManager(private val context: Context) {
                             mimeType = if (obj.has("mimeType") && !obj.isNull("mimeType")) obj.getString("mimeType") else null,
                             dateAddedSeconds = obj.optLong("dateAddedSeconds", System.currentTimeMillis() / 1000L),
                             dateTakenMillis = obj.optLong("dateTakenMillis", 0L),
-                            sizeBytes = actualSize,
+                            sizeBytes = file.length(),
                             width = obj.optInt("width", 0),
                             height = obj.optInt("height", 0),
                             relativePath = "Locked",
@@ -57,30 +51,9 @@ class LockedVaultManager(private val context: Context) {
                 }
             }
             list.sortedByDescending { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             emptyList()
         }
-    }
-
-    private fun readMetadataJson(): String? {
-        if (encryptedMetaFile.exists()) {
-            return runCatching {
-                val raw = encryptedMetaFile.readBytes()
-                String(VaultCrypto.decryptBytes(raw), Charsets.UTF_8)
-            }.getOrNull()
-        }
-        if (legacyMetaFile.exists()) {
-            val legacyJson = runCatching { legacyMetaFile.readText() }.getOrNull()
-            if (!legacyJson.isNullOrBlank()) {
-                runCatching {
-                    val encrypted = VaultCrypto.encryptBytes(legacyJson.toByteArray(Charsets.UTF_8))
-                    encryptedMetaFile.writeBytes(encrypted)
-                    legacyMetaFile.delete()
-                }
-            }
-            return legacyJson
-        }
-        return null
     }
 
     private fun saveVaultItems(items: List<MediaItem>) {
@@ -100,50 +73,43 @@ class LockedVaultManager(private val context: Context) {
             }
             array.put(obj)
         }
-        val encrypted = VaultCrypto.encryptBytes(array.toString().toByteArray(Charsets.UTF_8))
-        encryptedMetaFile.writeBytes(encrypted)
-        if (legacyMetaFile.exists()) {
-            legacyMetaFile.delete()
-        }
+        metaFile.writeText(array.toString())
     }
 
     /**
-     * Encrypts and copies media from mainline storage into app-private locked vault,
-     * deleting the original file from MediaStore when allowed (and returning any URIs
-     * requiring user confirmation via MediaStore.createDeleteRequest on Android 11+).
+     * Copies media from mainline storage into app-private locked vault
+     * and deletes the original file from mainline storage (MediaStore).
      */
-    suspend fun lockItemsWithPendingDeletes(items: List<MediaItem>): VaultLockResult = withContext(Dispatchers.IO) {
+    suspend fun lockItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
         val currentVaultItems = getVaultItems().toMutableList()
         val lockedList = mutableListOf<MediaItem>()
-        val pendingDeletes = mutableListOf<String>()
 
         for (item in items) {
             try {
                 val safeName = item.name.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
-                val destFile = File(vaultDir, "vault_${item.id}_${safeName}.enc")
+                val destFile = File(vaultDir, "vault_${item.id}_$safeName")
                 val srcUri = Uri.parse(item.uri)
 
+                // Copy stream to isolated vault file
                 context.contentResolver.openInputStream(srcUri)?.use { input ->
-                    VaultCrypto.encryptStreamToFile(input, destFile)
+                    destFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
                 }
 
-                if (destFile.exists() && destFile.length() > VaultCrypto.HEADER_SIZE) {
-                    val plaintextSize = VaultCrypto.getVaultFilePlaintextLength(destFile)
+                if (destFile.exists() && destFile.length() > 0) {
                     val lockedItem = item.copy(
                         uri = Uri.fromFile(destFile).toString(),
                         relativePath = "Locked",
-                        sizeBytes = plaintextSize
+                        sizeBytes = destFile.length()
                     )
                     currentVaultItems.removeAll { it.id == item.id || it.uri == lockedItem.uri }
                     currentVaultItems.add(lockedItem)
                     lockedList.add(lockedItem)
 
-                    // Remove original from device mainline storage if app owns it; otherwise request user confirmation
-                    val deletedDirectly = runCatching {
-                        context.contentResolver.delete(srcUri, null, null) > 0
-                    }.getOrDefault(false)
-                    if (!deletedDirectly && item.uri.startsWith("content://")) {
-                        pendingDeletes.add(item.uri)
+                    // Remove original from device mainline storage
+                    runCatching {
+                        context.contentResolver.delete(srcUri, null, null)
                     }
                 }
             } catch (_: Exception) {
@@ -151,18 +117,11 @@ class LockedVaultManager(private val context: Context) {
         }
 
         saveVaultItems(currentVaultItems)
-        VaultLockResult(lockedItems = lockedList, pendingDeleteUris = pendingDeletes)
+        lockedList
     }
 
     /**
-     * Copies media from mainline storage into encrypted app-private locked vault
-     * and attempts to remove originals from mainline storage.
-     */
-    suspend fun lockItems(items: List<MediaItem>): List<MediaItem> =
-        lockItemsWithPendingDeletes(items).lockedItems
-
-    /**
-     * Restores media items back from locked vault to mainline storage, decrypting transparently.
+     * Restores media items back from locked vault to mainline storage
      */
     suspend fun unlockItems(items: List<MediaItem>): List<String> = withContext(Dispatchers.IO) {
         val currentVaultItems = getVaultItems().toMutableList()
@@ -190,19 +149,24 @@ class LockedVaultManager(private val context: Context) {
 
                 val insertedUri = context.contentResolver.insert(collection, cv)
                 if (insertedUri != null) {
-                    VaultCrypto.openDecryptedInputStream(srcFile).use { input ->
+                    var bytesCopied = 0L
+                    srcFile.inputStream().use { input ->
                         context.contentResolver.openOutputStream(insertedUri)?.use { output ->
-                            input.copyTo(output)
+                            bytesCopied = input.copyTo(output)
                         }
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        cv.clear()
-                        cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        context.contentResolver.update(insertedUri, cv, null, null)
+                    if (bytesCopied > 0L) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            cv.clear()
+                            cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            context.contentResolver.update(insertedUri, cv, null, null)
+                        }
+                        srcFile.delete()
+                        currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
+                        restoredUris.add(insertedUri.toString())
+                    } else {
+                        runCatching { context.contentResolver.delete(insertedUri, null, null) }
                     }
-                    srcFile.delete()
-                    currentVaultItems.removeAll { it.uri == item.uri || it.id == item.id }
-                    restoredUris.add(insertedUri.toString())
                 }
             } catch (_: Exception) {
             }
@@ -213,7 +177,7 @@ class LockedVaultManager(private val context: Context) {
     }
 
     /**
-     * Permanently deletes items from the locked vault.
+     * Permanently deletes items from the locked vault
      */
     suspend fun deletePermanently(items: List<MediaItem>) = withContext(Dispatchers.IO) {
         val currentVaultItems = getVaultItems().toMutableList()
@@ -226,22 +190,5 @@ class LockedVaultManager(private val context: Context) {
             }
         }
         saveVaultItems(currentVaultItems)
-    }
-
-    companion object {
-        private const val VAULT_DIR_NAME = "locked_vault"
-
-        fun isVaultFileUri(context: Context, uriString: String?): Boolean {
-            if (uriString.isNullOrBlank()) return false
-            val path = runCatching { Uri.parse(uriString).path }.getOrNull() ?: return false
-            return isVaultFile(context, File(path))
-        }
-
-        fun isVaultFile(context: Context, file: File): Boolean {
-            val vaultRoot = runCatching { File(context.filesDir, VAULT_DIR_NAME).canonicalPath }.getOrNull()
-                ?: return false
-            val targetPath = runCatching { file.canonicalPath }.getOrNull() ?: return false
-            return targetPath.startsWith(vaultRoot + File.separator) || targetPath == vaultRoot
-        }
     }
 }

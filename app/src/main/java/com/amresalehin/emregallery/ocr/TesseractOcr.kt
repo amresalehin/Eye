@@ -77,13 +77,6 @@ object TesseractOcr {
     fun hasCachedResult(context: Context, uri: Uri): Boolean =
         runCatching { cacheFile(context, uri).let { it.isFile && it.length() >= 0L } }.getOrDefault(false)
 
-    /** Returns true only when cached OCR output contains actual non-blank text (for Documents category). */
-    fun hasCachedNonEmptyText(context: Context, uri: Uri): Boolean =
-        runCatching {
-            val f = cacheFile(context, uri)
-            f.isFile && f.length() > 0L && f.readText(Charsets.UTF_8).isNotBlank()
-        }.getOrDefault(false)
-
     /** Returns previously recognized text for this media URI, or null if not cached. */
     fun readCachedResult(context: Context, uri: Uri): String? =
         runCatching {
@@ -231,71 +224,49 @@ object TesseractOcr {
         val bitmap = decodeBitmap(context, uri)
         val combinedLangs = validCodes.joinToString("+")
         val candidates = (listOf(combinedLangs) + validCodes + listOf("eng")).distinct()
-        val desiredCacheKey = "${baseDir.absolutePath}|$combinedLangs"
+        var activeEngine: TessBaseAPI? = null
+        var lastInitError: String? = null
         try {
-            synchronized(engineLock) {
-                var engine = if (cachedEngineKey == desiredCacheKey) cachedEngine else null
-                var lastInitError: String? = null
-                if (engine == null) {
-                    releaseCachedEngineLocked()
-                    for (candidate in candidates) {
-                        if (candidate.split("+").any { code ->
-                                val file = File(tessdataDir, "$code.traineddata")
-                                !file.isFile || file.length() < 1024
-                            }) {
-                            continue
-                        }
-                        val candidateEngine = TessBaseAPI()
-                        val initialized = runCatching {
-                            candidateEngine.init(
-                                baseDir.absolutePath,
-                                candidate,
-                                TessBaseAPI.OEM_LSTM_ONLY
-                            )
-                        }.onFailure { error ->
-                            lastInitError = error.message ?: error.javaClass.simpleName
-                        }.getOrDefault(false)
-                        if (initialized) {
-                            engine = candidateEngine
-                            cachedEngine = candidateEngine
-                            cachedEngineKey = desiredCacheKey
-                            break
-                        }
-                        candidateEngine.recycle()
-                    }
+            // Use a fresh native engine for every attempt. A failed init can leave
+            // the native instance unsuitable for another init call.
+            for (candidate in candidates) {
+                if (candidate.split("+").any { code ->
+                        val file = File(tessdataDir, "$code.traineddata")
+                        !file.isFile || file.length() < 1024
+                    }) {
+                    continue
                 }
-
-                val active = engine ?: error(
-                    "Tesseract could not load ${model.title} OCR data ($combinedLangs). " +
-                        "The model files may be missing or corrupted. " +
-                        (lastInitError?.let { "Details: $it. " } ?: "") +
-                        "Please verify language files in OCR Settings and try again."
-                )
-                active.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
-                active.setImage(bitmap)
-                val text = active.getUTF8Text().orEmpty().trim()
-                active.clear()
-                return text
+                val candidateEngine = TessBaseAPI()
+                val initialized = runCatching {
+                    // Both tessdata_fast and tessdata_best models are LSTM neural network models.
+                    // OEM_LSTM_ONLY instructs Tesseract to use the neural network engine.
+                    candidateEngine.init(
+                        baseDir.absolutePath,
+                        candidate,
+                        TessBaseAPI.OEM_LSTM_ONLY
+                    )
+                }.onFailure { error ->
+                    lastInitError = error.message ?: error.javaClass.simpleName
+                }.getOrDefault(false)
+                if (initialized) {
+                    activeEngine = candidateEngine
+                    break
+                }
+                candidateEngine.recycle()
             }
+
+            val engine = activeEngine ?: error(
+                "Tesseract could not load ${model.title} OCR data ($combinedLangs). " +
+                    "The model files may be missing or corrupted. " +
+                    (lastInitError?.let { "Details: $it. " } ?: "") +
+                    "Please verify language files in OCR Settings and try again."
+            )
+            engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
+            engine.setImage(bitmap)
+            return engine.getUTF8Text().orEmpty().trim()
         } finally {
+            activeEngine?.recycle()
             bitmap.recycle()
-        }
-    }
-
-    private val engineLock = Any()
-    private var cachedEngine: TessBaseAPI? = null
-    private var cachedEngineKey: String? = null
-
-    private fun releaseCachedEngineLocked() {
-        runCatching { cachedEngine?.recycle() }
-        cachedEngine = null
-        cachedEngineKey = null
-    }
-
-    /** Releases the cached native Tesseract instance (called under memory pressure). */
-    fun releaseCachedEngine() {
-        synchronized(engineLock) {
-            releaseCachedEngineLocked()
         }
     }
 

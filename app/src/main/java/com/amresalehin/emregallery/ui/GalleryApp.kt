@@ -1,14 +1,11 @@
 package com.amresalehin.emregallery.ui
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,18 +36,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
@@ -76,13 +67,8 @@ data class NavBackStackEntry(
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS,
-    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
-    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-    val inboxInitialOpenBrowser: Boolean = false,
-    val selectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-    val selectedBookmarkDeckIndex: Int = 0,
-    val selectedBookmarkFullScreenIndex: Int? = null,
-    val browserInitialUrl: String = ""
+    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -98,8 +84,6 @@ fun GalleryApp() {
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
-    var rawMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var galleryData by remember { mutableStateOf(ProcessedGalleryData()) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var lockedVaultItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
@@ -123,7 +107,7 @@ fun GalleryApp() {
     val inBin by prefs.bin.collectAsStateWithLifecycle(initialValue = emptySet())
     val archive by prefs.archive.collectAsStateWithLifecycle(initialValue = emptySet())
     val recentSearches by prefs.recentSearches.collectAsStateWithLifecycle(initialValue = emptyList())
-    val themePref by prefs.theme.collectAsStateWithLifecycle(initialValue = remember { prefs.getThemeSync() })
+    val themePref by prefs.theme.collectAsStateWithLifecycle(initialValue = "system")
     val customAlbums by prefs.customAlbums.collectAsStateWithLifecycle(initialValue = emptyList())
     val sortOrderPref by prefs.sortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
     val groupByPref by prefs.groupBy.collectAsStateWithLifecycle(initialValue = "day")
@@ -140,39 +124,8 @@ fun GalleryApp() {
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     val lockedFolderPinHash by prefs.lockedFolderPinHash.collectAsStateWithLifecycle(initialValue = null)
-    val lockedFolderLockoutUntilMs by prefs.lockedFolderLockoutUntilMs.collectAsStateWithLifecycle(initialValue = 0L)
     var isLockedFolderUnlocked by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val isViewingLockedItem = selectedMedia != null &&
-        (selectedMedia?.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, selectedMedia?.uri))
-    val isVaultSensitiveScreen = destination == Destination.LOCKED_FOLDER ||
-        (destination == Destination.VIEWER && isViewingLockedItem)
-
-    DisposableEffect(isVaultSensitiveScreen, context) {
-        val window = (context as? Activity)?.window
-        if (isVaultSensitiveScreen) {
-            window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } else {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
-    }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                isLockedFolderUnlocked = false
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
     val isWelcomeCompletedInit = remember { prefs.isWelcomeCompletedSync() }
     val hasCompletedWelcomeFlow by prefs.hasCompletedWelcome.collectAsStateWithLifecycle(initialValue = isWelcomeCompletedInit)
     val hasCompletedWelcome = hasCompletedWelcomeFlow || isWelcomeCompletedInit
@@ -180,14 +133,8 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
-    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.ACTIVITY_PAGE) }
+    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
-    var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
-    var selectedBookmarkDetailStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
-    var selectedBookmarkDeckIndex by remember { mutableIntStateOf(0) }
-    var selectedBookmarkFullScreenIndex by remember { mutableStateOf<Int?>(null) }
-    var browserInitialUrl by remember { mutableStateOf("") }
-    var isPocketDetailOpen by remember { mutableStateOf(false) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -195,32 +142,22 @@ fun GalleryApp() {
         scope.launch {
             if (userInitiated) {
                 isRefreshing = true
-            } else if (rawMedia.isEmpty()) {
+            } else {
                 loading = true
             }
             val startTime = System.currentTimeMillis()
-            launch(Dispatchers.IO) {
-                lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
-            }
+            lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
             if (hasMediaPermission(context)) {
-                runCatching {
-                    mediaRepository.loadMediaProgressive { batch, isComplete ->
-                        val processed = withContext(Dispatchers.Default) {
-                            val eligible = batch.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
-                            processGalleryMedia(eligible, sortOrderPref, groupByPref, isComplete)
-                        }
-                        rawMedia = batch
-                        media = batch
-                        galleryData = processed
-                        if (batch.isNotEmpty()) {
-                            loading = false
-                        }
-                        if (isComplete) {
-                            withContext(Dispatchers.Default) {
-                                ThumbnailPrewarmManager.start(context.applicationContext, batch)
-                            }
-                        }
-                    }
+                val loadedMedia = withContext(Dispatchers.IO) {
+                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
+                }
+                media = loadedMedia
+
+                // Start disk-backed preparation after permissions and the MediaStore list are ready.
+                // This worker is independent of composition and never holds the whole library in RAM.
+                withContext(Dispatchers.Default) {
+                    // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
+                    ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                 }
             }
             if (userInitiated) {
@@ -239,15 +176,6 @@ fun GalleryApp() {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
         }
         if (hasMediaPermission(context)) refreshMedia()
-    }
-    LaunchedEffect(sortOrderPref, groupByPref, hidden, inBin, archive) {
-        if (rawMedia.isNotEmpty()) {
-            val processed = withContext(Dispatchers.Default) {
-                val eligible = rawMedia.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
-                processGalleryMedia(eligible, sortOrderPref, groupByPref, galleryData.isComplete)
-            }
-            galleryData = processed
-        }
     }
     LaunchedEffect(media, hidden, inBin) {
         if (media.isNotEmpty()) {
@@ -290,6 +218,29 @@ fun GalleryApp() {
     fun permanentlyDelete(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val itemUris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                val deleted = withContext(Dispatchers.IO) {
+                    itemUris.filter { uri ->
+                        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) > 0 }.getOrDefault(false)
+                    }
+                }
+                if (deleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        FaceClusterStore(context).deleteMediaCompletely(deleted)
+                    }
+                    prefs.removePermanently(deleted)
+                    refreshMedia()
+                    snackbarHostState.showSnackbar(
+                        message = "${deleted.size} ${if (deleted.size == 1) "item" else "items"} permanently deleted",
+                        duration = SnackbarDuration.Short
+                    )
+                } else {
+                    snackbarHostState.showSnackbar("Permission denied: could not delete files")
+                }
+            }
+            return
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -349,6 +300,23 @@ fun GalleryApp() {
     fun restoreFromDeviceTrash(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val uris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cv = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 0)
+                    }
+                    withContext(Dispatchers.IO) {
+                        uris.forEach { u ->
+                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
+                        }
+                    }
+                }
+                prefs.setInBinBatch(uris.toSet(), false)
+                refreshMedia()
+            }
+            return
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -402,6 +370,32 @@ fun GalleryApp() {
     fun moveToDeviceTrash(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val uris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cv = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 1)
+                    }
+                    withContext(Dispatchers.IO) {
+                        uris.forEach { u ->
+                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
+                        }
+                    }
+                }
+                prefs.setInBinBatch(uris.toSet(), true)
+                prefs.setHiddenBatch(uris.toSet(), false)
+                refreshMedia()
+                val res = snackbarHostState.showSnackbar(
+                    message = if (uris.size == 1) "Moved to Bin" else "${uris.size} items moved to Bin",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    restoreFromDeviceTrash(items)
+                }
+            }
+            return
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val requestLaunched = runCatching {
@@ -437,23 +431,6 @@ fun GalleryApp() {
         }
     }
 
-    val vaultOriginDeleteLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { _ ->
-        refreshMedia()
-    }
-
-    fun requestVaultOriginDeletion(pendingUris: List<String>) {
-        if (pendingUris.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        runCatching {
-            val request = android.provider.MediaStore.createDeleteRequest(
-                context.contentResolver,
-                pendingUris.map { Uri.parse(it) }
-            )
-            vaultOriginDeleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-        }
-    }
-
     fun moveItemsToLocked(uris: Set<String>) {
         if (uris.isEmpty()) return
         if (lockedFolderPinHash.isNullOrBlank()) {
@@ -462,12 +439,10 @@ fun GalleryApp() {
             scope.launch {
                 val itemsToLock = media.filter { it.uri in uris }
                 if (itemsToLock.isNotEmpty()) {
-                    val lockResult = withContext(Dispatchers.IO) { lockedVaultManager.lockItemsWithPendingDeletes(itemsToLock) }
-                    val lockedList = lockResult.lockedItems
+                    val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(itemsToLock) }
                     lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
                     prefs.setHiddenBatch(uris, true)
                     refreshMedia()
-                    requestVaultOriginDeletion(lockResult.pendingDeleteUris)
                     val res = snackbarHostState.showSnackbar(
                         message = if (uris.size == 1) "Moved to Locked folder" else "${uris.size} items moved to Locked folder",
                         actionLabel = "Undo",
@@ -504,13 +479,8 @@ fun GalleryApp() {
         newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
         newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
         newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
-        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
-        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-        newInboxInitialOpenBrowser: Boolean = false,
-        newSelectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = selectedBookmarkDetailStack,
-        newSelectedBookmarkDeckIndex: Int = selectedBookmarkDeckIndex,
-        newSelectedBookmarkFullScreenIndex: Int? = selectedBookmarkFullScreenIndex,
-        newBrowserInitialUrl: String = ""
+        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -530,12 +500,7 @@ fun GalleryApp() {
                     albumFilter = albumFilter,
                     albumFilterReturnDestination = albumFilterReturnDestination,
                     inboxInitialViewMode = inboxInitialViewMode,
-                    inboxInitialStack = inboxInitialStack,
-                    inboxInitialOpenBrowser = inboxInitialOpenBrowser,
-                    selectedBookmarkDetailStack = selectedBookmarkDetailStack,
-                    selectedBookmarkDeckIndex = selectedBookmarkDeckIndex,
-                    selectedBookmarkFullScreenIndex = selectedBookmarkFullScreenIndex,
-                    browserInitialUrl = browserInitialUrl
+                    inboxInitialStack = inboxInitialStack
                 )
             )
             previousDestination = destination
@@ -549,12 +514,6 @@ fun GalleryApp() {
         currentStoryIndex = newCurrentStoryIndex
         inboxInitialViewMode = newInboxInitialViewMode
         inboxInitialStack = newInboxInitialStack
-        inboxInitialOpenBrowser = newInboxInitialOpenBrowser
-        selectedBookmarkDetailStack = newSelectedBookmarkDetailStack
-        selectedBookmarkDeckIndex = newSelectedBookmarkDeckIndex
-        selectedBookmarkFullScreenIndex = newSelectedBookmarkFullScreenIndex
-        browserInitialUrl = newBrowserInitialUrl
-        isPocketDetailOpen = false
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
@@ -633,19 +592,7 @@ fun GalleryApp() {
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
                 inboxInitialViewMode = entry.inboxInitialViewMode
                 inboxInitialStack = entry.inboxInitialStack
-                inboxInitialOpenBrowser = entry.inboxInitialOpenBrowser
-                selectedBookmarkDetailStack = entry.selectedBookmarkDetailStack
-                selectedBookmarkDeckIndex = entry.selectedBookmarkDeckIndex
-                selectedBookmarkFullScreenIndex = entry.selectedBookmarkFullScreenIndex
-                browserInitialUrl = entry.browserInitialUrl
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
-            }
-            destination == Destination.BOOKMARK_DETAIL -> {
-                destination = Destination.POCKET
-                selectedBookmarkDetailStack = null
-                selectedBookmarkDeckIndex = 0
-                selectedBookmarkFullScreenIndex = null
-                viewerStoryTitle = null
             }
             albumFilter != null -> {
                 albumFilter = null
@@ -662,9 +609,7 @@ fun GalleryApp() {
                 Destination.LOCKED_FOLDER,
                 Destination.ARCHIVE,
                 Destination.PEOPLE,
-                Destination.MAP,
-                Destination.BROWSER,
-                Destination.YTDLNIS
+                Destination.MAP
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
@@ -672,6 +617,7 @@ fun GalleryApp() {
             }
             destination in listOf(
                 Destination.LIBRARY_OVERVIEW,
+                Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
                 Destination.ABOUT
             ) -> {
@@ -679,12 +625,7 @@ fun GalleryApp() {
                 viewerStoryTitle = null
             }
             destination == Destination.MEDIA_INBOX -> {
-                destination = when (previousDestination) {
-                    Destination.ALBUMS -> Destination.ALBUMS
-                    Destination.BROWSER -> Destination.BROWSER
-                    Destination.POCKET -> Destination.POCKET
-                    else -> Destination.SETTINGS
-                }
+                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
                 viewerStoryTitle = null
             }
             destination == Destination.VIEWER -> {
@@ -778,7 +719,8 @@ fun GalleryApp() {
 
     val hasMediaPerm = hasMediaPermission(context)
     val hasNotifPerm = hasNotificationPermission(context)
-    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm)
+    val hasAllFilesPerm = hasAllFilesAccess()
+    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
             initialStep = if (hasCompletedWelcome) 2 else 0,
@@ -861,8 +803,8 @@ fun GalleryApp() {
                     when (baseDestination) {
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
-                        media = if (albumFilter == null) galleryData.sortedMedia else visibleMedia,
-                        loading = loading && galleryData.sortedMedia.isEmpty(),
+                        media = visibleMedia,
+                        loading = loading,
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },
@@ -873,8 +815,6 @@ fun GalleryApp() {
                         gridStyle = gridStylePref,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        archiveCount = archive.size,
-                        onOpenArchive = { albumFilter = null; navigateTo(Destination.ARCHIVE) },
                         onClearAlbumFilter = { performBackNavigation() },
                         onAddPhotosToAlbum = if (activeCustomAlbum != null) { { showAddPhotosPickerForAlbum = activeCustomAlbum } } else null,
                         onMoveToBin = { uris ->
@@ -895,10 +835,8 @@ fun GalleryApp() {
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
-                        precomputedGroups = if (albumFilter == null) galleryData.groups else null,
-                        precomputedStories = if (albumFilter == null) galleryData.stories else null,
                         onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
-                        onOpen = { openMediaInViewer(it, if (albumFilter == null) galleryData.sortedMedia else visibleMedia) }
+                        onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
                     Destination.ALBUMS -> AlbumsScreen(
                         media = media,
@@ -911,20 +849,30 @@ fun GalleryApp() {
                         bottomContentPadding = bottomContentPadding,
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
-                        onOpenBrowser = {
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.BROWSER,
-                                rememberPrevious = true
-                            )
-                        },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Pocket", "Bookmarks" -> { albumFilter = null; navigateTo(Destination.POCKET, rememberPrevious = true) }; "Downloader", "YTDLnis", "Activity", "Activities", "Activity Page" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE, newInboxInitialOpenBrowser = false) }; "Scraper", "Media Scraper", "Browser" -> { albumFilter = null; navigateTo(dest = Destination.BROWSER, rememberPrevious = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
+                        },
+                        onOpenSavedLibrary = {
+                            albumFilter = null
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
+                            )
+                        },
+                        onOpenSavedStack = { stack ->
+                            albumFilter = null
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY,
+                                newInboxInitialStack = stack
+                            )
                         },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -1030,7 +978,6 @@ fun GalleryApp() {
                             availableGalleryMedia = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                             isUnlocked = isLockedFolderUnlocked,
                             hasPinSet = !lockedFolderPinHash.isNullOrBlank(),
-                            lockoutUntilMs = lockedFolderLockoutUntilMs,
                             onBack = {
                                 isLockedFolderUnlocked = false
                                 performBackNavigation()
@@ -1070,10 +1017,7 @@ fun GalleryApp() {
                             },
                             onSetPin = { newPin -> scope.launch { prefs.setLockedFolderPin(newPin) } },
                             onVerifyPin = { pin -> prefs.verifyLockedFolderPin(pin) },
-                            onUnlockSuccess = {
-                                scope.launch { prefs.resetLockedFolderLockout() }
-                                isLockedFolderUnlocked = true
-                            },
+                            onUnlockSuccess = { isLockedFolderUnlocked = true },
                             onLockAgain = { isLockedFolderUnlocked = false }
                         )
                     }
@@ -1102,7 +1046,7 @@ fun GalleryApp() {
                                 performBackNavigation()
                             },
                             onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
-                            onOpenIndexStatus = { navigateTo(Destination.SETTINGS) }
+                            onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
                         )
                     }
                     Destination.MAP -> {
@@ -1141,83 +1085,32 @@ fun GalleryApp() {
                             navigateTo(Destination.HOME)
                         }
                     )
-                    Destination.POCKET -> PocketScreen(
-                        topContentPadding = topContentPadding,
-                        bottomContentPadding = bottomContentPadding,
-                        onMenuClick = { showSidePanel = true },
-                        onDetailViewerStateChange = { isPocketDetailOpen = it },
-                        onOpenDiscoveredMedia = {
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
-                                newInboxInitialOpenBrowser = false
-                            )
-                        },
-                        onOpenBookmarkDetail = { stack ->
-                            navigateTo(
-                                dest = Destination.BOOKMARK_DETAIL,
-                                rememberPrevious = true,
-                                newSelectedBookmarkDetailStack = stack,
-                                newSelectedBookmarkDeckIndex = 0,
-                                newSelectedBookmarkFullScreenIndex = null
-                            )
-                        }
-                    )
-                    Destination.BOOKMARK_DETAIL -> {
-                        val pocketRepo = remember { com.amresalehin.emregallery.data.PocketRepository.getInstance(context) }
-                        val allBookmarks by pocketRepo.bookmarks.collectAsState()
-                        val activeStack = selectedBookmarkDetailStack?.let { cur ->
-                            allBookmarks.find { it.id == cur.id } ?: cur
-                        } ?: selectedBookmarkDetailStack
-
-                        if (activeStack != null) {
-                            BookmarkDetailScreen(
-                                stack = activeStack,
-                                onBack = { performBackNavigation() },
-                                onOpenBrowser = { url ->
-                                    navigateTo(
-                                        dest = Destination.BROWSER,
-                                        rememberPrevious = true,
-                                        newBrowserInitialUrl = url
-                                    )
-                                },
-                                onDelete = {
-                                    pocketRepo.deleteBookmark(activeStack.id)
-                                    performBackNavigation()
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar("Bookmark deleted")
-                                    }
-                                },
-                                onRefreshMetadata = {
-                                    pocketRepo.refreshMetadata(activeStack.id, context)
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar("Refreshing link info & preview...")
-                                    }
-                                },
-                                onFetchSiteMedia = {
-                                    pocketRepo.fetchSiteMedia(activeStack.id, context)
-                                },
-                                initialDeckIndex = selectedBookmarkDeckIndex,
-                                initialFullScreenMediaIndex = selectedBookmarkFullScreenIndex,
-                                onViewerStateChanged = { deckIdx, fullScreenIdx ->
-                                    selectedBookmarkDeckIndex = deckIdx
-                                    selectedBookmarkFullScreenIndex = fullScreenIdx
-                                },
-                                isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            LaunchedEffect(Unit) {
-                                performBackNavigation()
-                            }
-                        }
-                    }
                     Destination.SETTINGS -> SettingsScreen(
-                        media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         total = media.size,
                         onMenuClick = { showSidePanel = true },
                         theme = themePref,
+                        topContentPadding = statusBarTop + 14.dp,
+                        bottomContentPadding = bottomContentPadding,
+                        onTheme = { scope.launch { prefs.setTheme(it) } },
+                        onRefresh = { refreshMedia() },
+                        onSettings = { label ->
+                            when (label) {
+                                "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
+                                "About" -> navigateTo(Destination.ABOUT)
+                                "Media Downloader", "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
+                            }
+                        },
+                        onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+                    )
+                    Destination.LIBRARY_OVERVIEW -> LibraryOverviewScreen(
+                        media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
+                        loading = loading,
+                        isRefreshing = isRefreshing,
+                        onBack = { performBackNavigation() },
+                        onRefresh = { refreshMedia(userInitiated = true) }
+                    )
+                    Destination.INDEXING_STATUS -> IndexingStatusScreen(
+                        media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         ocrLanguages = ocrLanguagesPref,
                         ocrModel = ocrModelPref,
                         ocrEngine = ocrEnginePref,
@@ -1251,25 +1144,10 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setMlKitLanguages(updated) }
                         },
-                        topContentPadding = statusBarTop + 14.dp,
-                        bottomContentPadding = bottomContentPadding,
-                        onTheme = { scope.launch { prefs.setTheme(it) } },
-                        onRefresh = { refreshMedia() },
-                        onSettings = { label ->
-                            when (label) {
-                                "About" -> navigateTo(Destination.ABOUT)
-                            }
+                        onOpenMap = {
+                            navigateTo(Destination.MAP)
                         },
-                        onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
-                        prefs = prefs,
-                        onShowSnackbar = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
-                    )
-                    Destination.LIBRARY_OVERVIEW -> LibraryOverviewScreen(
-                        media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
-                        loading = loading,
-                        isRefreshing = isRefreshing,
-                        onBack = { performBackNavigation() },
-                        onRefresh = { refreshMedia(userInitiated = true) }
+                        onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         currentEngine = ocrEnginePref,
@@ -1313,36 +1191,31 @@ fun GalleryApp() {
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
                         initialStackForDetail = inboxInitialStack,
-                        initialOpenBrowser = inboxInitialOpenBrowser,
                         onBack = { performBackNavigation() },
-                        onOpenBrowser = { url ->
-                            navigateTo(
-                                dest = Destination.BROWSER,
-                                rememberPrevious = true,
-                                newBrowserInitialUrl = url.orEmpty()
-                            )
-                        },
                         onOpenMediaItem = { uri ->
+                            val file = java.io.File(uri.removePrefix("file://"))
+                            val fallbackName = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
+                            val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { uri })
                             val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
-                            val targetItem = match ?: run {
-                                val file = java.io.File(uri)
-                                val name = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
-                                val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                            name.endsWith(".webm", ignoreCase = true) ||
-                                            name.endsWith(".mkv", ignoreCase = true) ||
-                                            name.endsWith(".mov", ignoreCase = true)
+                            val targetItem = if (match != null) {
+                                if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
+                                    match.copy(mimeType = classified.mimeType)
+                                } else {
+                                    match
+                                }
+                            } else {
                                 MediaItem(
                                     id = uri.hashCode().toLong(),
                                     uri = uri,
-                                    name = name,
-                                    mimeType = if (isVid) "video/*" else "image/*",
+                                    name = fallbackName,
+                                    mimeType = classified.mimeType,
                                     dateAddedSeconds = System.currentTimeMillis() / 1000,
                                     dateTakenMillis = System.currentTimeMillis(),
                                     sizeBytes = if (file.exists()) file.length() else 0L,
                                     width = 0,
                                     height = 0,
                                     relativePath = "",
-                                    isVideo = isVid
+                                    isVideo = classified.isVideo
                                 )
                             }
                             openMediaInViewer(targetItem, listOf(targetItem))
@@ -1350,120 +1223,35 @@ fun GalleryApp() {
                         onOpenMediaWithList = { uri, allUris ->
                             val safeUris = if (allUris.contains(uri)) allUris else (listOf(uri) + allUris)
                             val viewerItems = safeUris.map { u ->
-                                media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) } ?: run {
-                                    val file = java.io.File(u)
-                                    val name = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
-                                    val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                                name.endsWith(".webm", ignoreCase = true) ||
-                                                name.endsWith(".mkv", ignoreCase = true) ||
-                                                name.endsWith(".mov", ignoreCase = true)
+                                val file = java.io.File(u.removePrefix("file://"))
+                                val fallbackName = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
+                                val classified = com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(fallbackName.ifBlank { u })
+                                val match = media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) }
+                                if (match != null) {
+                                    if (classified.isAudio && (match.mimeType.isNullOrBlank() || match.mimeType.startsWith("image/"))) {
+                                        match.copy(mimeType = classified.mimeType)
+                                    } else {
+                                        match
+                                    }
+                                } else {
                                     MediaItem(
                                         id = u.hashCode().toLong(),
                                         uri = u,
-                                        name = name,
-                                        mimeType = if (isVid) "video/*" else "image/*",
+                                        name = fallbackName,
+                                        mimeType = classified.mimeType,
                                         dateAddedSeconds = System.currentTimeMillis() / 1000,
                                         dateTakenMillis = System.currentTimeMillis(),
                                         sizeBytes = if (file.exists()) file.length() else 0L,
                                         width = 0,
                                         height = 0,
                                         relativePath = "",
-                                        isVideo = isVid
+                                        isVideo = classified.isVideo
                                     )
                                 }
                             }
                             val target = viewerItems.firstOrNull { it.uri == uri } ?: viewerItems.first()
                             openMediaInViewer(target, viewerItems)
                         }
-                    )
-                    Destination.BROWSER -> DirectBrowserView(
-                        initialUrl = browserInitialUrl,
-                        onClose = {
-                            browserInitialUrl = ""
-                            performBackNavigation()
-                        },
-                        onMenuClick = { showSidePanel = true },
-                        onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
-                        onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
-                        onOpenDownloads = {
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
-                                newInboxInitialOpenBrowser = false
-                            )
-                        },
-                        onOpenDiscoveredMedia = {
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
-                                newInboxInitialOpenBrowser = false
-                            )
-                        },
-                        onSwitchToMediaTab = {
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
-                                newInboxInitialOpenBrowser = false
-                            )
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Destination.YTDLNIS -> com.amresalehin.emregallery.ui.ytdlnis.YtdlnisScreen(
-                        onBack = { performBackNavigation() },
-                        initialUrl = browserInitialUrl,
-                        onOpenBrowser = { url ->
-                            navigateTo(
-                                dest = Destination.BROWSER,
-                                rememberPrevious = true,
-                                newBrowserInitialUrl = url.orEmpty()
-                            )
-                        },
-                        onOpenDiscoveredMedia = {
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
-                                newInboxInitialOpenBrowser = false
-                            )
-                        },
-                        onOpenMediaFile = { filePath ->
-                            val file = java.io.File(filePath)
-                            val name = if (file.exists()) file.name else filePath.substringAfterLast('/').ifBlank { "media_item" }
-                            val ext = name.substringAfterLast('.', "").lowercase()
-                            val isVid = ext in setOf("mp4", "webm", "mkv", "mov", "avi")
-                            val mime = when {
-                                isVid -> "video/$ext"
-                                ext in setOf("mp3", "m4a", "opus", "flac", "wav", "ogg") -> "audio/$ext"
-                                ext in setOf("jpg", "jpeg", "png", "webp", "gif") -> "image/$ext"
-                                else -> null
-                            }
-                            val nowMs = System.currentTimeMillis()
-                            val item = MediaItem(
-                                id = filePath.hashCode().toLong(),
-                                uri = if (file.exists()) android.net.Uri.fromFile(file).toString() else filePath,
-                                name = name,
-                                mimeType = mime,
-                                dateAddedSeconds = nowMs / 1000L,
-                                dateTakenMillis = if (file.exists() && file.lastModified() > 0L) file.lastModified() else nowMs,
-                                sizeBytes = if (file.exists()) file.length() else 0L,
-                                width = 0,
-                                height = 0,
-                                relativePath = "Download/Emre Gallery/YTDLnis",
-                                isVideo = isVid
-                            )
-                            openMediaInViewer(item, listOf(item))
-                        },
-                        onOpenBrowserForCookies = { url ->
-                            navigateTo(
-                                dest = Destination.BROWSER,
-                                rememberPrevious = true,
-                                newBrowserInitialUrl = url
-                            )
-                        },
-                        modifier = Modifier.fillMaxSize()
                     )
                     Destination.SEARCH -> {
                         val searchScopeMedia = remember(media, hidden, inBin, archive) {
@@ -1551,12 +1339,10 @@ fun GalleryApp() {
                     } else {
                         scope.launch {
                             if (!isAlreadyLocked) {
-                                val lockResult = withContext(Dispatchers.IO) { lockedVaultManager.lockItemsWithPendingDeletes(listOf(currentItem)) }
-                                val lockedList = lockResult.lockedItems
+                                val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(listOf(currentItem)) }
                                 lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
                                 prefs.setHidden(currentItem.uri, true)
                                 refreshMedia()
-                                requestVaultOriginDeletion(lockResult.pendingDeleteUris)
                                 val res = snackbarHostState.showSnackbar(
                                     message = "Moved to Locked folder",
                                     actionLabel = "Undo",
@@ -1628,8 +1414,8 @@ fun GalleryApp() {
             )
         }
 
-        // Wider top and bottom edge blur across app screens, smoothly fading with return progress (disabled on browser)
-        val showEdgeBlurs = (destination in listOf(Destination.HOME, Destination.ALBUMS)) && destination != Destination.VIEWER && destination != Destination.BROWSER
+        // Wider top and bottom edge blur across app screens, smoothly fading with return progress
+        val showEdgeBlurs = (destination != Destination.VIEWER) || viewerTransitionProgress.value < 0.99f
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
@@ -1675,7 +1461,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.YTDLNIS && destination != Destination.BOOKMARK_DETAIL
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1712,8 +1498,8 @@ fun GalleryApp() {
             }
         }
 
-        // Floating Bottom Navigation Bar across Home, Albums, Pocket, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.YTDLNIS && destination != Destination.BOOKMARK_DETAIL && !isPocketDetailOpen
+        // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
@@ -1732,7 +1518,7 @@ fun GalleryApp() {
                             alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
-                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS)) {
+                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
                         FloatingNavigationBar(
                             current = returnDestination,
                             onSelect = { dest ->
@@ -1808,12 +1594,7 @@ fun GalleryApp() {
                     navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
                 } else {
                     albumFilter = null
-                    navigateTo(
-                        dest = dest,
-                        rememberPrevious = true,
-                        newMapFocusItem = if (dest == Destination.MAP) null else mapFocusItem,
-                        newInboxInitialOpenBrowser = (dest == Destination.MEDIA_INBOX)
-                    )
+                    navigateTo(dest, rememberPrevious = true, newMapFocusItem = if (dest == Destination.MAP) null else mapFocusItem)
                 }
                 showSidePanel = false
             },
@@ -1842,7 +1623,7 @@ fun GalleryApp() {
             },
             text = {
                 Text(
-                    "Create a 6-digit PIN first so you can safely access and protect your locked photos.",
+                    "Create a 4-digit PIN first so you can safely access and protect your locked photos.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -1939,73 +1720,32 @@ fun GalleryApp() {
 }
 
 private fun shareMultipleMediaItems(context: android.content.Context, items: List<MediaItem>) {
-    val shareable = items.filterNot {
-        it.relativePath == "Locked" || LockedVaultManager.isVaultFileUri(context, it.uri)
-    }
-    if (shareable.isEmpty()) {
-        if (items.isNotEmpty()) {
-            Toast.makeText(context, "Move out of Locked folder to share", Toast.LENGTH_SHORT).show()
-        }
-        return
-    }
-    fun resolveShareUri(rawUriString: String): Uri {
-        val raw = Uri.parse(rawUriString)
-        return if (raw.scheme == "file" && raw.path != null) {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(raw.path!!))
-        } else {
-            raw
-        }
-    }
+    if (items.isEmpty()) return
     runCatching {
-        val activity = context as? android.app.Activity
-        if (shareable.size == 1) {
-            val item = shareable.first()
-            val parsedUri = resolveShareUri(item.uri)
-            val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
-            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                type = mimeType
-                putExtra(Intent.EXTRA_STREAM, parsedUri)
-                clipData = android.content.ClipData.newUri(context.contentResolver, item.name, parsedUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val chooserIntent = Intent.createChooser(sendIntent, "Share media").apply {
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                if (activity == null) {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            context.startActivity(chooserIntent)
+        if (items.size == 1) {
+            val item = items.first()
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = item.mimeType ?: com.amresalehin.emregallery.data.MediaClassifier.resolveLocalMediaMimeType(item.name.ifBlank { item.uri }).mimeType
+                        putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                    "Share media"
+                )
+            )
         } else {
-            val uris = ArrayList(shareable.map { resolveShareUri(it.uri) })
-            val allImages = shareable.all { !it.isVideo }
-            val allVideos = shareable.all { it.isVideo }
-            val commonMime = shareable.mapNotNull { it.mimeType }.distinct().singleOrNull()
-            val mimeType = commonMime ?: when {
-                allImages -> "image/*"
-                allVideos -> "video/*"
-                else -> "*/*"
-            }
-            val firstUri = uris.first()
-            val clipData = android.content.ClipData.newUri(context.contentResolver, shareable.first().name, firstUri)
-            for (i in 1 until uris.size) {
-                clipData.addItem(android.content.ClipData.Item(uris[i]))
-            }
-            val sendIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                type = mimeType
-                if (mimeType == "*/*") {
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
-                }
-                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                this.clipData = clipData
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val chooserIntent = Intent.createChooser(sendIntent, "Share media").apply {
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                if (activity == null) {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            context.startActivity(chooserIntent)
+            val uris = ArrayList(items.map { Uri.parse(it.uri) })
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                        type = "*/*"
+                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                    "Share media"
+                )
+            )
         }
     }
 }

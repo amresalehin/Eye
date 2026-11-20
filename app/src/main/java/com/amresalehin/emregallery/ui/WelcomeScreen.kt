@@ -22,12 +22,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material3.*
@@ -72,6 +72,7 @@ fun WelcomeScreen(
     var currentStep by remember { mutableIntStateOf(initialStep) }
     var mediaGranted by remember { mutableStateOf(hasMediaPermission(context)) }
     var notificationGranted by remember { mutableStateOf(hasNotificationPermission(context)) }
+    var allFilesGranted by remember { mutableStateOf(hasAllFilesAccess()) }
 
     BackHandler(enabled = currentStep > 0) {
         currentStep--
@@ -83,6 +84,7 @@ fun WelcomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 mediaGranted = hasMediaPermission(context)
                 notificationGranted = hasNotificationPermission(context)
+                allFilesGranted = hasAllFilesAccess()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -99,6 +101,12 @@ fun WelcomeScreen(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         notificationGranted = isGranted
+    }
+
+    val allFilesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        allFilesGranted = hasAllFilesAccess()
     }
 
     fun requestMedia() {
@@ -127,6 +135,22 @@ fun WelcomeScreen(
         }
     }
 
+    fun requestAllFiles() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = try {
+                Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                )
+            } catch (_: Exception) {
+                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            }
+            allFilesLauncher.launch(intent)
+        } else {
+            allFilesGranted = true
+        }
+    }
+
     // Atmospheric mist/fog gradient matching Emre style (#F3F5F7 to #161A20)
     val mistGradient = Brush.verticalGradient(
         0.00f to Color(0xFFF3F5F7),
@@ -136,14 +160,14 @@ fun WelcomeScreen(
         1.00f to Color(0xFF161A20)
     )
 
-    val needsNotifPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val grantedCount = (if (mediaGranted) 1 else 0) +
-        (if (needsNotifPrompt && notificationGranted) 1 else 0)
-    val allPermissionsGranted = mediaGranted && (!needsNotifPrompt || notificationGranted)
+        (if (notificationGranted) 1 else 0) +
+        (if (allFilesGranted) 1 else 0)
+    val allPermissionsGranted = grantedCount == 3
 
     val buttonText = when {
         allPermissionsGranted -> "Enter Emre"
-        grantedCount > 0 -> "Growing Wings"
+        grantedCount in 1..2 -> "Growing Wings"
         else -> "Liberate Emre"
     }
 
@@ -310,10 +334,21 @@ fun WelcomeScreen(
                             testTag = "welcome_permission_notifications"
                         )
 
+                        Spacer(Modifier.height(14.dp))
+
+                        // Card 3: All files access
+                        PermissionCard(
+                            icon = Icons.Outlined.FolderCopy,
+                            title = "All files access",
+                            isGranted = allFilesGranted,
+                            onClick = { requestAllFiles() },
+                            testTag = "welcome_permission_all_files"
+                        )
+
                         Spacer(Modifier.weight(1f))
 
                         // Dynamic Action Button:
-                        // "Liberate Emre" -> "Growing Wings" -> "Enter Emre"
+                        // "Liberate Emre" (0 granted) -> "Growing Wings" (1 or 2 granted) -> "Enter Emre" (all 3 granted)
                         // Arrow appears ONLY on "Enter Emre"
                         Button(
                             onClick = {
@@ -323,6 +358,8 @@ fun WelcomeScreen(
                                     requestMedia()
                                 } else if (!notificationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                     requestNotifications()
+                                } else if (!allFilesGranted) {
+                                    requestAllFiles()
                                 }
                             },
                             shape = RoundedCornerShape(32.dp),
@@ -958,7 +995,12 @@ private fun PersonalizeAiConfigCard() {
                 modifier = Modifier.size(46.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    AiIcon(tint = Color(0xFF181C22))
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = Color(0xFF181C22)
+                    )
                 }
             }
 
@@ -1100,43 +1142,6 @@ private fun FaceRecognitionIcon(modifier: Modifier = Modifier, tint: Color = Col
         }
         Icon(
             imageVector = Icons.Default.Face,
-            contentDescription = null,
-            modifier = Modifier.size(14.dp),
-            tint = tint
-        )
-    }
-}
-
-@Composable
-private fun AiIcon(modifier: Modifier = Modifier, tint: Color = Color(0xFF181C22)) {
-    Box(
-        modifier = modifier.size(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 1.6.dp.toPx()
-            val cornerLength = 4.5.dp.toPx()
-            val w = size.width
-            val h = size.height
-
-            // Top-left
-            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(cornerLength, 0f), strokeWidth)
-            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, cornerLength), strokeWidth)
-
-            // Top-right
-            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w - cornerLength, 0f), strokeWidth)
-            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w, cornerLength), strokeWidth)
-
-            // Bottom-left
-            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(cornerLength, h), strokeWidth)
-            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(0f, h - cornerLength), strokeWidth)
-
-            // Bottom-right
-            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w - cornerLength, h), strokeWidth)
-            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w, h - cornerLength), strokeWidth)
-        }
-        Icon(
-            imageVector = Icons.Default.AutoAwesome,
             contentDescription = null,
             modifier = Modifier.size(14.dp),
             tint = tint

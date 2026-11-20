@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.map
 class UiPreferencesManager(private val context: Context) {
 
     private val themeKey = stringPreferencesKey("theme")
-    private val colorThemeKey = stringPreferencesKey("color_theme")
     private val sortOrderKey = stringPreferencesKey("sort_order")
     private val groupByKey = stringPreferencesKey("group_by")
     private val gridColumnsKey = stringPreferencesKey("grid_columns")
@@ -57,28 +56,12 @@ class UiPreferencesManager(private val context: Context) {
         }
     }
 
-    fun getThemeSync(): String =
-        sharedPrefs.getString("theme", "system") ?: "system"
-
     val theme: Flow<String> = context.galleryDataStore.data.map {
-        it[themeKey] ?: getThemeSync()
+        it[themeKey] ?: "system"
     }.distinctUntilChanged()
 
     suspend fun setTheme(value: String) {
-        sharedPrefs.edit().putString("theme", value).apply()
         context.galleryDataStore.edit { it[themeKey] = value }
-    }
-
-    fun getColorThemeSync(): String =
-        sharedPrefs.getString("color_theme", "monochrome") ?: "monochrome"
-
-    val colorTheme: Flow<String> = context.galleryDataStore.data.map {
-        it[colorThemeKey] ?: getColorThemeSync()
-    }.distinctUntilChanged()
-
-    suspend fun setColorTheme(value: String) {
-        sharedPrefs.edit().putString("color_theme", value).apply()
-        context.galleryDataStore.edit { it[colorThemeKey] = value }
     }
 
     val sortOrder: Flow<String> = context.galleryDataStore.data.map {

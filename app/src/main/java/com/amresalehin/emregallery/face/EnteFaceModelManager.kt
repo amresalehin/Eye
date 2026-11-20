@@ -273,12 +273,8 @@ object EnteFaceModelManager {
             onDetailedProgress(
                 DetailedDownloadProgress(totalBytesEstimated, totalBytesEstimated, 0L, 0L, "ready")
             )
-            stagingDir.deleteRecursively()
         } finally {
-            // Preserve partial .part downloads on error/pause so HTTP Range resume works on retry
-            if (isInstalled(context) && stagingDir.exists()) {
-                stagingDir.deleteRecursively()
-            }
+            stagingDir.deleteRecursively()
         }
     }
 

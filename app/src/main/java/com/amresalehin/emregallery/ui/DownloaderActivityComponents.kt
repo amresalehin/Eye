@@ -455,7 +455,6 @@ fun DownloaderActivityPage(
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         DownloadActivityManager.initialize(context)
-        DownloadActivityManager.syncWithStorageDir(context)
         DownloadActivityManager.syncWithInboxRepository()
     }
 
@@ -895,14 +894,10 @@ private fun ActiveDownloadRow(
                     "${DownloadActivityManager.formatBytes(item.bytesRead)} downloaded"
                 }
 
-                val boostTag = if (item.isSpeedBoostActive && item.activeConnections > 1) {
-                    " • Speed Boost ${item.activeConnections}x"
-                } else ""
                 Text(
-                    text = "$bytesText • $speedText$boostTag",
+                    text = "$bytesText • $speedText",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (item.isSpeedBoostActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (item.isSpeedBoostActive) FontWeight.Bold else FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
             }
@@ -916,11 +911,7 @@ private fun ActiveDownloadRow(
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp)),
-                color = when {
-                    item.isRetrying -> Color(0xFFFFB74D)
-                    item.isSpeedBoostActive -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+                color = if (item.isRetrying) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
         }

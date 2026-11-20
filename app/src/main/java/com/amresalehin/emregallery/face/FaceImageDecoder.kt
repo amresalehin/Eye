@@ -58,20 +58,10 @@ object FaceImageDecoder {
                     if (file.exists() && file.canRead()) {
                         ImageDecoder.createSource(file)
                     } else {
-                        val afd = runCatching { context.contentResolver.openAssetFileDescriptor(targetUri, "r") }.getOrNull()
-                        if (afd != null) {
-                            ImageDecoder.createSource { afd }
-                        } else {
-                            ImageDecoder.createSource(context.contentResolver, targetUri)
-                        }
-                    }
-                } else {
-                    val afd = runCatching { context.contentResolver.openAssetFileDescriptor(targetUri, "r") }.getOrNull()
-                    if (afd != null) {
-                        ImageDecoder.createSource { afd }
-                    } else {
                         ImageDecoder.createSource(context.contentResolver, targetUri)
                     }
+                } else {
+                    ImageDecoder.createSource(context.contentResolver, targetUri)
                 }
                 var origW = 0
                 var origH = 0

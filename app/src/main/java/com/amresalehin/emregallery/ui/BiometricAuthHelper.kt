@@ -8,23 +8,12 @@ import androidx.fragment.app.FragmentActivity
 
 object BiometricAuthHelper {
 
-    private fun resolveAllowedAuthenticators(context: Context): Int? {
-        val biometricManager = BiometricManager.from(context)
-        val strongOrCredential = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        if (biometricManager.canAuthenticate(strongOrCredential) == BiometricManager.BIOMETRIC_SUCCESS) {
-            return strongOrCredential
-        }
-        val weakOrCredential = BiometricManager.Authenticators.BIOMETRIC_WEAK or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        if (biometricManager.canAuthenticate(weakOrCredential) == BiometricManager.BIOMETRIC_SUCCESS) {
-            return weakOrCredential
-        }
-        return null
-    }
-
     fun isBiometricAvailable(context: Context): Boolean {
-        return resolveAllowedAuthenticators(context) != null
+        val biometricManager = BiometricManager.from(context)
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        return biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
     }
 
     fun authenticate(
@@ -34,12 +23,6 @@ object BiometricAuthHelper {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val authenticators = resolveAllowedAuthenticators(activity)
-        if (authenticators == null) {
-            onError("Biometric or device credential authentication is unavailable on this device.")
-            return
-        }
-
         val executor = ContextCompat.getMainExecutor(activity)
         val biometricPrompt = BiometricPrompt(
             activity,
@@ -71,7 +54,11 @@ object BiometricAuthHelper {
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setAllowedAuthenticators(authenticators)
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
             .build()
 
         biometricPrompt.authenticate(promptInfo)

@@ -15,7 +15,3 @@ app/build/
 # OS specific
 .DS_Store
 Thumbs.db
-
-# Kotlin compiler error logs & local archive snapshots
-.kotlin/
-*.zip

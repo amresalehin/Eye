@@ -13,7 +13,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config
+@Config(sdk = [34])
 class FaceArchitectureTest {
 
     private lateinit var context: Context

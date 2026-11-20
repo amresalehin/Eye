@@ -1,9 +1,9 @@
 package com.amresalehin.emregallery
 
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
-import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -15,23 +15,20 @@ import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 class MainActivity : FragmentActivity() {
 
+    private val prefs by lazy {
+        getSharedPreferences("window_refresh_rate_state", Context.MODE_PRIVATE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
         applyHighRefreshRate()
         warmupChromiumEngine()
 
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
-            val initialTheme = remember { preferences.getThemeSync() }
-            val initialColorTheme = remember { preferences.getColorThemeSync() }
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
-            val colorTheme by preferences.colorTheme.collectAsStateWithLifecycle(initialValue = initialColorTheme)
-            EmreGalleryTheme(theme = theme, colorTheme = colorTheme) {
+            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
+            EmreGalleryTheme(theme) {
                 GalleryApp()
             }
         }
@@ -39,7 +36,15 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Re-apply and persist high refresh rate state when returning from pause/background
         applyHighRefreshRate()
+        prefs.edit().putBoolean("is_paused", false).apply()
+    }
+
+    override fun onPause() {
+        // Persist pause state
+        prefs.edit().putBoolean("is_paused", true).putLong("paused_at", System.currentTimeMillis()).apply()
+        super.onPause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -86,6 +91,8 @@ class MainActivity : FragmentActivity() {
 
             currentWindow.attributes = params
         }
+
+        prefs.edit().putFloat("configured_refresh_rate", targetFps).apply()
     }
 
     private fun warmupChromiumEngine() {

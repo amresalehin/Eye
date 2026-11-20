@@ -178,10 +178,6 @@ data class EngineComparisonResult(
 class FaceClusterStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
 
-    init {
-        setWriteAheadLoggingEnabled(true)
-    }
-
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.enableWriteAheadLogging()

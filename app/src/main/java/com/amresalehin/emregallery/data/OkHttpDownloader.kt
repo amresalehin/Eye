@@ -7,26 +7,17 @@ import android.util.Log
 import android.webkit.CookieManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import okhttp3.Authenticator
 import okhttp3.Cookie
 import okhttp3.CookieJar
-import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.InetSocketAddress
-import java.net.Proxy
-import java.net.URI
 import android.graphics.BitmapFactory
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -42,8 +33,8 @@ import java.util.concurrent.TimeUnit
 object OkHttpDownloader {
 
     private const val TAG = "OkHttpDownloader"
-    const val DEFAULT_USER_AGENT = BotDetectionMitigator.STEALTH_USER_AGENT
-    private val activeDownloadLocks = Array(64) { Mutex() }
+    const val DEFAULT_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
     /**
      * Shared bidirectional CookieJar bridging Android WebView CookieManager and in-memory cache.
@@ -146,125 +137,31 @@ object OkHttpDownloader {
 
     val sharedCookieJar = SharedSessionCookieJar()
 
-    data class ParsedProxySpec(
-        val type: Proxy.Type,
-        val host: String,
-        val port: Int,
-        val username: String? = null,
-        val password: String? = null
-    )
-
-    fun parseProxyUrl(rawUrl: String?): ParsedProxySpec? {
-        val trimmed = rawUrl?.trim().orEmpty()
-        if (trimmed.isBlank()) return null
-        return try {
-            val normalized = if ("://" in trimmed) trimmed else "http://$trimmed"
-            val uri = URI(normalized)
-            val scheme = (uri.scheme ?: "http").lowercase(Locale.ROOT)
-            val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
-            val defaultPort = when (scheme) {
-                "socks5", "socks5h", "socks4", "socks" -> 1080
-                "https" -> 443
-                else -> 8080
-            }
-            val port = if (uri.port in 1..65535) uri.port else defaultPort
-            val proxyType = when (scheme) {
-                "socks5", "socks5h", "socks4", "socks" -> Proxy.Type.SOCKS
-                "http", "https" -> Proxy.Type.HTTP
-                else -> return null
-            }
-            var user: String? = null
-            var pass: String? = null
-            uri.userInfo?.takeIf { it.isNotBlank() }?.let { info ->
-                val parts = info.split(":", limit = 2)
-                user = parts.getOrNull(0)
-                pass = parts.getOrNull(1) ?: ""
-            }
-            ParsedProxySpec(proxyType, host, port, user, pass)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private val clientLock = Any()
-    @Volatile
-    private var proxyEnabledState: Boolean = false
-    @Volatile
-    private var proxyUrlState: String = ""
-    @Volatile
-    private var timeoutSecondsState: Int = 30
-    @Volatile
-    private var cachedClient: OkHttpClient? = null
-
-    val isProxyActive: Boolean get() = proxyEnabledState && parseProxyUrl(proxyUrlState) != null
-    val activeProxyUrl: String? get() = if (isProxyActive) proxyUrlState else null
-
-    fun configureProxy(enabled: Boolean, proxyUrl: String, timeoutSeconds: Int = 30) {
-        val cleanUrl = proxyUrl.trim()
-        val clampedTimeout = timeoutSeconds.coerceIn(10, 120)
-        synchronized(clientLock) {
-            if (proxyEnabledState == enabled && proxyUrlState == cleanUrl && timeoutSecondsState == clampedTimeout && cachedClient != null) {
-                return
-            }
-            proxyEnabledState = enabled
-            proxyUrlState = cleanUrl
-            timeoutSecondsState = clampedTimeout
-            cachedClient = buildClient(enabled, cleanUrl, clampedTimeout)
-        }
-    }
-
-    private fun buildClient(proxyEnabled: Boolean, proxyUrl: String, timeoutSec: Int): OkHttpClient {
-        val builder = OkHttpClient.Builder()
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
             .cookieJar(sharedCookieJar)
-            .connectTimeout((timeoutSec / 2).coerceIn(10, 30).toLong(), TimeUnit.SECONDS)
-            .readTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
-            .writeTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .addInterceptor { chain ->
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
 
-                // Attach comprehensive browser stealth headers to prevent anti-bot and Cloudflare 403 blocks
-                BotDetectionMitigator.STEALTH_HEADERS.forEach { (key, value) ->
-                    if (original.header(key).isNullOrBlank()) {
-                        requestBuilder.header(key, value)
-                    }
+                if (original.header("User-Agent").isNullOrBlank()) {
+                    requestBuilder.header("User-Agent", DEFAULT_USER_AGENT)
                 }
-                val existingAccept = original.header("Accept")
-                if (!existingAccept.isNullOrBlank() && existingAccept.contains("image/avif", ignoreCase = true)) {
+                if (original.header("Accept").isNullOrBlank()) {
                     requestBuilder.header(
                         "Accept",
-                        existingAccept.replace("image/avif,", "", ignoreCase = true)
-                            .replace("image/avif", "image/webp", ignoreCase = true)
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/*;q=0.8,video/*;q=0.8,audio/*;q=0.8,*/*;q=0.7"
                     )
                 }
                 chain.proceed(requestBuilder.build())
             }
-
-        if (proxyEnabled) {
-            parseProxyUrl(proxyUrl)?.let { spec ->
-                builder.proxy(Proxy(spec.type, InetSocketAddress(spec.host, spec.port)))
-                if (!spec.username.isNullOrBlank()) {
-                    val credential = Credentials.basic(spec.username, spec.password.orEmpty())
-                    builder.proxyAuthenticator(Authenticator { _, response ->
-                        if (response.request.header("Proxy-Authorization") != null) return@Authenticator null
-                        response.request.newBuilder()
-                            .header("Proxy-Authorization", credential)
-                            .build()
-                    })
-                }
-            }
-        }
-        return builder.build()
+            .build()
     }
-
-    val client: OkHttpClient
-        get() = cachedClient ?: synchronized(clientLock) {
-            cachedClient ?: buildClient(proxyEnabledState, proxyUrlState, timeoutSecondsState).also {
-                cachedClient = it
-            }
-        }
 
     data class HttpResponse(
         val isSuccessful: Boolean,
@@ -286,121 +183,6 @@ object OkHttpDownloader {
         val errorMessage: String? = null,
         val retryAfterSeconds: Long? = null
     )
-
-    /**
-     * Data class capturing the result of probing a URL for direct media file headers.
-     */
-    data class DirectMediaProbeResult(
-        val isConfirmedDirectMedia: Boolean,
-        val finalUrl: String,
-        val contentType: String?,
-        val contentDisposition: String?,
-        val contentLength: Long?,
-        val statusCode: Int
-    )
-
-    /**
-     * Probes an arbitrary URL using OkHttp (HEAD request with fast Range GET fallback)
-     * to verify if the URL points directly to an image, video, audio or binary stream.
-     */
-    suspend fun probeDirectMedia(
-        url: String,
-        referer: String? = null
-    ): DirectMediaProbeResult = withContext(Dispatchers.IO) {
-        try {
-            val headReq = Request.Builder()
-                .url(url)
-                .head()
-                .apply {
-                    if (!referer.isNullOrBlank()) header("Referer", referer)
-                }
-                .build()
-
-            val headResp = runCatching { client.newCall(headReq).execute() }.getOrNull()
-            if (headResp != null && headResp.isSuccessful) {
-                headResp.use { resp ->
-                    val ct = resp.header("Content-Type")?.lowercase(Locale.ROOT)
-                    val cd = resp.header("Content-Disposition")
-                    val cl = resp.header("Content-Length")?.toLongOrNull()
-                    val finalUrl = resp.request.url.toString()
-                    val isMedia = isMediaContentType(ct) || hasMediaContentDisposition(cd) || isDirectMediaExtension(finalUrl)
-                    if (isMedia) {
-                        return@withContext DirectMediaProbeResult(
-                            isConfirmedDirectMedia = true,
-                            finalUrl = finalUrl,
-                            contentType = ct,
-                            contentDisposition = cd,
-                            contentLength = cl,
-                            statusCode = resp.code
-                        )
-                    }
-                }
-            }
-
-            // Fallback: fast Range GET (0-1024) to probe server if HEAD was rejected or inconclusive
-            val rangeReq = Request.Builder()
-                .url(url)
-                .header("Range", "bytes=0-1024")
-                .apply {
-                    if (!referer.isNullOrBlank()) header("Referer", referer)
-                }
-                .build()
-
-            client.newCall(rangeReq).execute().use { resp ->
-                val ct = resp.header("Content-Type")?.lowercase(Locale.ROOT)
-                val cd = resp.header("Content-Disposition")
-                val cl = resp.header("Content-Length")?.toLongOrNull()
-                val finalUrl = resp.request.url.toString()
-                val isMedia = (resp.code in 200..206) && (isMediaContentType(ct) || hasMediaContentDisposition(cd) || isDirectMediaExtension(finalUrl))
-                DirectMediaProbeResult(
-                    isConfirmedDirectMedia = isMedia,
-                    finalUrl = finalUrl,
-                    contentType = ct,
-                    contentDisposition = cd,
-                    contentLength = cl,
-                    statusCode = resp.code
-                )
-            }
-        } catch (e: Exception) {
-            DirectMediaProbeResult(
-                isConfirmedDirectMedia = false,
-                finalUrl = url,
-                contentType = null,
-                contentDisposition = null,
-                contentLength = null,
-                statusCode = -1
-            )
-        }
-    }
-
-    private fun isMediaContentType(ct: String?): Boolean {
-        if (ct.isNullOrBlank()) return false
-        val clean = ct.substringBefore(";").trim().lowercase(Locale.ROOT)
-        return clean.startsWith("image/") ||
-                clean.startsWith("video/") ||
-                clean.startsWith("audio/") ||
-                clean == "application/x-mpegurl" ||
-                clean == "application/vnd.apple.mpegurl" ||
-                clean == "application/dash+xml"
-    }
-
-    private fun hasMediaContentDisposition(cd: String?): Boolean {
-        if (cd.isNullOrBlank()) return false
-        val lower = cd.lowercase(Locale.ROOT)
-        return lower.contains(".mp4") || lower.contains(".webm") || lower.contains(".mkv") ||
-                lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") ||
-                lower.contains(".webp") || lower.contains(".gif") || lower.contains(".mp3") ||
-                lower.contains(".m4a") || lower.contains(".flac") || lower.contains(".wav")
-    }
-
-    private fun isDirectMediaExtension(url: String): Boolean {
-        val clean = url.substringBefore("?").substringBefore("#").lowercase(Locale.ROOT)
-        return clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".mkv") ||
-                clean.endsWith(".mov") || clean.endsWith(".jpg") || clean.endsWith(".jpeg") ||
-                clean.endsWith(".png") || clean.endsWith(".webp") || clean.endsWith(".gif") ||
-                clean.endsWith(".m3u8") || clean.endsWith(".mpd") || clean.endsWith(".mp3") ||
-                clean.endsWith(".m4a") || clean.endsWith(".flac") || clean.endsWith(".wav")
-    }
 
     /**
      * Parses the HTTP 'Retry-After' header (RFC 7231/9110) as seconds or HTTP-date.
@@ -426,76 +208,25 @@ object OkHttpDownloader {
 
     /**
      * Executes an HTTP GET request with OkHttp, following redirects and utilizing shared session cookies.
-     * Incorporates multi-stage resilience: Desktop User-Agent retry, www/non-www alternate host,
-     * and Jsoup connection fallback to conquer anti-bot, Cloudflare, and CDN 403 blocks.
      */
     suspend fun getHtml(
         url: String,
         referer: String? = null,
         maxBytes: Long = 2 * 1024 * 1024
     ): HttpResponse = withContext(Dispatchers.IO) {
-        // Attempt 1: Standard OkHttp GET with mobile stealth headers
-        val res1 = executeOkHttpGet(url, referer, maxBytes, isDesktop = false)
-        if (res1.isSuccessful && !res1.bodyString.isNullOrBlank()) {
-            return@withContext res1
-        }
-
-        // Attempt 2: OkHttp GET with Desktop Chrome headers
-        val resDesktop = executeOkHttpGet(url, referer, maxBytes, isDesktop = true)
-        if (resDesktop.isSuccessful && !resDesktop.bodyString.isNullOrBlank()) {
-            return@withContext resDesktop
-        }
-
-        // Attempt 3: If domain didn't have 'www.', try 'www.' (or vice-versa)
-        val alternateUrl = getAlternateWwwUrl(url)
-        if (!alternateUrl.isNullOrBlank() && alternateUrl != url) {
-            val resAlt = executeOkHttpGet(alternateUrl, referer, maxBytes, isDesktop = true)
-            if (resAlt.isSuccessful && !resAlt.bodyString.isNullOrBlank()) {
-                return@withContext resAlt
-            }
-        }
-
-        // Attempt 4: Direct Jsoup HTTPURLConnection fallback (different TLS/cipher stack than OkHttp)
-        val jsoupRes = executeJsoupFallback(url, maxBytes)
-        if (jsoupRes != null && jsoupRes.isSuccessful && !jsoupRes.bodyString.isNullOrBlank()) {
-            return@withContext jsoupRes
-        }
-
-        // Return best response or last failure
-        resDesktop.takeIf { it.statusCode > 0 } ?: res1
-    }
-
-    private fun executeOkHttpGet(
-        url: String,
-        referer: String?,
-        maxBytes: Long,
-        isDesktop: Boolean
-    ): HttpResponse {
         val reqBuilder = Request.Builder().url(url)
         if (!referer.isNullOrBlank()) {
             reqBuilder.header("Referer", referer)
         }
 
-        if (isDesktop) {
-            reqBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            reqBuilder.header("Sec-Ch-Ua-Platform", "\"Windows\"")
-            reqBuilder.header("Sec-Ch-Ua-Mobile", "?0")
-            reqBuilder.header("Sec-Ch-Ua", "\"Chromium\";v=\"131\", \"Google Chrome\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-            reqBuilder.header("Sec-Fetch-Dest", "document")
-            reqBuilder.header("Sec-Fetch-Mode", "navigate")
-            reqBuilder.header("Sec-Fetch-Site", "none")
-            reqBuilder.header("Sec-Fetch-User", "?1")
-            reqBuilder.header("Upgrade-Insecure-Requests", "1")
-        }
-
-        return try {
+        try {
             client.newCall(reqBuilder.build()).execute().use { response ->
                 val code = response.code
-                val contentType = response.header("Content-Type")?.lowercase(Locale.ROOT) ?: ""
+                val contentType = response.header("Content-Type")?.lowercase() ?: ""
                 val finalUrl = response.request.url.toString()
 
                 if (!response.isSuccessful) {
-                    return HttpResponse(
+                    return@withContext HttpResponse(
                         isSuccessful = false,
                         statusCode = code,
                         contentType = contentType,
@@ -524,7 +255,7 @@ object OkHttpDownloader {
                 )
             }
         } catch (e: Exception) {
-            Log.w(TAG, "executeOkHttpGet failed for $url (desktop=$isDesktop): ${e.message}")
+            Log.e(TAG, "getHtml failed for $url", e)
             HttpResponse(
                 isSuccessful = false,
                 statusCode = -1,
@@ -535,86 +266,9 @@ object OkHttpDownloader {
         }
     }
 
-    private fun getAlternateWwwUrl(url: String): String? {
-        return try {
-            val uri = java.net.URI(url)
-            val host = uri.host ?: return null
-            val newHost = if (host.startsWith("www.", ignoreCase = true)) {
-                host.substring(4)
-            } else {
-                "www.$host"
-            }
-            java.net.URI(uri.scheme ?: "https", uri.userInfo, newHost, uri.port, uri.path, uri.query, uri.fragment).toString()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun executeJsoupFallback(url: String, maxBytes: Long): HttpResponse? {
-        return try {
-            val conn = org.jsoup.Jsoup.connect(url)
-                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .followRedirects(true)
-                .ignoreHttpErrors(true)
-                .timeout(12000)
-                .maxBodySize(maxBytes.toInt())
-                .execute()
-
-            val statusCode = conn.statusCode()
-            if (statusCode in 200..299) {
-                HttpResponse(
-                    isSuccessful = true,
-                    statusCode = statusCode,
-                    contentType = conn.contentType() ?: "text/html",
-                    finalUrl = conn.url().toString(),
-                    bodyString = conn.body()
-                )
-            } else null
-        } catch (e: Exception) {
-            Log.w(TAG, "executeJsoupFallback failed for $url: ${e.message}")
-            null
-        }
-    }
-
     /**
      * Generates a deterministic file identifier from URL and file name to persist partial downloads across retries.
      */
-    internal fun stableDownloadBaseName(mediaUrl: String, fileName: String, downloadId: String?): String {
-        // Canonical media identity is independent of bookmark/item IDs and tracking
-        // parameters. Signed URL parameters remain in the canonical key by MediaClassifier.
-        val canonicalUrl = MediaClassifier.deduplicationKey(mediaUrl).ifBlank { mediaUrl.trim() }
-        val hash = runCatching {
-            val bytes = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(canonicalUrl.toByteArray(Charsets.UTF_8))
-            bytes.take(12).joinToString("") { "%02x".format(it) }
-        }.getOrDefault(Integer.toHexString(canonicalUrl.hashCode()))
-
-        val safeName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val extension = safeName.substringAfterLast('.', "").takeIf { it.isNotBlank() }
-        return if (extension != null) "media_$hash.$extension" else "media_$hash"
-    }
-
-    internal data class ParsedContentRange(
-        val start: Long,
-        val end: Long,
-        val total: Long?
-    )
-
-    internal fun parseContentRangeHeader(value: String?): ParsedContentRange? {
-        if (value.isNullOrBlank()) return null
-        val match = Regex(
-            """^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$""",
-            RegexOption.IGNORE_CASE
-        ).matchEntire(value) ?: return null
-        val start = match.groupValues[1].toLongOrNull() ?: return null
-        val end = match.groupValues[2].toLongOrNull() ?: return null
-        val total = match.groupValues[3].takeIf { it != "*" }?.toLongOrNull()
-        if (end < start || (total != null && (total <= 0L || end >= total))) return null
-        return ParsedContentRange(start, end, total)
-    }
-
     fun generateDeterministicId(mediaUrl: String, fileName: String): String {
         val hash = runCatching {
             val md = java.security.MessageDigest.getInstance("SHA-256")
@@ -627,42 +281,15 @@ object OkHttpDownloader {
     }
 
     /**
-     * Extracts a sanitized host/domain token from a URL or referer.
+     * Resolves and ensures existence of the target storage directory (public Downloads or app external storage).
      */
-    fun extractDomain(rawUrl: String?): String {
-        if (rawUrl.isNullOrBlank()) return "general"
-        val trimmed = rawUrl.trim()
-        if (trimmed.startsWith("data:", ignoreCase = true)) return "embedded_data"
-        return runCatching {
-            val uri = java.net.URI(trimmed)
-            var host = uri.host ?: ""
-            if (host.startsWith("www.", ignoreCase = true)) {
-                host = host.substring(4)
-            }
-            host.replace(Regex("[^a-zA-Z0-9.-]"), "_").trim().takeIf { it.isNotBlank() } ?: "general"
-        }.getOrDefault("general")
-    }
-
-    /**
-     * Resolves and ensures existence of the target storage directory:
-     * Device Download Folder under Subfolder 'Emre Gallery' and then subfolder within it by Domains.
-     */
-    fun getTargetStorageDir(context: Context, domain: String? = null): File {
+    fun getTargetStorageDir(context: Context, subfolder: String? = null): File {
         val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val emreGalleryDir = File(publicDownloads, "Emre Gallery")
-        val canWritePublic = runCatching {
-            if (!emreGalleryDir.exists()) emreGalleryDir.mkdirs()
-            if (emreGalleryDir.exists() && emreGalleryDir.isDirectory && emreGalleryDir.canWrite()) {
-                val probe = File(emreGalleryDir, ".emre_write_probe_${Thread.currentThread().id}")
-                probe.writeText("")
-                val deleted = probe.delete()
-                deleted || !probe.exists()
-            } else {
-                false
-            }
-        }.getOrDefault(false)
-
-        val baseDir = if (canWritePublic) {
+        if (!emreGalleryDir.exists()) {
+            emreGalleryDir.mkdirs()
+        }
+        val baseDir = if (emreGalleryDir.exists() && emreGalleryDir.canWrite()) {
             emreGalleryDir
         } else {
             val appExternal = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -670,81 +297,18 @@ object OkHttpDownloader {
             if (!fallbackFolder.exists()) fallbackFolder.mkdirs()
             fallbackFolder
         }
-
-        if (domain.isNullOrBlank()) {
-            return baseDir
-        }
-
-        val cleanDomain = domain.replace(Regex("[^a-zA-Z0-9.-]"), "_").trim().takeIf { it.isNotBlank() } ?: "general"
-        val domainDir = File(baseDir, cleanDomain)
-        val canWriteDomain = runCatching {
-            if (!domainDir.exists()) domainDir.mkdirs()
-            domainDir.exists() && domainDir.isDirectory && domainDir.canWrite()
-        }.getOrDefault(false)
-        return if (canWriteDomain) domainDir else baseDir
-    }
-
-    fun publishToDownloadsMediaStoreIfAppPrivate(
-        context: Context,
-        file: File,
-        mimeType: String? = null,
-        domain: String? = null
-    ) {
-        if (!file.exists() || file.length() <= 0L) return
-        val effectiveMime = mimeType?.takeIf { it.isNotBlank() }
-            ?: android.webkit.MimeTypeMap.getSingleton()
-                .getMimeTypeFromExtension(file.extension.lowercase(Locale.ROOT))
-            ?: "application/octet-stream"
-
-        val publicDownloadsPath = runCatching {
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).canonicalPath
-        }.getOrNull()
-        val fileCanonical = runCatching { file.canonicalPath }.getOrNull() ?: file.absolutePath
-        val isPublicDownloadFile = publicDownloadsPath != null &&
-            fileCanonical.startsWith(publicDownloadsPath + File.separator)
-
-        if (!isPublicDownloadFile && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            runCatching {
-                val cleanDomain = domain?.replace(Regex("[^a-zA-Z0-9.-]"), "_")?.trim()?.takeIf { it.isNotBlank() }
-                val relPath = if (cleanDomain != null) {
-                    "${Environment.DIRECTORY_DOWNLOADS}/Emre Gallery/$cleanDomain"
-                } else {
-                    "${Environment.DIRECTORY_DOWNLOADS}/Emre Gallery"
-                }
-                val values = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file.name)
-                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, effectiveMime)
-                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relPath)
-                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-                val resolver = context.contentResolver
-                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                if (uri != null) {
-                    FileInputStream(file).use { input ->
-                        resolver.openOutputStream(uri)?.use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    values.clear()
-                    values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                    resolver.update(uri, values, null, null)
-                }
-            }
+        val cleanSub = subfolder?.trim()?.takeIf { it.isNotEmpty() }
+        return if (cleanSub != null) {
+            val subDir = File(baseDir, cleanSub)
+            if (!subDir.exists()) subDir.mkdirs()
+            if (subDir.exists() && subDir.canWrite()) subDir else baseDir
         } else {
-            runCatching {
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(file.absolutePath),
-                    arrayOf(effectiveMime),
-                    null
-                )
-            }
+            baseDir
         }
     }
 
     /**
      * Downloads an image, video, audio file, or stream to storage with resumable Range support.
-     * Saved under: Download/Emre Gallery/<domain>/
      */
     suspend fun downloadMediaFileDetailed(
         context: Context,
@@ -753,47 +317,27 @@ object OkHttpDownloader {
         referer: String? = null,
         downloadId: String? = null,
         headers: Map<String, String>? = null,
-        domain: String? = null,
+        subfolder: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
-    ): DownloadResult {
-        val lockKey = MediaClassifier.deduplicationKey(mediaUrl).ifBlank { mediaUrl.trim() }
-        val lock = activeDownloadLocks[(lockKey.hashCode() and Int.MAX_VALUE) % activeDownloadLocks.size]
-        return lock.withLock {
-            downloadMediaFileDetailedLocked(
-                context, mediaUrl, fileName, referer, downloadId, headers, domain, onProgress
-            )
-        }
-    }
-
-    private suspend fun downloadMediaFileDetailedLocked(
-        context: Context,
-        mediaUrl: String,
-        fileName: String,
-        referer: String?,
-        downloadId: String?,
-        headers: Map<String, String>?,
-        domain: String?,
-        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)?
     ): DownloadResult = withContext(Dispatchers.IO) {
-        val effectiveDomain = domain?.takeIf { it.isNotBlank() }
-            ?: extractDomain(referer ?: mediaUrl).takeIf { it != "general" && it != "localhost" }
-
         // Handle Base64 inline data URIs directly without network calls
         if (mediaUrl.startsWith("data:image/", ignoreCase = true)) {
-            return@withContext downloadDataUriMedia(context, mediaUrl, fileName, downloadId, effectiveDomain)
+            return@withContext downloadDataUriMedia(context, mediaUrl, fileName, downloadId)
         }
 
-        val baseDir = getTargetStorageDir(context, null)
-        val domainDir = if (effectiveDomain != null) getTargetStorageDir(context, effectiveDomain) else baseDir
+        val targetDir = getTargetStorageDir(context, subfolder)
 
         val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val deterministicBase = stableDownloadBaseName(mediaUrl, sanitizedName, downloadId)
-
-        // Check if an existing resuming temp file is in baseDir (e.g. from local unit tests or unassigned domain)
-        val targetDir = if (File(baseDir, "$deterministicBase.downloading").exists() && !File(domainDir, "$deterministicBase.downloading").exists()) {
-            baseDir
+        val deterministicBase = if (!downloadId.isNullOrBlank()) {
+            val cleanId = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val ext = sanitizedName.substringAfterLast('.', "")
+            if (ext.isNotEmpty() && !cleanId.endsWith(".$ext", ignoreCase = true)) {
+                "${cleanId}.$ext"
+            } else {
+                cleanId
+            }
         } else {
-            domainDir
+            generateDeterministicId(mediaUrl, sanitizedName)
         }
 
         val finalFile = File(targetDir, deterministicBase)
@@ -818,20 +362,6 @@ object OkHttpDownloader {
         }
 
         var existingBytes = if (tempFile.exists()) tempFile.length() else 0L
-
-        // Resume only when the original resource version can be identified.
-        if (existingBytes > 0L && savedEtag.isNullOrBlank() && savedLastModified.isNullOrBlank()) {
-            Log.w(TAG, "Discarding partial file without a resume validator for $mediaUrl")
-            tempFile.delete()
-            metaFile.delete()
-            existingBytes = 0L
-        }
-        if (existingBytes <= 0L && metaFile.exists()) {
-            // Metadata without its partial file cannot validate a future transfer.
-            metaFile.delete()
-            savedEtag = null
-            savedLastModified = null
-        }
 
         val reqBuilder = Request.Builder()
             .url(mediaUrl)
@@ -866,17 +396,7 @@ object OkHttpDownloader {
             if (response.code == 416) {
                 val cr = response.header("Content-Range")
                 val totalLength = cr?.substringAfterLast('/', "")?.toLongOrNull()
-                val validatorChanged = (
-                    (!savedEtag.isNullOrBlank() &&
-                        !response.header("ETag").isNullOrBlank() &&
-                        savedEtag != response.header("ETag")) ||
-                    (!savedLastModified.isNullOrBlank() &&
-                        !response.header("Last-Modified").isNullOrBlank() &&
-                        savedLastModified != response.header("Last-Modified"))
-                )
-                if (!validatorChanged && totalLength != null && totalLength > 0L &&
-                    existingBytes == totalLength && tempFile.exists() && tempFile.length() == totalLength
-                ) {
+                if (totalLength != null && totalLength > 0L && existingBytes == totalLength && tempFile.exists() && tempFile.length() == totalLength) {
                     response.close()
                     val commitRes = validateAndCommitDownloadedFile(
                         context = context,
@@ -913,75 +433,42 @@ object OkHttpDownloader {
             }
 
             var activeResponse = response
-            var parsedContentRange: ParsedContentRange? = null
+            var shouldRestartFromZero = false
 
-            if (activeResponse.code == 206) {
-                parsedContentRange = parseContentRangeHeader(activeResponse.header("Content-Range"))
-                val validatorChanged = existingBytes > 0L && (
-                    (!savedEtag.isNullOrBlank() &&
-                        !activeResponse.header("ETag").isNullOrBlank() &&
-                        savedEtag != activeResponse.header("ETag")) ||
-                    (!savedLastModified.isNullOrBlank() &&
-                        !activeResponse.header("Last-Modified").isNullOrBlank() &&
-                        savedLastModified != activeResponse.header("Last-Modified"))
-                )
-                val invalidRange = parsedContentRange == null ||
-                    parsedContentRange?.start != existingBytes
-
-                if (invalidRange || validatorChanged) {
-                    if (existingBytes <= 0L) {
-                        activeResponse.close()
-                        tempFile.delete()
-                        metaFile.delete()
-                        return@withContext DownloadResult(
-                            file = null,
-                            isSuccessful = false,
-                            statusCode = 206,
-                            bytesDownloaded = 0L,
-                            totalBytes = -1L,
-                            errorMessage = "Server returned an invalid HTTP 206 Content-Range"
-                        )
-                    }
-
-                    Log.w(TAG, "Invalid or changed partial response for $mediaUrl; restarting from byte zero")
-                    activeResponse.close()
-                    tempFile.delete()
-                    metaFile.delete()
-                    existingBytes = 0L
-                    val cleanRequest = Request.Builder()
-                        .url(mediaUrl)
-                        .header("Accept", "*/*")
-                        .apply {
-                            if (!referer.isNullOrBlank()) header("Referer", referer)
-                            headers?.forEach { (k, v) ->
-                                if (!k.equals("Range", ignoreCase = true) &&
-                                    !k.equals("If-Range", ignoreCase = true)
-                                ) header(k, v)
-                            }
-                        }
-                        .build()
-                    activeResponse = client.newCall(cleanRequest).execute()
-
-                    if (activeResponse.code == 206) {
-                        parsedContentRange = parseContentRangeHeader(activeResponse.header("Content-Range"))
-                        if (parsedContentRange == null || parsedContentRange?.start != 0L) {
-                            activeResponse.close()
-                            tempFile.delete()
-                            metaFile.delete()
-                            return@withContext DownloadResult(
-                                file = null,
-                                isSuccessful = false,
-                                statusCode = 206,
-                                bytesDownloaded = 0L,
-                                totalBytes = -1L,
-                                errorMessage = "Clean restart still returned an invalid partial response"
-                            )
-                        }
-                    } else {
-                        parsedContentRange = null
+            // Check Content-Range start match before entering processing
+            if (activeResponse.code == 206 && existingBytes > 0L) {
+                val cr = activeResponse.header("Content-Range")
+                if (!cr.isNullOrBlank()) {
+                    val rangeRegex = Regex("""bytes\s+(\d+)-\d+/.*""", RegexOption.IGNORE_CASE)
+                    val match = rangeRegex.find(cr)
+                    val startByte = match?.groupValues?.get(1)?.toLongOrNull()
+                    if (startByte != null && startByte != existingBytes) {
+                        Log.w(TAG, "Content-Range start mismatch: expected $existingBytes, got $startByte. Restarting from byte 0.")
+                        shouldRestartFromZero = true
                     }
                 }
             }
+
+            if (shouldRestartFromZero) {
+                activeResponse.close()
+                tempFile.delete()
+                metaFile.delete()
+                existingBytes = 0L
+                val cleanRequest = Request.Builder()
+                    .url(mediaUrl)
+                    .header("Accept", "*/*")
+                    .apply {
+                        if (!referer.isNullOrBlank()) header("Referer", referer)
+                        headers?.forEach { (k, v) ->
+                            if (!k.equals("Range", ignoreCase = true) && !k.equals("If-Range", ignoreCase = true)) {
+                                header(k, v)
+                            }
+                        }
+                    }
+                    .build()
+                activeResponse = client.newCall(cleanRequest).execute()
+            }
+
             activeResponse.use { resp ->
                 val code = resp.code
                 val isPartial = code == 206
@@ -1053,54 +540,42 @@ object OkHttpDownloader {
                     )
                 }
 
-                val rangeInfo = if (isPartial) {
-                    parsedContentRange ?: parseContentRangeHeader(resp.header("Content-Range"))
-                } else null
-                if (isPartial && (rangeInfo == null || rangeInfo.start != existingBytes)) {
-                    tempFile.delete()
-                    metaFile.delete()
-                    return@withContext DownloadResult(
-                        file = null,
-                        isSuccessful = false,
-                        statusCode = code,
-                        bytesDownloaded = 0L,
-                        totalBytes = -1L,
-                        errorMessage = "HTTP 206 response did not contain a valid matching Content-Range"
-                    )
+                val contentRange = resp.header("Content-Range")
+                val append = if (isPartial && existingBytes > 0L) {
+                    true
+                } else {
+                    // Server returned HTTP 200 (ignored Range request) or restarted cleanly:
+                    if (existingBytes > 0L) {
+                        tempFile.delete()
+                        existingBytes = 0L
+                    }
+                    false
                 }
 
-                val append = isPartial && existingBytes > 0L
-                if (!append && existingBytes > 0L) {
-                    // HTTP 200 means the server restarted the representation. Do not carry
-                    // the previous response's validators into the new file's metadata.
-                    tempFile.delete()
-                    metaFile.delete()
-                    existingBytes = 0L
-                    savedEtag = null
-                    savedLastModified = null
-                }
-
+                // Store or update ETag / Last-Modified metadata for next resume attempt
                 val currentEtag = resp.header("ETag")
                 val currentLastModified = resp.header("Last-Modified")
-                val validatorEtag = currentEtag?.takeIf { it.isNotBlank() } ?: savedEtag
-                val validatorLastModified = currentLastModified?.takeIf { it.isNotBlank() } ?: savedLastModified
-                if (!validatorEtag.isNullOrBlank() || !validatorLastModified.isNullOrBlank()) {
+                if (!currentEtag.isNullOrBlank() || !currentLastModified.isNullOrBlank()) {
                     runCatching {
-                        metaFile.writeText(
-                            "etag=${validatorEtag.orEmpty()}\nlast_modified=${validatorLastModified.orEmpty()}"
-                        )
+                        metaFile.writeText("etag=${currentEtag.orEmpty()}\nlast_modified=${currentLastModified.orEmpty()}")
                     }
                 }
 
                 val contentLength = body.contentLength()
                 val totalBytes = if (isPartial) {
-                    rangeInfo?.total ?: -1L
+                    val rangeTotal = contentRange?.substringAfterLast('/', "")?.toLongOrNull()
+                    if (rangeTotal != null && rangeTotal > 0L) {
+                        rangeTotal
+                    } else if (contentLength > 0L) {
+                        existingBytes + contentLength
+                    } else {
+                        -1L
+                    }
                 } else {
                     if (contentLength > 0L) contentLength else -1L
                 }
-                val expectedResponseBytes = rangeInfo?.let { it.end - it.start + 1L }
+
                 var downloaded = if (append) existingBytes else 0L
-                var responseBytes = 0L
 
                 body.byteStream().use { input: InputStream ->
                     FileOutputStream(tempFile, append).use { output ->
@@ -1109,36 +584,10 @@ object OkHttpDownloader {
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                             downloaded += bytesRead
-                            responseBytes += bytesRead
                             onProgress?.invoke(downloaded, totalBytes)
                         }
                         output.flush()
-                        output.fd.sync()
                     }
-                }
-
-                if (expectedResponseBytes != null && responseBytes != expectedResponseBytes) {
-                    tempFile.delete()
-                    metaFile.delete()
-                    return@withContext DownloadResult(
-                        file = null,
-                        isSuccessful = false,
-                        statusCode = code,
-                        bytesDownloaded = 0L,
-                        totalBytes = totalBytes,
-                        errorMessage = "Response byte count did not match Content-Range"
-                    )
-                }
-
-                if (isPartial && totalBytes <= 0L) {
-                    return@withContext DownloadResult(
-                        file = null,
-                        isSuccessful = false,
-                        statusCode = code,
-                        bytesDownloaded = tempFile.length(),
-                        totalBytes = -1L,
-                        errorMessage = "HTTP 206 response did not provide a verifiable total length"
-                    )
                 }
 
                 // Verify actual downloaded size before committing the file
@@ -1303,42 +752,24 @@ object OkHttpDownloader {
             }
         }
 
-        // Commit only after validation. First try an atomic same-directory rename.
-        // If the filesystem does not support atomic moves, stage and verify the copy first.
-        val moved = try {
-            Files.move(
-                tempFile.toPath(),
-                finalFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING
-            )
+        // Clean up metadata file upon successful completion
+        metaFile.delete()
+
+        val moved = if (tempFile.renameTo(finalFile)) {
             true
-        } catch (_: Exception) {
-            try {
-                val stagingFile = File(finalFile.parentFile, "${finalFile.name}.commit.tmp")
-                stagingFile.delete()
-                tempFile.copyTo(stagingFile, overwrite = true)
-                FileOutputStream(stagingFile, true).use { it.fd.sync() }
-                if (stagingFile.length() != tempFile.length()) {
-                    throw IllegalStateException("Staged download size mismatch")
-                }
-                Files.move(
-                    stagingFile.toPath(),
-                    finalFile.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING
-                )
-                tempFile.delete()
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "Unable to commit downloaded file ${finalFile.name}", e)
-                false
-            }
+        } else {
+            tempFile.copyTo(finalFile, overwrite = true)
+            tempFile.delete()
+            true
         }
 
         if (moved && finalFile.exists() && finalFile.length() > 0L) {
-            metaFile.delete()
-            val inferredDomain = finalFile.parentFile?.name?.takeUnless { it == "Emre Gallery" }
-            publishToDownloadsMediaStoreIfAppPrivate(context, finalFile, mimeType, inferredDomain)
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(finalFile.absolutePath),
+                arrayOf(mimeType),
+                null
+            )
             return DownloadResult(
                 file = finalFile,
                 isSuccessful = true,
@@ -1369,11 +800,10 @@ object OkHttpDownloader {
         context: Context,
         dataUri: String,
         fileName: String,
-        downloadId: String?,
-        domain: String? = null
+        downloadId: String?
     ): DownloadResult {
         return try {
-            val targetDir = getTargetStorageDir(context, domain)
+            val targetDir = getTargetStorageDir(context)
             val dataInfo = MediaClassifier.parseDataUriInfo(dataUri)
             val ext = dataInfo?.format?.lowercase(Locale.ROOT) ?: "png"
             val mimeType = dataInfo?.mimeType ?: "image/png"
@@ -1427,7 +857,12 @@ object OkHttpDownloader {
             }
 
             finalFile.writeBytes(decodedBytes)
-            publishToDownloadsMediaStoreIfAppPrivate(context, finalFile, mimeType, domain)
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(finalFile.absolutePath),
+                arrayOf(mimeType),
+                null
+            )
 
             DownloadResult(
                 file = finalFile,
@@ -1463,15 +898,7 @@ object OkHttpDownloader {
         headers: Map<String, String>? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): File? {
-        val res = downloadMediaFileDetailed(
-            context = context,
-            mediaUrl = mediaUrl,
-            fileName = fileName,
-            referer = referer,
-            downloadId = downloadId,
-            headers = headers,
-            onProgress = onProgress
-        )
+        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, headers, onProgress)
         return res.file
     }
 }

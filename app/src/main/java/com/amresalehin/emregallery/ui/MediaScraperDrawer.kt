@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap
  * This composable delegates directly to DownloaderResultsPage to avoid maintaining duplicate
  * extraction pipelines.
  */
-@Deprecated("Use DiscoveredMediaPage + ExtractionCoordinator directly instead")
+@Deprecated("Use DownloaderResultsPage directly instead")
 @Composable
 fun MediaScraperDrawer(
     initialUrl: String? = null,
@@ -48,25 +48,13 @@ fun MediaScraperDrawer(
     showSearchBar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-    val coordinator = remember(context) { ExtractionCoordinator(context) }
-
-    LaunchedEffect(initialUrl) {
-        if (!initialUrl.isNullOrBlank()) {
-            DownloaderSession.startSession(initialUrl)
-            coordinator.extract(initialUrl, scope)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { coordinator.cancel() }
-    }
-
     if (!initialUrl.isNullOrBlank()) {
-        DiscoveredMediaPage(
+        DownloaderResultsPage(
+            targetUrl = initialUrl,
             onBack = onClose,
-            onDeepScanClick = { onOpenBrowser?.invoke(initialUrl) },
+            onOpenBrowser = onOpenBrowser,
+            onDownloadComplete = { onDownloadComplete() },
+            onViewSavedLibrary = onClose,
             modifier = modifier
         )
     }
@@ -143,28 +131,8 @@ fun RealScrapedCard(
                         )
                     }
                 } else {
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    val isGif = item.format.equals("GIF", ignoreCase = true) ||
-                        previewUrl.substringBefore('?').endsWith(".gif", ignoreCase = true)
-                    val scraperImageRequest = remember(previewUrl, item.downloadHeaders, item.provenance.pageUrl, isGif) {
-                        val referer = item.downloadHeaders["Referer"]
-                            ?: item.provenance.pageUrl.takeIf { it.isNotBlank() }
-                        val cookies = item.downloadHeaders["Cookie"]
-                            ?: com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar.getCookieString(previewUrl)
-                                .ifBlank { referer?.let { com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar.getCookieString(it) }.orEmpty() }
-                        coil.request.ImageRequest.Builder(context)
-                            .data(ThumbnailUtils.parseMediaDataModel(previewUrl))
-                            .setHeader("User-Agent", item.downloadHeaders["User-Agent"] ?: com.amresalehin.emregallery.data.OkHttpDownloader.DEFAULT_USER_AGENT)
-                            .apply {
-                                if (!referer.isNullOrBlank()) setHeader("Referer", referer)
-                                if (cookies.isNotBlank()) setHeader("Cookie", cookies)
-                            }
-                            .allowHardware(!isGif)
-                            .crossfade(!isGif)
-                            .build()
-                    }
                     SubcomposeAsyncImage(
-                        model = scraperImageRequest,
+                        model = previewUrl,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
@@ -503,7 +471,7 @@ fun formatScrapedMediaDimensionOrSize(
     val knownBytes = item.sizeBytes?.takeIf { it > 0L }
         ?: ImageDimensionProber.getCachedSize(item.url)?.takeIf { it > 0L }
     if (knownBytes != null) {
-        return formatBytes(knownBytes)
+        return DownloadActivityManager.formatBytes(knownBytes)
     }
 
     val formatClean = item.format.trim().uppercase(Locale.ROOT)
@@ -584,7 +552,7 @@ object ImageDimensionProber {
                 val reqBuilder = okhttp3.Request.Builder()
                     .url(httpUrl)
                     .header("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
-                    .header("Accept", "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                    .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                     .header("Accept-Encoding", "identity")
                     .header("Range", "bytes=0-8191")
 
@@ -607,16 +575,6 @@ object ImageDimensionProber {
                             sizeCache[cleanUrl] = totalSize
                         }
 
-                        val contentType = resp.header("Content-Type")?.lowercase() ?: ""
-                        val isIsoBmffContentType = contentType.startsWith("video/") ||
-                            contentType.startsWith("audio/") ||
-                            contentType.contains("avif") ||
-                            contentType.contains("heif") ||
-                            contentType.contains("heic")
-                        if (isIsoBmffContentType) {
-                            return@withPermit null
-                        }
-
                         val body = resp.body ?: return@withPermit null
                         val maxProbeBytes = 8192
                         val buffer = ByteArray(maxProbeBytes)
@@ -628,14 +586,7 @@ object ImageDimensionProber {
                                 totalRead += read
                             }
                         }
-                        // Do not pass partial 8KB ISOBMFF ('ftyp' box at offset 4) buffers to BitmapFactory,
-                        // as Android's HeifDecoderImpl logs 'E/HeifDecoderImpl: getSize: not supported!' on partial streams.
-                        val hasIsoBmffBox = totalRead >= 12 &&
-                            buffer[4] == 'f'.code.toByte() &&
-                            buffer[5] == 't'.code.toByte() &&
-                            buffer[6] == 'y'.code.toByte() &&
-                            buffer[7] == 'p'.code.toByte()
-                        if (totalRead > 0 && !hasIsoBmffBox) {
+                        if (totalRead > 0) {
                             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                             BitmapFactory.decodeByteArray(buffer, 0, totalRead, opts)
                             if (opts.outWidth > 0 && opts.outHeight > 0) {

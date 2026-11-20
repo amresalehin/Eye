@@ -198,21 +198,37 @@ object GalleryDlEngine {
             return GalleryDlSupportInfo(false, "", "", "", "")
         }
 
+        val heuristic = defaultPopularSites().firstOrNull { site ->
+            site.domains.any { domain -> url.contains(domain, ignoreCase = true) }
+        }?.let { site ->
+            GalleryDlSupportInfo(
+                isSupported = true,
+                category = site.name.lowercase(),
+                subcategory = "",
+                extractorName = if (site.name == "YouTube" || site.name == "TikTok") "yt-dlp" else "${site.name}Extractor",
+                displayName = site.name
+            )
+        }
+
         return try {
             val py = Python.getInstance()
             val runner = py.getModule("gallery_dl_runner")
             val checkJson = runner.callAttr("check_support", url.trim()).toString()
             val json = JSONObject(checkJson)
-            GalleryDlSupportInfo(
-                isSupported = json.optBoolean("supported", false),
-                category = json.optString("category", ""),
-                subcategory = json.optString("subcategory", ""),
-                extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", ""))
-            )
+            if (json.optBoolean("supported", false)) {
+                GalleryDlSupportInfo(
+                    isSupported = true,
+                    category = json.optString("category", ""),
+                    subcategory = json.optString("subcategory", ""),
+                    extractorName = json.optString("extractor", ""),
+                    displayName = json.optString("display_name", json.optString("category", ""))
+                )
+            } else {
+                heuristic ?: GalleryDlSupportInfo(false, "", "", "", "")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
-            GalleryDlSupportInfo(false, "", "", "", "")
+            heuristic ?: GalleryDlSupportInfo(false, "", "", "", "")
         }
     }
 
@@ -569,6 +585,8 @@ object GalleryDlEngine {
     }
 
     fun defaultPopularSites(): List<GalleryDlSite> = listOf(
+        GalleryDlSite("YouTube", listOf("youtube.com", "youtu.be"), "smart_display"),
+        GalleryDlSite("TikTok", listOf("tiktok.com"), "smart_display"),
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
         GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
         GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),

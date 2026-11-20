@@ -326,6 +326,10 @@ object MediaClassifier {
         if (raw.isNullOrBlank()) return ""
         var cleaned = raw.trim().trim('"', '\'', '<', '>', '(', ')', '[', ']', ';')
         if (cleaned.isBlank()) return ""
+        if (cleaned.startsWith("file://", ignoreCase = true) ||
+            cleaned.startsWith("content://", ignoreCase = true) ||
+            cleaned.startsWith("data:", ignoreCase = true)
+        ) return cleaned
 
         if (!cleaned.startsWith("http://", ignoreCase = true) && !cleaned.startsWith("https://", ignoreCase = true)) {
             cleaned = "https://$cleaned"
@@ -611,8 +615,10 @@ object MediaClassifier {
             )
         }
 
-        // 1. Reddit Preview CDN (preview.redd.it / external-preview.redd.it -> i.redd.it)
-        if (normalized.contains("preview.redd.it") || normalized.contains("external-preview.redd.it")) {
+        // 1. Only Reddit's internal preview host maps to i.redd.it. external-preview is
+        // a third-party CDN URL and its signed query string is required for access.
+        val normalizedHost = runCatching { java.net.URI(normalized).host?.lowercase(Locale.ROOT) }.getOrNull()
+        if (normalizedHost == "preview.redd.it") {
             val cleanPath = normalized.substringBefore("?")
             val fileName = cleanPath.substringAfterLast('/')
             val originalUrl = "https://i.redd.it/$fileName"
@@ -1468,6 +1474,10 @@ object MediaClassifier {
     fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
         val trimmed = input.trim()
         if (trimmed.isBlank()) return ""
+        if (trimmed.startsWith("file://", ignoreCase = true) ||
+            trimmed.startsWith("content://", ignoreCase = true) ||
+            trimmed.startsWith("data:", ignoreCase = true)
+        ) return trimmed
         return if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
             trimmed
         } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {
@@ -1564,9 +1574,9 @@ object MediaClassifier {
         val trimmed = url.trim()
         if (trimmed.isBlank()) return ""
         return try {
-            val uri = java.net.URI(if (trimmed.contains("://")) trimmed else "https://$trimmed")
+            val uri = java.net.URI(if (trimmed.contains("://")) trimmed else "https://$trimmed").normalize()
             val host = (uri.host ?: "").lowercase(java.util.Locale.ROOT).removePrefix("www.").removePrefix("m.")
-            val path = (uri.path ?: "").trimEnd('/')
+            val path = (uri.path ?: "").trimEnd('/').ifBlank { "/" }
             val query = uri.query?.split("&")
                 ?.filterNot { p ->
                     val k = p.substringBefore("=").lowercase(java.util.Locale.ROOT)

@@ -21,6 +21,19 @@ data class BrowserSite(
 /**
  * Manages persistent browser history for tracking top visited and recent sites.
  */
+
+data class BrowserShortcut(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val url: String
+)
+
+data class BrowserTabItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "New Tab",
+    val url: String = ""
+)
+
 class BrowserHistoryManager(private val context: Context) {
 
     private val historyKey = stringPreferencesKey("browser_sites_history_v1")

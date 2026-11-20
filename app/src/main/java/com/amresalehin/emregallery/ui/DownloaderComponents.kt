@@ -2732,3 +2732,83 @@ fun DownloaderMediaCard(
         }
     }
 }
+
+@Composable
+fun WebbyDiscoveredMediaGrid(
+    items: List<ScrapedMediaItem>,
+    onDownloadSingle: (ScrapedMediaItem) -> Unit,
+    onDownloadSelected: (List<ScrapedMediaItem>) -> Unit,
+    onOpenInStudio: (String) -> Unit,
+    onClearAll: () -> Unit,
+    searchHistory: List<String> = emptyList(),
+    onSelectHistoryUrl: (String) -> Unit = {},
+    onClearHistory: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    var selectedIds by remember(items) { mutableStateOf(items.map { it.id }.toSet()) }
+    Column(modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${items.size} media found",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onClearAll) {
+                    Text("Clear")
+                }
+                Button(
+                    onClick = { onDownloadSelected(items.filter { it.id in selectedIds }) },
+                    enabled = selectedIds.isNotEmpty()
+                ) {
+                    Text("Download (${selectedIds.size})")
+                }
+            }
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            items(items, key = { it.id }) { item ->
+                val isSelected = item.id in selectedIds
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    tonalElevation = 1.dp,
+                    border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                        }
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text = item.title.ifBlank { item.format },
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            TextButton(onClick = { onOpenInStudio(item.url) }) {
+                                Text("Studio")
+                            }
+                            TextButton(onClick = { onDownloadSingle(item) }) {
+                                Text("Save")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

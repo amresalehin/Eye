@@ -21,7 +21,55 @@ enum class DownloaderVideoQuality(val id: String, val label: String, val maxHeig
     Q1080P("1080P", "1080p Full HD", 1080),
     Q720P("720P", "720p HD", 720),
     Q480P("480P", "480p SD", 480),
-    Q360P("360P", "360p Data Saver", 360);
+    Q360P("360P", "360p Data Saver", 360),
+    Q240P("240P", "240p Low", 240),
+    Q144P("144P", "144p Minimal", 144);
+
+
+    val speedBoostEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_SPEED_BOOST] ?: syncPrefs.getBoolean(PREF_SPEED_BOOST, true)
+    }.distinctUntilChanged()
+
+    val recursiveCrawlEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_RECURSIVE_CRAWL] ?: syncPrefs.getBoolean(PREF_RECURSIVE_CRAWL, false)
+    }.distinctUntilChanged()
+
+    val formatMode: Flow<DownloaderFormatMode> = appContext.galleryDataStore.data.map { prefs ->
+        DownloaderFormatMode.fromId(prefs[KEY_FORMAT_MODE] ?: syncPrefs.getString(PREF_FORMAT_MODE, DownloaderFormatMode.VIDEO_AUDIO.id))
+    }.distinctUntilChanged()
+
+    suspend fun setSpeedBoostEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_SPEED_BOOST, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_SPEED_BOOST] = enabled }
+    }
+
+    suspend fun setRecursiveCrawlEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_RECURSIVE_CRAWL, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_RECURSIVE_CRAWL] = enabled }
+    }
+
+    suspend fun setFormatMode(mode: DownloaderFormatMode) {
+        syncPrefs.edit().putString(PREF_FORMAT_MODE, mode.id).apply()
+        appContext.galleryDataStore.edit { it[KEY_FORMAT_MODE] = mode.id }
+    }
+
+    suspend fun setRedditConfig(config: RedditDlConfig) {
+        val encSecret = if (config.clientSecret.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.clientSecret) else ""
+        val encPass = if (config.password.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.password) else ""
+        val encToken = if (config.refreshToken.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.refreshToken) else ""
+        syncPrefs.edit()
+            .putString(PREF_REDDIT_CLIENT_ID, config.clientId)
+            .putString(PREF_REDDIT_CLIENT_SECRET, encSecret)
+            .putString(PREF_REDDIT_USERNAME, config.username)
+            .putString(PREF_REDDIT_PASSWORD, encPass)
+            .putString(PREF_REDDIT_REFRESH_TOKEN, encToken)
+            .putInt(PREF_REDDIT_LIMIT, config.limit.coerceIn(1, 500))
+            .putString(PREF_REDDIT_AFTER_DATE, config.afterDate)
+            .putString(PREF_REDDIT_BEFORE_DATE, config.beforeDate)
+            .putBoolean(PREF_REDDIT_INCLUDE_COMMENTS, config.includeComments)
+            .putBoolean(PREF_REDDIT_INCLUDE_AUTHORS, config.includePostAuthors)
+            .apply()
+    }
 
     companion object {
         fun fromId(id: String?): DownloaderVideoQuality =
@@ -45,6 +93,31 @@ enum class DownloaderSubfolderMode(val id: String, val label: String, val descri
  * Synchronizes values to both Jetpack DataStore (for reactive Compose UI Flows)
  * and SharedPreferences (for non-blocking reads in WorkManager and downloader engines).
  */
+
+enum class DownloaderFormatMode(val id: String, val label: String) {
+    VIDEO_AUDIO("video_audio", "Video + Audio"),
+    VIDEO_ONLY("video_only", "Video Only"),
+    AUDIO_ONLY("audio_only", "Audio Only");
+
+    companion object {
+        fun fromId(id: String?): DownloaderFormatMode =
+            entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: VIDEO_AUDIO
+    }
+}
+
+data class RedditDlConfig(
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val username: String = "",
+    val password: String = "",
+    val refreshToken: String = "",
+    val limit: Int = 50,
+    val afterDate: String = "",
+    val beforeDate: String = "",
+    val includeComments: Boolean = false,
+    val includePostAuthors: Boolean = false
+)
+
 class DownloaderPreferencesManager(private val context: Context) {
 
     private val appContext = context.applicationContext
@@ -299,6 +372,110 @@ class DownloaderPreferencesManager(private val context: Context) {
                     clean.ifBlank { null }
                 }
             }
+        }
+
+        private val KEY_SPEED_BOOST = booleanPreferencesKey("downloader_speed_boost_enabled")
+        private val KEY_RECURSIVE_CRAWL = booleanPreferencesKey("downloader_recursive_crawl_enabled")
+        private val KEY_FORMAT_MODE = stringPreferencesKey("downloader_format_mode")
+
+        private const val PREF_SPEED_BOOST = "speed_boost_enabled"
+        private const val PREF_RECURSIVE_CRAWL = "recursive_crawl_enabled"
+        private const val PREF_FORMAT_MODE = "format_mode"
+        private const val PREF_PROXY_ENABLED = "proxy_enabled"
+        private const val PREF_PROXY_URL = "proxy_url"
+        private const val PREF_NETWORK_TIMEOUT = "network_timeout_seconds"
+        private const val PREF_RETRY_COUNT = "retry_count"
+        private const val PREF_DOWNLOAD_PLAYLIST = "download_playlist"
+        private const val PREF_DOWNLOAD_SUBTITLES = "download_subtitles"
+        private const val PREF_INCLUDE_AUTO_SUBTITLES = "include_auto_subtitles"
+        private const val PREF_SUBTITLE_LANGS = "subtitle_languages"
+        private const val PREF_REDDIT_CLIENT_ID = "reddit_dl_client_id"
+        private const val PREF_REDDIT_CLIENT_SECRET = "reddit_dl_client_secret"
+        private const val PREF_REDDIT_USERNAME = "reddit_dl_username"
+        private const val PREF_REDDIT_PASSWORD = "reddit_dl_password"
+        private const val PREF_REDDIT_REFRESH_TOKEN = "reddit_dl_refresh_token"
+        private const val PREF_REDDIT_LIMIT = "reddit_dl_limit"
+        private const val PREF_REDDIT_AFTER_DATE = "reddit_dl_after_date"
+        private const val PREF_REDDIT_BEFORE_DATE = "reddit_dl_before_date"
+        private const val PREF_REDDIT_INCLUDE_COMMENTS = "reddit_dl_include_comments"
+        private const val PREF_REDDIT_INCLUDE_AUTHORS = "reddit_dl_include_authors"
+
+        fun getActiveProxyUrlSync(context: Context): String? {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            if (!sp.getBoolean(PREF_PROXY_ENABLED, false)) return null
+            return sp.getString(PREF_PROXY_URL, null)?.trim()?.takeIf { it.isNotBlank() }
+        }
+
+        fun getFormatModeSync(context: Context): DownloaderFormatMode {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return DownloaderFormatMode.fromId(sp.getString(PREF_FORMAT_MODE, DownloaderFormatMode.VIDEO_AUDIO.id))
+        }
+
+        fun getNetworkTimeoutSync(context: Context): Int {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getInt(PREF_NETWORK_TIMEOUT, 30).coerceIn(10, 180)
+        }
+
+        fun getRetryCountSync(context: Context): Int {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getInt(PREF_RETRY_COUNT, 3).coerceIn(0, 10)
+        }
+
+        fun isDownloadPlaylistSync(context: Context): Boolean {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getBoolean(PREF_DOWNLOAD_PLAYLIST, false)
+        }
+
+        fun isDownloadSubtitlesSync(context: Context): Boolean {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getBoolean(PREF_DOWNLOAD_SUBTITLES, false)
+        }
+
+        fun isIncludeAutoSubtitlesSync(context: Context): Boolean {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getBoolean(PREF_INCLUDE_AUTO_SUBTITLES, false)
+        }
+
+        fun getSubtitleLanguagesSync(context: Context): List<String> {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = sp.getString(PREF_SUBTITLE_LANGS, "en") ?: "en"
+            return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.ifEmpty { listOf("en") }
+        }
+
+        fun isRecursiveCrawlEnabledSync(context: Context): Boolean {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return sp.getBoolean(PREF_RECURSIVE_CRAWL, false)
+        }
+
+        fun getRecursiveCrawlConfigSync(context: Context): com.amresalehin.emregallery.data.RecursiveCrawlConfig {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return com.amresalehin.emregallery.data.RecursiveCrawlConfig(
+                maxDepth = sp.getInt("recursive_crawl_max_depth", 2).coerceIn(1, 5),
+                maxPages = sp.getInt("recursive_crawl_max_pages", 15).coerceIn(1, 100),
+                sameDomainOnly = sp.getBoolean("recursive_crawl_same_domain", true),
+                delayMs = sp.getLong("recursive_crawl_delay_ms", 400L).coerceIn(100L, 5000L)
+            )
+        }
+
+        fun getRedditConfigSync(context: Context): RedditDlConfig {
+            val sp = context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            fun dec(key: String): String {
+                val raw = sp.getString(key, "") ?: ""
+                if (raw.isBlank()) return ""
+                return runCatching { com.amresalehin.emregallery.data.VaultCrypto.decryptStringFromBase64(raw) }.getOrDefault(raw)
+            }
+            return RedditDlConfig(
+                clientId = sp.getString(PREF_REDDIT_CLIENT_ID, "") ?: "",
+                clientSecret = dec(PREF_REDDIT_CLIENT_SECRET),
+                username = sp.getString(PREF_REDDIT_USERNAME, "") ?: "",
+                password = dec(PREF_REDDIT_PASSWORD),
+                refreshToken = dec(PREF_REDDIT_REFRESH_TOKEN),
+                limit = sp.getInt(PREF_REDDIT_LIMIT, 50),
+                afterDate = sp.getString(PREF_REDDIT_AFTER_DATE, "") ?: "",
+                beforeDate = sp.getString(PREF_REDDIT_BEFORE_DATE, "") ?: "",
+                includeComments = sp.getBoolean(PREF_REDDIT_INCLUDE_COMMENTS, false),
+                includePostAuthors = sp.getBoolean(PREF_REDDIT_INCLUDE_AUTHORS, false)
+            )
         }
     }
 }

@@ -145,4 +145,28 @@ object DownloaderSession {
     fun deselectAll() {
         _selectedItemIds.value = emptySet()
     }
+
+    fun clear() {
+        synchronized(itemsLock) {
+            _currentUrl.value = ""
+            _sourceDomain.value = ""
+            _pageTitle.value = ""
+            canonicalMap.clear()
+            _discoveredItems.value = emptyList()
+            _selectedItemIds.value = emptySet()
+            _isExtracting.value = false
+            _statusMessage.value = ""
+            _errorMessage.value = null
+        }
+    }
+
+    fun updateBrowserPage(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return
+        val domain = runCatching { URL(trimmed).host }.getOrDefault("")
+        synchronized(itemsLock) {
+            _currentUrl.value = trimmed
+            if (domain.isNotBlank()) _sourceDomain.value = domain
+        }
+    }
 }

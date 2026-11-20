@@ -60,6 +60,7 @@ object FfmpegKitEngine {
     fun ensureConfigured() {
         if (!isConfigured) {
             try {
+                FFmpegKitConfig.setSessionHistorySize(20)
                 FFmpegKitConfig.enableLogCallback { log ->
                     if (log != null && log.message.isNotBlank()) {
                         Log.v(TAG, "[FFmpeg] ${log.message.trimEnd()}")

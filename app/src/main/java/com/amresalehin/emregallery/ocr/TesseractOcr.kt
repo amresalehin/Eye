@@ -362,4 +362,19 @@ object TesseractOcr {
         }
     }
 
+
+    private val engineLock = Any()
+    private var cachedEngine: TessBaseAPI? = null
+    private var cachedEngineKey: String? = null
+
+    fun hasCachedNonEmptyText(context: Context, uri: Uri): Boolean =
+        !readCachedResult(context, uri).isNullOrBlank()
+
+    fun releaseCachedEngine() {
+        synchronized(engineLock) {
+            runCatching { cachedEngine?.recycle() }
+            cachedEngine = null
+            cachedEngineKey = null
+        }
+    }
 }

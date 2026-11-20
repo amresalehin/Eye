@@ -14,18 +14,18 @@ permissions:
   contents: read
 
 jobs:
-  assemble-debug:
-    name: Unit tests and debug APK
+  build-and-test:
+    name: Python tests, Android unit tests, Lint, Debug & Release APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.11
         uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           architecture: 'x64'
 
       - name: Set up JDK 17
@@ -38,18 +38,40 @@ jobs:
         run: |
           java -version
           python --version
-          python3.10 --version
+          python3.11 --version
+
+      - name: Run Python extractor unit tests
+        run: python3 -m unittest discover -s app/src/test/python -v
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run unit tests and assemble debug APK
-        run: bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - name: Run Android unit tests, lint, and assemble debug & release APKs
+        run: bash ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Upload unit test & lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emre-gallery-reports-${{ github.sha }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: emre-gallery-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: emre-gallery-release-${{ github.sha }}
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14

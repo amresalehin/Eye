@@ -63,6 +63,23 @@ data class DownloadActivityItem(
     val isFinished: Boolean get() = status == DownloadActivityStatus.FINISHED
     val isPaused: Boolean get() = status == DownloadActivityStatus.PAUSED
     val isRetrying: Boolean get() = status == DownloadActivityStatus.RETRYING
+
+    val etaSeconds: Long?
+        get() {
+            if (status != DownloadActivityStatus.DOWNLOADING) return null
+            if (speedBytesPerSec <= 0L || totalBytes <= 0L || bytesRead >= totalBytes) return null
+            return ((totalBytes - bytesRead) / speedBytesPerSec).coerceAtLeast(1L)
+        }
+
+    val formattedEta: String?
+        get() {
+            val sec = etaSeconds ?: return null
+            return when {
+                sec < 60L -> "${sec}s left"
+                sec < 3600L -> "${sec / 60L}m ${sec % 60L}s left"
+                else -> "${sec / 3600L}h ${(sec % 3600L) / 60L}m left"
+            }
+        }
 }
 
 object DownloadActivityManager {
@@ -790,6 +807,45 @@ object DownloadActivityManager {
                     dateFormat.format(Date(timestampMillis))
                 }.getOrDefault("Recent")
             }
+        }
+    }
+
+    fun syncWithStorageDir(context: Context) {
+        initialize(context)
+        val rootDir = OkHttpDownloader.getTargetStorageDir(context)
+        if (!rootDir.exists() || !rootDir.isDirectory) return
+        val existingByPath = _activities.value.associateBy { it.localUri ?: "" }
+        val discovered = mutableListOf<DownloadActivityItem>()
+        val mediaExts = setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "mp3", "m4a", "opus", "flac", "wav", "ogg", "jpg", "jpeg", "png", "webp", "gif", "avif", "heic")
+        rootDir.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".tmp") && it.length() > 0L }.forEach { file ->
+            val ext = file.extension.lowercase(Locale.ROOT)
+            if (ext !in mediaExts) return@forEach
+            val fileUri = android.net.Uri.fromFile(file).toString()
+            if (existingByPath.containsKey(fileUri) || existingByPath.containsKey(file.absolutePath)) return@forEach
+            val isVid = ext in setOf("mp4", "mkv", "webm", "mov", "avi", "m4v")
+            val isAud = ext in setOf("mp3", "m4a", "opus", "flac", "wav", "ogg")
+            val parentDomain = file.parentFile?.takeIf { it != rootDir }?.name
+            discovered.add(
+                DownloadActivityItem(
+                    id = "storage_${(file.absolutePath.hashCode() and 0x7FFFFFFF)}",
+                    title = file.name,
+                    mediaUrl = fileUri,
+                    localUri = fileUri,
+                    isVideo = isVid,
+                    isAudio = isAud,
+                    format = ext.uppercase(Locale.ROOT),
+                    status = DownloadActivityStatus.FINISHED,
+                    progress = 1f,
+                    bytesRead = file.length(),
+                    totalBytes = file.length(),
+                    timestampMillis = file.lastModified(),
+                    sourceDomain = parentDomain
+                )
+            )
+        }
+        if (discovered.isNotEmpty()) {
+            val merged = (discovered + _activities.value).distinctBy { it.localUri ?: it.id }
+            _activities.value = merged
         }
     }
 }

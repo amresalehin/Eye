@@ -40,7 +40,24 @@ data class GalleryDlOptions(
     val timeoutSeconds: Int = 30,
     val maxHeight: Int = 0,
     val audioOnly: Boolean = false,
-    val preferredAudioFormat: String = "M4A"
+    val preferredAudioFormat: String = "M4A",
+    val limit: Int? = null,
+    val afterDate: String? = null,
+    val beforeDate: String? = null,
+    val includeComments: Boolean = false,
+    val includePostAuthors: Boolean = false,
+    val redditClientId: String? = null,
+    val redditClientSecret: String? = null,
+    val redditUsername: String? = null,
+    val redditPassword: String? = null,
+    val redditRefreshToken: String? = null,
+    val proxy: String? = null,
+    val formatMode: String = "video_audio",
+    val downloadPlaylist: Boolean = false,
+    val downloadSubtitles: Boolean = false,
+    val includeAutoSubtitles: Boolean = false,
+    val subtitleLanguages: List<String> = listOf("en"),
+    val retries: Int = 3
 )
 
 data class GalleryDlExtractResult(
@@ -553,6 +570,7 @@ object GalleryDlEngine {
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),
         GalleryDlSite("Flickr", listOf("flickr.com"), "photo_camera"),
         GalleryDlSite("Tumblr", listOf("tumblr.com"), "feed"),
+        GalleryDlSite("Pixiv", listOf("pixiv.net", "i.pximg.net"), "palette"),
         GalleryDlSite("Wikimedia", listOf("wikimedia.org", "wikipedia.org"), "public"),
         GalleryDlSite("Bluesky", listOf("bsky.app"), "cloud"),
         GalleryDlSite("500px", listOf("500px.com"), "camera_alt"),
@@ -560,4 +578,115 @@ object GalleryDlEngine {
         GalleryDlSite("Bilibili", listOf("bilibili.com"), "smart_display"),
         GalleryDlSite("4chan", listOf("4chan.org", "4channel.org", "i.4cdn.org"), "forum")
     )
+
+    fun isPythonStarted(): Boolean = try {
+        Python.isStarted()
+    } catch (_: Throwable) {
+        false
+    }
+
+    private fun checkRunnerBoolAttr(attrName: String): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val runner = Python.getInstance().getModule("gallery_dl_runner")
+            runner.callAttr(attrName).toBoolean()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    fun isGalleryDlAvailable(): Boolean = checkRunnerBoolAttr("is_gallery_dl_available")
+    fun isYtDlpAvailable(): Boolean = checkRunnerBoolAttr("is_yt_dlp_available")
+    fun isInstaloaderAvailable(): Boolean = checkRunnerBoolAttr("is_instaloader_available")
+    fun isPinterestDlAvailable(): Boolean = checkRunnerBoolAttr("is_pinterest_dl_available")
+    fun isRedditDlAvailable(): Boolean = checkRunnerBoolAttr("is_reddit_dl_available")
+    fun isMediaDownloaderAvailable(): Boolean = checkRunnerBoolAttr("is_media_downloader_available")
+    fun isMediaScraperAvailable(): Boolean = checkRunnerBoolAttr("is_media_scraper_available")
+
+    fun isYouTubeUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val lower = url.trim().lowercase(java.util.Locale.ROOT)
+        return lower.contains("youtube.com/") ||
+            lower.contains("youtu.be/") ||
+            lower.contains("youtube-nocookie.com/")
+    }
+
+    fun normalizeYouTubeUrl(url: String): String {
+        val trimmed = url.trim()
+        if (!isYouTubeUrl(trimmed)) return trimmed
+        return try {
+            val uri = android.net.Uri.parse(trimmed)
+            val host = (uri.host ?: "").lowercase(java.util.Locale.ROOT)
+            val videoId = when {
+                host == "youtu.be" || host.endsWith(".youtu.be") ->
+                    uri.pathSegments.firstOrNull()?.takeIf { it.isNotBlank() }
+                uri.pathSegments.firstOrNull()?.equals("shorts", ignoreCase = true) == true ->
+                    uri.pathSegments.getOrNull(1)?.takeIf { it.isNotBlank() }
+                uri.pathSegments.firstOrNull()?.equals("embed", ignoreCase = true) == true ->
+                    uri.pathSegments.getOrNull(1)?.takeIf { it.isNotBlank() }
+                uri.pathSegments.firstOrNull()?.equals("live", ignoreCase = true) == true ->
+                    uri.pathSegments.getOrNull(1)?.takeIf { it.isNotBlank() }
+                else -> uri.getQueryParameter("v")?.takeIf { it.isNotBlank() }
+            }
+            if (!videoId.isNullOrBlank()) {
+                "https://www.youtube.com/watch?v=$videoId"
+            } else {
+                trimmed
+            }
+        } catch (_: Throwable) {
+            trimmed
+        }
+    }
+
+    private val YOUTUBE_AUTH_COOKIE_KEYS = setOf(
+        "SID", "SAPISID", "__Secure-3PSID", "__Secure-1PSID",
+        "__Secure-3PAPISID", "__Secure-1PAPISID", "HSID", "SSID", "APISID", "LOGIN_INFO"
+    )
+
+    fun sanitizeCookiesForUrl(url: String, cookies: String?): String? {
+        val raw = cookies?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (!isYouTubeUrl(url)) return raw
+        val hasAuth = if (raw.startsWith("# Netscape") || raw.contains("\t")) {
+            raw.lineSequence().any { line ->
+                val parts = line.split('\t')
+                parts.size >= 6 && parts[5].trim() in YOUTUBE_AUTH_COOKIE_KEYS
+            }
+        } else {
+            raw.split(';').any { pair ->
+                val key = pair.substringBefore('=').trim()
+                key in YOUTUBE_AUTH_COOKIE_KEYS
+            }
+        }
+        return if (hasAuth) raw else null
+    }
+
+    suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_reddit", url, options)
+
+    suspend fun extractInstagram(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_instagram", url, options)
+
+    suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_pinterest", url, options)
+
+    suspend fun extractSpotify(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_spotify", url, options)
+
+    suspend fun extractRadioJavan(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_radiojavan", url, options)
+
+    suspend fun extractXSpace(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_xspace", url, options)
+
+    suspend fun extractTumblr(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_tumblr", url, options)
+
+    suspend fun extractPixiv(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_pixiv", url, options)
+
+    suspend fun extractTwitterMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_twitter_media_scraper", url, options)
+
+    suspend fun extractFacebookMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        extractWithRunner("extract_facebook_media_scraper", url, options)
 }

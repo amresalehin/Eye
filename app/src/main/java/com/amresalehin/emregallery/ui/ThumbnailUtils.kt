@@ -78,4 +78,21 @@ object ThumbnailUtils {
         }
         return builder.build()
     }
+
+    fun resolvePreviewImageModel(
+        thumbnailUrl: String?,
+        mediaUrl: String?,
+        isVideo: Boolean = false,
+        isAudio: Boolean = false,
+        isStream: Boolean = false
+    ): String? {
+        val cleanThumb = thumbnailUrl?.trim()?.takeIf { it.isNotBlank() }
+        if (cleanThumb != null) return cleanThumb
+        if (isAudio || isStream) return null
+        val cleanMedia = mediaUrl?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val lower = cleanMedia.lowercase(java.util.Locale.ROOT)
+        if (lower.contains(".m3u8") || lower.contains(".mpd")) return null
+        if (!isVideo) return cleanMedia
+        return cleanMedia
+    }
 }

@@ -94,6 +94,8 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Maintained drop-in FFmpegKit fork (SDK 35, 16 KB page aligned, arm64-v8a + x86_64)
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
@@ -107,10 +109,11 @@ dependencies {
 
 chaquopy {
     defaultConfig {
-        version = "3.10"
+        version = "3.11"
         pip {
-            install("gallery-dl")
-            install("yt-dlp")
+            install("gallery-dl==1.32.20")
+            install("yt-dlp>=2026.8.19,<2027.0")
+            install("instaloader==4.16")
         }
     }
 }

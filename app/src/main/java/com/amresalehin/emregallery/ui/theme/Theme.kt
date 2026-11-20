@@ -71,6 +71,38 @@ private val Dark = darkColorScheme(
     scrim = Color(0x99000000)
 )
 
+
+enum class AppColorTheme(val id: String, val label: String, val accentHex: Long) {
+    MONOCHROME("monochrome", "Monochrome", 0xFF202020),
+    OCEAN("ocean", "Ocean", 0xFF00668B),
+    FOREST("forest", "Forest", 0xFF2E6B3E),
+    SUNSET("sunset", "Sunset", 0xFFD85A2A),
+    LAVENDER("lavender", "Lavender", 0xFF6B539B),
+    CRIMSON("crimson", "Crimson", 0xFFB3261E),
+    AMBER("amber", "Amber", 0xFFB87600),
+    TEAL("teal", "Teal", 0xFF006A6A),
+    INDIGO("indigo", "Indigo", 0xFF3F51B5),
+    ROSE("rose", "Rose", 0xFFC2185B),
+    EMERALD("emerald", "Emerald", 0xFF0F8A5F),
+    COBALT("cobalt", "Cobalt", 0xFF1D4ED8),
+    CYBERPUNK("cyberpunk", "Cyberpunk", 0xFFE11D9A),
+    ESPRESSO("espresso", "Espresso", 0xFF5D4037),
+    GLACIER("glacier", "Glacier", 0xFF0284C7),
+    SLATE("slate", "Slate", 0xFF475569),
+    CORAL("coral", "Coral", 0xFFE66767),
+    MINT("mint", "Mint", 0xFF10B981),
+    GOLD("gold", "Gold", 0xFFCA8A04),
+    PLUM("plum", "Plum", 0xFF7E22CE),
+    SAKURA("sakura", "Sakura", 0xFFEC4899),
+    MIDNIGHT("midnight", "Midnight", 0xFF1E293B),
+    OLIVE("olive", "Olive", 0xFF65732A);
+
+    companion object {
+        fun fromId(id: String?): AppColorTheme =
+            entries.firstOrNull { it.id.equals(id?.trim(), ignoreCase = true) } ?: MONOCHROME
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmreGalleryTheme(

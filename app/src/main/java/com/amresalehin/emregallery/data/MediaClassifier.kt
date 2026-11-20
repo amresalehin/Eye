@@ -1466,7 +1466,111 @@ object MediaClassifier {
         if (mimeType?.startsWith("audio/", ignoreCase = true) == true) return true
         return resolveLocalMediaMimeType(uriOrName).isAudio
     }
+
+    private val REDDIT_SHORTHAND_REGEX = Regex(
+        "^(?:(r)/([A-Za-z0-9_]{2,32})(?:/([A-Za-z0-9_]+))?|(u)/([A-Za-z0-9_-]{2,32})|(p)/([A-Za-z0-9]{4,16})|my/(saved|joined|following|upvoted|downvoted|hidden))$",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isRedditShorthand(input: String?): Boolean {
+        val t = input?.trim() ?: return false
+        if (t.isBlank() || t.contains("://") || t.contains(' ')) return false
+        return REDDIT_SHORTHAND_REGEX.matches(t)
+    }
+
+    fun normalizeRedditShorthand(input: String?): String? {
+        val t = input?.trim() ?: return null
+        if (!isRedditShorthand(t)) return null
+        val lower = t.lowercase(java.util.Locale.ROOT)
+        return when {
+            lower.startsWith("r/") -> {
+                val parts = t.split("/").filter { it.isNotBlank() }
+                if (parts.size >= 3) "https://www.reddit.com/r/${parts[1]}/${parts[2]}"
+                else "https://www.reddit.com/r/${parts[1]}/"
+            }
+            lower.startsWith("u/") -> {
+                val user = t.substring(2).substringBefore("/")
+                "https://www.reddit.com/user/$user/submitted/"
+            }
+            lower.startsWith("p/") -> {
+                val postId = t.substring(2).substringBefore("/")
+                "https://www.reddit.com/comments/$postId/"
+            }
+            lower.startsWith("my/") -> "https://www.reddit.com/$lower"
+            else -> null
+        }
+    }
+
+    fun bookmarkDeduplicationKey(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return ""
+        return try {
+            val uri = java.net.URI(if (trimmed.contains("://")) trimmed else "https://$trimmed")
+            val host = (uri.host ?: "").lowercase(java.util.Locale.ROOT).removePrefix("www.").removePrefix("m.")
+            val path = (uri.path ?: "").trimEnd('/')
+            val query = uri.query?.split("&")
+                ?.filterNot { p ->
+                    val k = p.substringBefore("=").lowercase(java.util.Locale.ROOT)
+                    k.startsWith("utm_") || k in setOf("fbclid", "gclid", "si", "ref", "feature", "pp")
+                }
+                ?.sorted()
+                ?.joinToString("&")
+                ?.takeIf { it.isNotBlank() }
+            if (query != null) "$host$path?$query" else "$host$path"
+        } catch (_: Throwable) {
+            trimmed.lowercase(java.util.Locale.ROOT).trimEnd('/')
+        }
+    }
+
+    fun intelligentDeduplicate(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> {
+        if (items.size <= 1) return items
+        val bestBySignature = LinkedHashMap<String, ScrapedMediaItem>()
+        for (item in items) {
+            val normTitle = item.title
+                .lowercase(java.util.Locale.ROOT)
+                .replace(Regex("[^a-z0-9]+"), "")
+            val sig = if (normTitle.isNotBlank() && (item.sizeBytes ?: 0L) > 0L) {
+                "${item.category.name}|$normTitle|${item.sizeBytes}"
+            } else {
+                canonicalKey(item.url)
+            }
+            val existing = bestBySignature[sig]
+            if (existing == null) {
+                bestBySignature[sig] = item
+            } else {
+                val itemPixels = (item.width ?: 0).toLong() * (item.height ?: 0).toLong()
+                val existingPixels = (existing.width ?: 0).toLong() * (existing.height ?: 0).toLong()
+                if (itemPixels > existingPixels || (itemPixels == existingPixels && compareMediaQuality(item, existing) > 0)) {
+                    bestBySignature[sig] = item
+                }
+            }
+        }
+        return bestBySignature.values.toList()
+    }
+
+    fun mergeMediaItems(
+        targetMap: MutableMap<String, ScrapedMediaItem>,
+        incoming: List<ScrapedMediaItem>
+    ): Boolean {
+        var changed = false
+        for (item in incoming) {
+            val key = canonicalKey(item.url)
+            val existing = targetMap[key]
+            if (existing == null) {
+                targetMap[key] = item
+                changed = true
+            } else if (compareMediaQuality(item, existing) > 0) {
+                targetMap[key] = item.copy(
+                    id = existing.id,
+                    thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                )
+                changed = true
+            }
+        }
+        return changed
+    }
 }
+
 
 enum class BrowserSearchEngine(val label: String, val shortLabel: String, val searchUrl: String) {
     DUCKDUCKGO("DuckDuckGo", "DDG", "https://duckduckgo.com/?q="),

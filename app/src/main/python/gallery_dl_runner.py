@@ -1,4 +1,8 @@
 import json
+import re
+import tempfile
+import urllib.parse
+import urllib.request
 import os
 import sys
 import time
@@ -20,6 +24,168 @@ try:
     YTDLP_AVAILABLE = True
 except Exception:
     YTDLP_AVAILABLE = False
+
+try:
+    import instaloader_extractor as _instaloader_extractor
+    INSTALOADER_AVAILABLE = True
+except Exception:
+    _instaloader_extractor = None
+    INSTALOADER_AVAILABLE = False
+
+try:
+    import pinterest_dl_extractor as _pinterest_extractor
+    PINTEREST_DL_AVAILABLE = True
+except Exception:
+    _pinterest_extractor = None
+    PINTEREST_DL_AVAILABLE = False
+
+try:
+    import reddit_dl_extractor as _reddit_extractor
+    REDDIT_DL_AVAILABLE = True
+except Exception:
+    _reddit_extractor = None
+    REDDIT_DL_AVAILABLE = False
+
+try:
+    import media_downloader_extractor as _media_downloader_extractor
+    MEDIA_DOWNLOADER_AVAILABLE = True
+except Exception:
+    _media_downloader_extractor = None
+    MEDIA_DOWNLOADER_AVAILABLE = False
+
+try:
+    import media_scraper_extractor as _media_scraper_extractor
+    MEDIA_SCRAPER_AVAILABLE = True
+except Exception:
+    _media_scraper_extractor = None
+    MEDIA_SCRAPER_AVAILABLE = False
+
+
+def is_gallery_dl_available():
+    return bool(GALLERY_DL_AVAILABLE)
+
+
+def is_yt_dlp_available():
+    return bool(YTDLP_AVAILABLE)
+
+
+def is_instaloader_available():
+    return bool(INSTALOADER_AVAILABLE)
+
+
+def is_pinterest_dl_available():
+    return bool(PINTEREST_DL_AVAILABLE)
+
+
+def is_reddit_dl_available():
+    return bool(REDDIT_DL_AVAILABLE)
+
+
+def is_media_downloader_available():
+    return bool(MEDIA_DOWNLOADER_AVAILABLE)
+
+
+def is_media_scraper_available():
+    return bool(MEDIA_SCRAPER_AVAILABLE)
+
+
+def _extract_page_preview_url(page_url, timeout=8):
+    """Lightweight HTML preview extractor for og:image / twitter:image / video poster."""
+    if not page_url or not isinstance(page_url, str):
+        return None
+    parsed = urllib.parse.urlparse(page_url.strip())
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return None
+    try:
+        req = urllib.request.Request(
+            page_url.strip(),
+            headers={
+                "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_bytes = resp.read(256 * 1024)
+        html_text = raw_bytes.decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    import html as _html_mod
+
+    # Check <meta> tags regardless of attribute order
+    meta_tags = re.findall(r"<meta\b[^>]*>", html_text, flags=re.IGNORECASE)
+    for tag in meta_tags:
+        prop_m = re.search(r'(?:property|name)\s*=\s*["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
+        if not prop_m:
+            continue
+        prop = prop_m.group(1).strip().lower()
+        if prop in ("og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"):
+            content_m = re.search(r'content\s*=\s*["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
+            if content_m:
+                cand = _html_mod.unescape(content_m.group(1).strip())
+                if cand:
+                    return urllib.parse.urljoin(page_url, cand)
+
+    # Fallback: <video ... poster="...">
+    video_m = re.search(r'<video\b[^>]*poster\s*=\s*["\']([^"\']+)["\']', html_text, flags=re.IGNORECASE)
+    if video_m:
+        cand = _html_mod.unescape(video_m.group(1).strip())
+        if cand:
+            return urllib.parse.urljoin(page_url, cand)
+
+    return None
+
+
+def _prepare_cookiefile(cookies_raw, target_url=""):
+    """Writes a Netscape HTTP Cookie File from raw header cookies or preserves Netscape format."""
+    if not cookies_raw or not str(cookies_raw).strip():
+        return None
+    raw = str(cookies_raw).strip()
+    fd, path = tempfile.mkstemp(prefix="emre_cookies_", suffix=".txt")
+    try:
+        if raw.startswith("# Netscape") or ("\t" in raw and "\n" in raw):
+            content = raw if raw.startswith("# Netscape") else ("# Netscape HTTP Cookie File\n" + raw)
+        else:
+            host = ""
+            if target_url:
+                try:
+                    host = (urllib.parse.urlparse(target_url).hostname or "").lower()
+                except Exception:
+                    host = ""
+            # Normalize YouTube short/mobile domains to .youtube.com
+            if host in ("youtu.be", "m.youtube.com", "music.youtube.com", "www.youtube.com", "youtube.com") or host.endswith(".youtube.com"):
+                domain = ".youtube.com"
+            elif host:
+                parts = host.split(".")
+                domain = "." + ".".join(parts[-2:]) if len(parts) >= 2 else host
+            else:
+                domain = ".example.com"
+            lines = ["# Netscape HTTP Cookie File"]
+            for pair in raw.split(";"):
+                pair = pair.strip()
+                if "=" not in pair:
+                    continue
+                k, v = pair.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if not k:
+                    continue
+                lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\t{k}\t{v}")
+            content = "\n".join(lines) + "\n"
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        return path
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        return None
+
 
 POPULAR_EXTRACTORS = [
     {"name": "Reddit", "domains": ["reddit.com", "redd.it", "i.redd.it", "v.redd.it"], "icon": "reddit"},
@@ -94,68 +260,130 @@ def _mux_with_android_media_muxer(video_path, audio_path, target_path):
         return False
 
 def get_engine_status():
-    """Returns runtime status and version information synchronized with GalleryDlEngine."""
-    gdl_ver = getattr(gallery_dl, "__version__", "1.32.19") if GALLERY_DL_AVAILABLE else "N/A"
+    gdl_ver = getattr(gallery_dl, "__version__", "1.32.20") if GALLERY_DL_AVAILABLE else "N/A"
     ytdlp_ver = getattr(yt_dlp, "__version__", "2026.10.21") if YTDLP_AVAILABLE else "N/A"
-    available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE
-    engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver}" if available else "Python Engine Unavailable"
+    available = any([
+        GALLERY_DL_AVAILABLE,
+        YTDLP_AVAILABLE,
+        INSTALOADER_AVAILABLE,
+        PINTEREST_DL_AVAILABLE,
+        REDDIT_DL_AVAILABLE,
+        MEDIA_DOWNLOADER_AVAILABLE,
+        MEDIA_SCRAPER_AVAILABLE,
+    ])
+    engines = []
+    if GALLERY_DL_AVAILABLE:
+        engines.append("gallery-dl")
+    if YTDLP_AVAILABLE:
+        engines.append("yt-dlp")
+    if INSTALOADER_AVAILABLE:
+        engines.append("instaloader")
+    if PINTEREST_DL_AVAILABLE:
+        engines.append("pinterest-dl")
+    if REDDIT_DL_AVAILABLE:
+        engines.append("reddit-dl")
+    if MEDIA_DOWNLOADER_AVAILABLE:
+        engines.append("media-downloader")
+    if MEDIA_SCRAPER_AVAILABLE:
+        engines.append("media-scraper")
 
     return json.dumps({
         "available": available,
-        "version": gdl_ver,
-        "engine": engine_name,
+        "engine": " + ".join(engines) if engines else "none",
+        "version": f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver}",
         "gallery_dl_available": GALLERY_DL_AVAILABLE,
         "gallery_dl_version": gdl_ver,
         "yt_dlp_available": YTDLP_AVAILABLE,
         "yt_dlp_version": ytdlp_ver,
-        "python_version": sys.version.split()[0],
+        "instaloader_available": INSTALOADER_AVAILABLE,
+        "pinterest_dl_available": PINTEREST_DL_AVAILABLE,
+        "reddit_dl_available": REDDIT_DL_AVAILABLE,
+        "media_downloader_available": MEDIA_DOWNLOADER_AVAILABLE,
+        "media_scraper_available": MEDIA_SCRAPER_AVAILABLE,
+        "media_scraper_version": getattr(_media_scraper_extractor, "VERSION", "1.0.0") if MEDIA_SCRAPER_AVAILABLE else "N/A",
         "supported_categories_count": 287 if GALLERY_DL_AVAILABLE else 0,
-        "popular_extractors": POPULAR_EXTRACTORS
     })
 
+
 def check_support(url):
-    """
-    Checks if a URL is handled by gallery-dl or yt-dlp extractors.
-    """
-    if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": ""})
+    clean_url = (url or "").strip()
+    if not clean_url:
+        return json.dumps({"supported": False, "engine": "none", "category": "", "subcategory": "", "extractor": ""})
 
-    clean_url = url.strip()
+    # Specialized platform routing first
+    if PINTEREST_DL_AVAILABLE and _pinterest_extractor is not None:
+        try:
+            if _pinterest_extractor.is_pinterest_url(clean_url):
+                return json.dumps({
+                    "supported": True,
+                    "engine": "pinterest-dl",
+                    "category": "pinterest",
+                    "subcategory": "pin",
+                    "extractor": "PinterestDlExtractor",
+                })
+        except Exception:
+            pass
 
-    # 1. Check gallery-dl
+    if REDDIT_DL_AVAILABLE and _reddit_extractor is not None:
+        try:
+            is_rd = _reddit_extractor.is_reddit_url(clean_url) if hasattr(_reddit_extractor, "is_reddit_url") else False
+            parsed_rd = _reddit_extractor.parse_reddit_target(clean_url) if is_rd else None
+            if parsed_rd is not None and (isinstance(parsed_rd, dict) and parsed_rd.get("kind") in (None, "", "unknown")):
+                parsed_rd = None
+            if parsed_rd is not None:
+                kind = parsed_rd.get("kind", "subreddit") if isinstance(parsed_rd, dict) else getattr(parsed_rd, "kind", "subreddit")
+                return json.dumps({
+                    "supported": True,
+                    "engine": "reddit-dl",
+                    "category": "reddit",
+                    "subcategory": kind,
+                    "extractor": "RedditDlExtractor",
+                })
+        except Exception:
+            pass
+
+    if MEDIA_DOWNLOADER_AVAILABLE and _media_downloader_extractor is not None:
+        try:
+            plat = _media_downloader_extractor.detect_platform(clean_url)
+            if plat == "spotify":
+                return json.dumps({"supported": True, "engine": "spotify", "category": "spotify", "subcategory": "track", "extractor": "SpotifyExtractor"})
+            if plat == "radiojavan":
+                return json.dumps({"supported": True, "engine": "radiojavan", "category": "radiojavan", "subcategory": "media", "extractor": "RadioJavanExtractor"})
+            if plat in ("x_space", "x_spaces") or (hasattr(_media_downloader_extractor, "is_x_space_url") and _media_downloader_extractor.is_x_space_url(clean_url)):
+                return json.dumps({"supported": True, "engine": "x_spaces", "category": "twitter", "subcategory": "space", "extractor": "XSpacesExtractor"})
+        except Exception:
+            pass
+
     if GALLERY_DL_AVAILABLE:
         try:
-            ext = gdl_extractor.find(clean_url)
-            if ext is not None:
-                cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
-                subcat = getattr(ext, "subcategory", "") or ""
-                name = ext.__class__.__name__
+            extr = gallery_dl.extractor.find(clean_url)
+            if extr is not None:
                 return json.dumps({
                     "supported": True,
-                    "category": cat,
-                    "subcategory": subcat,
-                    "extractor": name,
-                    "engine": "gallery-dl"
+                    "engine": "gallery-dl",
+                    "category": getattr(extr, "category", "") or "",
+                    "subcategory": getattr(extr, "subcategory", "") or "",
+                    "extractor": extr.__class__.__name__,
                 })
         except Exception:
             pass
 
-    # 2. Check yt-dlp
     if YTDLP_AVAILABLE:
         try:
-            lower = clean_url.lower()
-            if any(vh in lower for vh in SOCIAL_VIDEO_HOSTS):
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
+            for ie in yt_dlp.extractor.gen_extractors():
+                if getattr(ie, "IE_NAME", "") != "generic" and ie.suitable(clean_url):
+                    return json.dumps({
+                        "supported": True,
+                        "engine": "yt-dlp",
+                        "category": getattr(ie, "IE_NAME", "yt-dlp"),
+                        "subcategory": "video",
+                        "extractor": ie.__class__.__name__,
+                    })
         except Exception:
             pass
 
-    return json.dumps({"supported": False, "category": "", "extractor": ""})
+    return json.dumps({"supported": False, "engine": "none", "category": "", "subcategory": "", "extractor": ""})
+
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -583,7 +811,89 @@ def extract_yt_dlp(url, options_json="{}"):
         "items": items
     })
 
+
+
+def extract_pinterest(url, options_json="{}"):
+    if not PINTEREST_DL_AVAILABLE or _pinterest_extractor is None:
+        return json.dumps({"success": False, "engine": "pinterest-dl", "items": [], "error": "pinterest-dl unavailable"})
+    return _pinterest_extractor.extract_pinterest(url, options_json)
+
+
+def extract_reddit(url, options_json="{}"):
+    if not REDDIT_DL_AVAILABLE or _reddit_extractor is None:
+        return json.dumps({"success": False, "engine": "reddit-dl", "items": [], "error": "reddit-dl unavailable"})
+    return _reddit_extractor.extract_reddit(url, options_json)
+
+
+def extract_instagram(url, options_json="{}"):
+    if not INSTALOADER_AVAILABLE or _instaloader_extractor is None:
+        return json.dumps({"success": False, "engine": "instaloader", "items": [], "error": "instaloader unavailable"})
+    return _instaloader_extractor.extract_instagram(url, options_json)
+
+
+def extract_spotify(url, options_json="{}"):
+    if not MEDIA_DOWNLOADER_AVAILABLE or _media_downloader_extractor is None:
+        return json.dumps({"success": False, "engine": "spotify", "items": [], "error": "media_downloader unavailable"})
+    return _media_downloader_extractor.extract_spotify(url, options_json)
+
+
+def extract_radiojavan(url, options_json="{}"):
+    if not MEDIA_DOWNLOADER_AVAILABLE or _media_downloader_extractor is None:
+        return json.dumps({"success": False, "engine": "radiojavan", "items": [], "error": "media_downloader unavailable"})
+    return _media_downloader_extractor.extract_radiojavan(url, options_json)
+
+
+def extract_xspace(url, options_json="{}"):
+    if not MEDIA_DOWNLOADER_AVAILABLE or _media_downloader_extractor is None:
+        return json.dumps({"success": False, "engine": "x_spaces", "items": [], "error": "media_downloader unavailable"})
+    return _media_downloader_extractor.extract_x_space(url, options_json)
+
+
+def extract_tumblr(url, options_json="{}"):
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper", "items": [], "error": "media_scraper unavailable"})
+    return _media_scraper_extractor.extract_tumblr(url, options_json)
+
+
+def extract_pixiv(url, options_json="{}"):
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper", "items": [], "error": "media_scraper unavailable"})
+    return _media_scraper_extractor.extract_pixiv(url, options_json)
+
+
+def extract_twitter_media_scraper(url, options_json="{}"):
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper", "items": [], "error": "media_scraper unavailable"})
+    return _media_scraper_extractor.extract_twitter(url, options_json)
+
+
+def extract_facebook_media_scraper(url, options_json="{}"):
+    if not MEDIA_SCRAPER_AVAILABLE or _media_scraper_extractor is None:
+        return json.dumps({"success": False, "engine": "media-scraper", "items": [], "error": "media_scraper unavailable"})
+    return _media_scraper_extractor.extract_facebook(url, options_json)
+
+
 def extract_media(url, options_json="{}"):
+    clean_url = (url or "").strip()
+    if PINTEREST_DL_AVAILABLE and _pinterest_extractor is not None:
+        try:
+            if _pinterest_extractor.is_pinterest_url(clean_url):
+                p_raw = extract_pinterest(clean_url, options_json)
+                p_obj = json.loads(p_raw)
+                if p_obj.get("success") and p_obj.get("items"):
+                    return p_raw
+        except Exception:
+            pass
+    if REDDIT_DL_AVAILABLE and _reddit_extractor is not None:
+        try:
+            if hasattr(_reddit_extractor, "is_reddit_url") and _reddit_extractor.is_reddit_url(clean_url):
+                r_raw = extract_reddit(clean_url, options_json)
+                r_obj = json.loads(r_raw)
+                if r_obj.get("success") and r_obj.get("items"):
+                    return r_raw
+        except Exception:
+            pass
+
     """
     Extracts all media items using gallery-dl AND yt-dlp progressively.
     Does not allow partial gallery-dl results to prevent yt-dlp from running.

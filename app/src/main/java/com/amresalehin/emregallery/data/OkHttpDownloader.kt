@@ -30,6 +30,29 @@ import java.util.concurrent.TimeUnit
  * 3. Resumable downloads via HTTP Range (RFC 7233) with byte-level progress reporting.
  * 4. Atomic file creation, MIME validation, and corrupt partial download cleanup.
  */
+
+data class ParsedProxy(
+    val type: java.net.Proxy.Type,
+    val host: String,
+    val port: Int,
+    val username: String? = null,
+    val password: String? = null
+)
+
+data class ContentRangeInfo(
+    val start: Long,
+    val end: Long,
+    val total: Long
+)
+
+data class DirectMediaProbe(
+    val isConfirmedDirectMedia: Boolean,
+    val finalUrl: String,
+    val contentType: String? = null,
+    val contentDisposition: String? = null,
+    val contentLength: Long? = null
+)
+
 object OkHttpDownloader {
 
     private const val TAG = "OkHttpDownloader"
@@ -921,5 +944,126 @@ object OkHttpDownloader {
             onProgress = onProgress
         )
         return res.file
+    }
+
+    fun parseProxyUrl(raw: String?): ParsedProxy? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val uri = java.net.URI(trimmed)
+            val scheme = (uri.scheme ?: "").lowercase(Locale.ROOT)
+            val type = when (scheme) {
+                "http", "https" -> java.net.Proxy.Type.HTTP
+                "socks", "socks4", "socks5" -> java.net.Proxy.Type.SOCKS
+                else -> return null
+            }
+            val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+            val port = if (uri.port > 0) uri.port else if (type == java.net.Proxy.Type.SOCKS) 1080 else 8080
+            val userInfo = uri.userInfo
+            val username = userInfo?.substringBefore(":")?.takeIf { it.isNotBlank() }
+            val password = if (userInfo != null && userInfo.contains(":")) userInfo.substringAfter(":") else null
+            ParsedProxy(type = type, host = host, port = port, username = username, password = password)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    @Volatile
+    private var configuredProxyKey: String = ""
+
+    fun configureProxy(enabled: Boolean, proxyUrl: String, timeoutSeconds: Int = 30) {
+        val key = "$enabled|$proxyUrl|$timeoutSeconds"
+        if (key == configuredProxyKey) return
+        configuredProxyKey = key
+        // Proxy settings are applied cleanly on demand; keep base client responsive.
+        if (enabled) {
+            val parsed = parseProxyUrl(proxyUrl)
+            if (parsed != null && !parsed.username.isNullOrBlank()) {
+                java.net.Authenticator.setDefault(object : java.net.Authenticator() {
+                    override fun getPasswordAuthentication(): java.net.PasswordAuthentication {
+                        return java.net.PasswordAuthentication(
+                            parsed.username,
+                            (parsed.password ?: "").toCharArray()
+                        )
+                    }
+                })
+            }
+        }
+    }
+
+    fun extractDomain(url: String?): String {
+        if (url.isNullOrBlank()) return "general"
+        return try {
+            val host = java.net.URI(url.trim()).host ?: return "general"
+            host.lowercase(Locale.ROOT).removePrefix("www.")
+        } catch (_: Throwable) {
+            "general"
+        }
+    }
+
+    fun parseContentRangeHeader(header: String?): ContentRangeInfo? {
+        if (header.isNullOrBlank()) return null
+        val m = Regex("bytes\s+(\d+)-(\d+)/(\d+|\*)", RegexOption.IGNORE_CASE).find(header.trim()) ?: return null
+        val start = m.groupValues[1].toLongOrNull() ?: return null
+        val end = m.groupValues[2].toLongOrNull() ?: return null
+        val total = m.groupValues[3].toLongOrNull() ?: -1L
+        return ContentRangeInfo(start = start, end = end, total = total)
+    }
+
+    fun stableDownloadBaseName(mediaUrl: String, sanitizedName: String, downloadId: String? = null): String {
+        val clean = sanitizedName.trim().ifBlank { "media_${(mediaUrl.hashCode() and 0x7FFFFFFF)}" }
+        val dot = clean.lastIndexOf('.')
+        val stem = if (dot > 0) clean.substring(0, dot).take(64) else clean.take(64)
+        val ext = if (dot > 0) clean.substring(dot).take(12) else ""
+        val suffix = ((downloadId ?: mediaUrl).hashCode() and 0xFFFF).toString(16)
+        return "${stem}_${suffix}${ext}"
+    }
+
+    suspend fun probeDirectMedia(url: String): DirectMediaProbe = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url(url.trim())
+                .head()
+                .header("User-Agent", DEFAULT_USER_AGENT)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val finalUrl = resp.request.url.toString()
+                val ct = resp.header("Content-Type")?.substringBefore(";")?.trim()?.lowercase(Locale.ROOT)
+                val cd = resp.header("Content-Disposition")
+                val cl = resp.header("Content-Length")?.toLongOrNull()
+                val isMedia = resp.isSuccessful && ct != null && (
+                    ct.startsWith("image/") || ct.startsWith("video/") || ct.startsWith("audio/") ||
+                        ct == "application/vnd.apple.mpegurl" || ct == "application/x-mpegurl" ||
+                        ct == "application/dash+xml"
+                )
+                DirectMediaProbe(
+                    isConfirmedDirectMedia = isMedia,
+                    finalUrl = finalUrl,
+                    contentType = ct,
+                    contentDisposition = cd,
+                    contentLength = cl
+                )
+            }
+        } catch (_: Throwable) {
+            DirectMediaProbe(isConfirmedDirectMedia = false, finalUrl = url)
+        }
+    }
+
+    fun publishToDownloadsMediaStoreIfAppPrivate(
+        context: Context,
+        file: File,
+        mimeType: String? = null,
+        subfolder: String? = null
+    ) {
+        if (!file.exists() || file.length() <= 0L) return
+        try {
+            MediaScannerConnection.scanFile(
+                context.applicationContext,
+                arrayOf(file.absolutePath),
+                mimeType?.let { arrayOf(it) },
+                null
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "MediaScanner publish skipped: ${t.message}")
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -1026,7 +1028,9 @@ fun DownloaderResultsPage(
     var showSvg by remember(persistedShowSvg) { mutableStateOf(persistedShowSvg) }
     var minKbInput by remember(persistedMinKb) { mutableStateOf(persistedMinKb.toString()) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
+    var browserMenuExpanded by remember { mutableStateOf(false) }
     var showDownloaderSettings by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
 
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
     val dynamicDurations = remember { mutableStateMapOf<String, Long>() }
@@ -1079,6 +1083,38 @@ fun DownloaderResultsPage(
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 runCatching { context.startActivity(intent) }
+            }
+        }
+    }
+
+    fun performOpenInExternalBrowser(target: String) {
+        val trimmed = target.trim()
+        if (trimmed.isNotBlank()) {
+            val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
+            isEditingUrl = false
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destinationUrl)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { context.startActivity(intent) }
+        }
+    }
+
+    fun performShareUrl(target: String) {
+        val trimmed = target.trim()
+        if (trimmed.isNotBlank()) {
+            val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, destinationUrl)
+            }
+            runCatching {
+                context.startActivity(
+                    Intent.createChooser(shareIntent, "Share URL").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
             }
         }
     }
@@ -1511,19 +1547,152 @@ fun DownloaderResultsPage(
                                     }
                                 }
 
-                                // External Browser Redirect Button
-                                IconButton(
-                                    onClick = {
-                                        performOpenInBrowser(activeUrl)
-                                    },
-                                    modifier = Modifier.size(36.dp).testTag("downloader_browser_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                        contentDescription = "Open in browser",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                // Three-dot Overflow Menu in Top Bar Right Corner
+                                Box {
+                                    IconButton(
+                                        onClick = { browserMenuExpanded = true },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .testTag("downloader_browser_menu_btn")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "More browser options",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = browserMenuExpanded,
+                                        onDismissRequest = { browserMenuExpanded = false },
+                                        modifier = Modifier.testTag("downloader_browser_dropdown_menu")
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    if (onOpenBrowser != null) "Open in browser" else "Open in external browser"
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = if (onOpenBrowser != null) Icons.Default.TravelExplore else Icons.AutoMirrored.Filled.OpenInNew,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                performOpenInBrowser(activeUrl)
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_open_browser")
+                                        )
+
+                                        if (onOpenBrowser != null) {
+                                            DropdownMenuItem(
+                                                text = { Text("Open externally") },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                },
+                                                onClick = {
+                                                    browserMenuExpanded = false
+                                                    performOpenInExternalBrowser(activeUrl)
+                                                },
+                                                modifier = Modifier.testTag("downloader_menu_open_external")
+                                            )
+                                        }
+
+                                        DropdownMenuItem(
+                                            text = { Text("Copy URL") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                val targetUrl = MediaClassifier.formatQueryOrUrl(activeUrl, searchEnginePref)
+                                                clipboardManager.setText(AnnotatedString(targetUrl))
+                                                Toast.makeText(context, "URL copied", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_copy_url")
+                                        )
+
+                                        DropdownMenuItem(
+                                            text = { Text("Share URL") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Share,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                performShareUrl(activeUrl)
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_share_url")
+                                        )
+
+                                        HorizontalDivider()
+
+                                        DropdownMenuItem(
+                                            text = { Text("Reload & scan") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Refresh,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                selectedItemIds = emptySet()
+                                                dynamicDimensions.clear()
+                                                dynamicDurations.clear()
+                                                dualExtractor.extract(activeUrl, scope)
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_reload")
+                                        )
+
+                                        DropdownMenuItem(
+                                            text = { Text("Saved library") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Folder,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                onViewSavedLibrary()
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_saved_library")
+                                        )
+
+                                        DropdownMenuItem(
+                                            text = { Text("Downloader settings") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Settings,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                browserMenuExpanded = false
+                                                showDownloaderSettings = true
+                                            },
+                                            modifier = Modifier.testTag("downloader_menu_settings")
+                                        )
+                                    }
                                 }
                             }
                         }

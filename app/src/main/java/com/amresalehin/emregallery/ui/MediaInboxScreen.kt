@@ -2389,6 +2389,7 @@ fun FullScreenBrowserView(
                 onClose = onClose,
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
+                discoveredCount = discoveredItems.size,
                 onMediaExtracted = { item ->
                     val key = MediaClassifier.canonicalKey(item.url)
                     val existingIndex = discoveredItems.indexOfFirst { MediaClassifier.canonicalKey(it.url) == key }

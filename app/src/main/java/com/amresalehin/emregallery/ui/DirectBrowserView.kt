@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import android.webkit.*
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -25,15 +26,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -86,6 +90,8 @@ fun DirectBrowserView(
     var canGoForward by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
+    var browserMenuExpanded by remember { mutableStateOf(false) }
+    var isDesktopMode by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
@@ -102,6 +108,7 @@ fun DirectBrowserView(
     }
 
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
 
@@ -310,26 +317,7 @@ fun DirectBrowserView(
                         )
                     }
 
-                    // Home button
-                    IconButton(
-                        onClick = {
-                            currentUrl = ""
-                            addressInput = ""
-                            pageTitle = ""
-                            onUrlChange?.invoke("")
-                            webViewInstance?.loadUrl("about:blank")
-                        },
-                        modifier = Modifier.size(34.dp).testTag("browser_home_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = "Home",
-                            tint = if (currentUrl.isBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Discovered Media count badge or Scan button
+                    // Discovered Media count badge (shown when media is captured)
                     if (discoveredCount > 0) {
                         Surface(
                             onClick = onSwitchToMediaTab,
@@ -344,7 +332,7 @@ fun DirectBrowserView(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.PermMedia,
-                                    contentDescription = null,
+                                    contentDescription = "Discovered media",
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(14.dp)
                                 )
@@ -356,16 +344,191 @@ fun DirectBrowserView(
                                 )
                             }
                         }
-                    } else if (currentUrl.isNotBlank()) {
+                    }
+
+                    // Three-dot Overflow Menu in Browser Top Bar Right Corner
+                    Box {
                         IconButton(
-                            onClick = { scanCurrentPageDOM(webViewInstance) },
-                            modifier = Modifier.size(34.dp).testTag("browser_scan_page_btn")
+                            onClick = { browserMenuExpanded = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("browser_more_menu_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.TravelExplore,
-                                contentDescription = "Scan media",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(19.dp)
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "More browser options",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = browserMenuExpanded,
+                            onDismissRequest = { browserMenuExpanded = false },
+                            modifier = Modifier.testTag("browser_dropdown_menu")
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Scan page for media") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.TravelExplore,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank(),
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    scanCurrentPageDOM(webViewInstance)
+                                },
+                                modifier = Modifier.testTag("browser_menu_scan_page")
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (discoveredCount > 0) "Discovered media ($discoveredCount)" else "Discovered media"
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.PermMedia,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    onSwitchToMediaTab()
+                                },
+                                modifier = Modifier.testTag("browser_menu_discovered_media")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Home") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Home,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    currentUrl = ""
+                                    addressInput = ""
+                                    pageTitle = ""
+                                    onUrlChange?.invoke("")
+                                    webViewInstance?.loadUrl("about:blank")
+                                },
+                                modifier = Modifier.testTag("browser_menu_home")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Desktop site") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.DesktopWindows,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = if (isDesktopMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    val nextDesktop = !isDesktopMode
+                                    isDesktopMode = nextDesktop
+                                    webViewInstance?.let { wv ->
+                                        wv.settings.userAgentString = if (nextDesktop) {
+                                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                        } else {
+                                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                        }
+                                        if (currentUrl.isNotBlank()) {
+                                            wv.reload()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("browser_menu_desktop_site")
+                            )
+
+                            HorizontalDivider()
+
+                            DropdownMenuItem(
+                                text = { Text("Copy URL") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank(),
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    if (currentUrl.isNotBlank()) {
+                                        clipboardManager.setText(AnnotatedString(currentUrl))
+                                        Toast.makeText(context, "URL copied", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.testTag("browser_menu_copy_url")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Share URL") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank(),
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    if (currentUrl.isNotBlank()) {
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, currentUrl)
+                                        }
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(shareIntent, "Share URL").apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                            )
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("browser_menu_share_url")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Open in external browser") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank(),
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    if (currentUrl.isNotBlank()) {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        runCatching { context.startActivity(intent) }
+                                    }
+                                },
+                                modifier = Modifier.testTag("browser_menu_open_external")
                             )
                         }
                     }

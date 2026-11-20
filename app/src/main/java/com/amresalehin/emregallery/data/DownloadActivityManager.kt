@@ -56,7 +56,9 @@ data class DownloadActivityItem(
     val sourceDomain: String? = null,
     val sourceUrl: String? = null,
     val sourceEngine: String? = null,
-    val downloadHeaders: Map<String, String> = emptyMap()
+    val downloadHeaders: Map<String, String> = emptyMap(),
+    val isSpeedBoostActive: Boolean = false,
+    val activeConnections: Int = 1
 ) {
     val isFailed: Boolean get() = status == DownloadActivityStatus.FAILED
     val isDownloading: Boolean get() = status == DownloadActivityStatus.DOWNLOADING
@@ -182,6 +184,8 @@ object DownloadActivityManager {
                     put("sourceDomain", item.sourceDomain ?: "")
                     put("sourceUrl", item.sourceUrl ?: "")
                     put("sourceEngine", item.sourceEngine ?: "")
+                    put("isSpeedBoostActive", item.isSpeedBoostActive)
+                    put("activeConnections", item.activeConnections.coerceAtLeast(1))
                 }
                 jsonArray.put(obj)
             }
@@ -247,7 +251,9 @@ object DownloadActivityManager {
                             stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
                             sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
                             sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() },
-                            sourceEngine = obj.optString("sourceEngine").takeIf { it.isNotBlank() }
+                            sourceEngine = obj.optString("sourceEngine").takeIf { it.isNotBlank() },
+                            isSpeedBoostActive = obj.optBoolean("isSpeedBoostActive", false),
+                            activeConnections = obj.optInt("activeConnections", 1).coerceAtLeast(1)
                         )
                     )
                 } catch (e: Exception) {
@@ -417,7 +423,9 @@ object DownloadActivityManager {
         progress: Float,
         bytesRead: Long,
         totalBytes: Long,
-        speedBytesPerSec: Long = 0L
+        speedBytesPerSec: Long = 0L,
+        isSpeedBoostActive: Boolean? = null,
+        activeConnections: Int? = null
     ) {
         val current = _activities.value
         val index = current.indexOfFirst { it.id == itemId }
@@ -429,7 +437,9 @@ object DownloadActivityManager {
                 progress = progress.coerceIn(0f, 1f),
                 bytesRead = bytesRead,
                 totalBytes = if (totalBytes > 0) totalBytes else existing.totalBytes,
-                speedBytesPerSec = speedBytesPerSec
+                speedBytesPerSec = speedBytesPerSec,
+                isSpeedBoostActive = isSpeedBoostActive ?: existing.isSpeedBoostActive,
+                activeConnections = activeConnections?.coerceAtLeast(1) ?: existing.activeConnections
             )
             _activities.value = updated
         }

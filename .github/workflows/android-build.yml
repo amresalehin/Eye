@@ -1,26 +1,17 @@
 name: Android build
 
 on:
+  # Run for every branch and tag push.
   push:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
+
+  # Run for pull requests targeting any branch.
   pull_request:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
+
+  # Keep manual execution available from the Actions tab.
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: android-build-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   assemble-debug:

@@ -102,7 +102,7 @@ class VaultPreferencesManager(private val context: Context) {
     private fun createPbkdf2Hash(pin: String): String {
         val salt = ByteArray(SALT_BYTES).also(random::nextBytes)
         val derived = derive(pin, salt, PBKDF2_ITERATIONS)
-        return PBKDF2_PREFIX + '
+        return PBKDF2_PREFIX + '$' + PBKDF2_ITERATIONS + '$' + b64(salt) + '$' + b64(derived)
     }
 
     private fun verifyPbkdf2(pin: String, stored: String): Boolean {

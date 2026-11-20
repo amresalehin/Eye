@@ -552,18 +552,18 @@ object MediaCaptureEngine {
     fun extractDimension(resolutionHint: String?, url: String?, isWidth: Boolean): Int? {
         val hint = resolutionHint?.trim()
         if (!hint.isNullOrBlank()) {
-            val wh = Regex("(\d{2,5})\s*[xX×]\s*(\d{2,5})").find(hint)
+            val wh = Regex("""(\d{2,5})\s*[xX×]\s*(\d{2,5})""").find(hint)
             if (wh != null) {
                 return (if (isWidth) wh.groupValues[1] else wh.groupValues[2]).toIntOrNull()
             }
-            val pMatch = Regex("(\d{3,4})p", RegexOption.IGNORE_CASE).find(hint)
+            val pMatch = Regex("""(\d{3,4})p""", RegexOption.IGNORE_CASE).find(hint)
             if (pMatch != null) {
                 val h = pMatch.groupValues[1].toIntOrNull()
                 if (h != null) return if (isWidth) (h * 16) / 9 else h
             }
         }
         if (!url.isNullOrBlank()) {
-            val uwh = Regex("[/_-](\d{2,5})[xX](\d{2,5})(?:[/_.-?]|$)").find(url)
+            val uwh = Regex("""[/_-](\d{2,5})[xX](\d{2,5})(?:[/_.-?]|$)""").find(url)
             if (uwh != null) {
                 return (if (isWidth) uwh.groupValues[1] else uwh.groupValues[2]).toIntOrNull()
             }

@@ -694,7 +694,6 @@ fun GalleryApp() {
             }
             destination in listOf(
                 Destination.LIBRARY_OVERVIEW,
-                Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
                 Destination.ABOUT
             ) -> {
@@ -1123,7 +1122,7 @@ fun GalleryApp() {
                                 performBackNavigation()
                             },
                             onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
-                            onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
+                            onOpenIndexStatus = { navigateTo(Destination.LIBRARY_OVERVIEW) }
                         )
                     }
                     Destination.MAP -> {
@@ -1172,7 +1171,7 @@ fun GalleryApp() {
                         onRefresh = { refreshMedia() },
                         onSettings = { label ->
                             when (label) {
-                                "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
+                                "Indexing Status" -> navigateTo(Destination.LIBRARY_OVERVIEW)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "Media Downloader", "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }

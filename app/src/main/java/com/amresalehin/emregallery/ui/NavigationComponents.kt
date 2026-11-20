@@ -331,7 +331,6 @@ fun SideNavigationDrawer(
                         listOf(
                             Triple(Destination.MEDIA_INBOX, "Inbox", Icons.Default.Inbox),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings),
-                            Triple(Destination.INDEXING_STATUS, "Indexing Status", Icons.Default.Storage)
                         )
                     )
 

@@ -50,53 +50,6 @@ interface ExtractionProvider {
     ): MediaExtractionResult
 }
 
-class DirectMediaProvider : ExtractionProvider {
-    override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!MediaClassifier.isValidMedia(context.url)) return false
-        val classification = MediaClassifier.classify(context.url)
-        return classification.isVideo || classification.isAudio || classification.isStream ||
-                context.url.endsWith(".jpg", true) || context.url.endsWith(".jpeg", true) ||
-                context.url.endsWith(".png", true) || context.url.endsWith(".webp", true) ||
-                context.url.endsWith(".gif", true) || context.url.endsWith(".svg", true)
-    }
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult {
-        val resolvedInfo = MediaClassifier.resolveOriginalMedia(context.url)
-        val downloadUrl = resolvedInfo.mediaUrl
-        val classification = MediaClassifier.classify(downloadUrl)
-        val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, 0)
-        val thumb = resolvedInfo.thumbnailUrl ?: if (classification.category == MediaCategory.IMAGES) downloadUrl else null
-        val item = ScrapedMediaItem(
-            id = "direct_${System.currentTimeMillis()}",
-            url = downloadUrl,
-            title = fileName,
-            isVideo = classification.isVideo,
-            isAudio = classification.isAudio,
-            isStream = classification.isStream,
-            category = classification.category,
-            format = classification.format,
-            thumbnailUrl = thumb,
-            mimeType = classification.mimeType,
-            source = "Direct Link",
-            provenance = MediaProvenance(
-                extractorEngine = "Direct URL",
-                pageUrl = context.url
-            ),
-            metadata = mapOf("source_url" to context.url),
-            downloadHeaders = mapOf(
-                "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                "Referer" to context.url
-            )
-        )
-        onItemDiscovered(item)
-        return MediaExtractionResult(items = listOf(item), pageTitle = fileName)
-    }
-}
-
 class GalleryDlProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
         return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
@@ -244,7 +197,7 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
 
 /**
  * Multi-Provider Media Extraction Engine Coordinator.
- * Coordinates DirectMediaProvider, GalleryDlProvider, YtDlpProvider, StaticHtmlProvider,
+ * Coordinates GalleryDlProvider, YtDlpProvider, StaticHtmlProvider,
  * and BrowserProvider.
  * Gates headless BrowserProvider when yt-dlp or gallery-dl already succeeds on a known social/structured
  * platform so WebView network interception does not pollute muxed videos with silent DASH video segments.
@@ -266,7 +219,6 @@ class DualMediaExtractor(private val context: Context) {
 
     enum class ExtractionPhase {
         IDLE,
-        DIRECT_MEDIA,
         GALLERY_DL,
         STATIC_SCRAPING,
         BROWSER_INTERCEPTING,
@@ -292,7 +244,7 @@ class DualMediaExtractor(private val context: Context) {
         }
     }
 
-    fun extract(targetUrl: String, scope: CoroutineScope, directOnly: Boolean = false) {
+    fun extract(targetUrl: String, scope: CoroutineScope) {
         cancel()
 
         val trimmed = targetUrl.trim()
@@ -311,7 +263,7 @@ class DualMediaExtractor(private val context: Context) {
         _state.value = ExtractionState(
             isRunning = true,
             statusMessage = "Starting extraction engine...",
-            phase = ExtractionPhase.DIRECT_MEDIA,
+            phase = ExtractionPhase.GALLERY_DL,
             domain = domain,
             items = emptyList()
         )
@@ -477,37 +429,6 @@ class DualMediaExtractor(private val context: Context) {
             }
 
             try {
-                // Provider 1: Direct Media Provider (Fast-path initial discovery)
-                val directProvider = DirectMediaProvider()
-                if (directProvider.isApplicable(requestContext)) {
-                    updateStatus("Identified direct media link...", ExtractionPhase.DIRECT_MEDIA)
-                    val directRes = coroutineScope {
-                        directProvider.extract(
-                            context = requestContext,
-                            onItemDiscovered = { item -> launch { updateItems(listOf(item)) } },
-                            onStatusUpdate = {}
-                        )
-                    }
-                    if (directRes.items.isNotEmpty()) {
-                        updateItems(
-                            newList = directRes.items,
-                            title = directRes.pageTitle ?: domain,
-                            msg = "Discovered direct media file"
-                        )
-                    }
-                }
-
-                if (directOnly) {
-                    itemsMutex.withLock {
-                        _state.value = _state.value.copy(
-                            isRunning = false,
-                            phase = ExtractionPhase.COMPLETED,
-                            statusMessage = if (itemsMap.isNotEmpty()) "Discovered direct media file" else "No direct media found"
-                        )
-                    }
-                    return@launch
-                }
-
                 val enabledProviders = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.getEnabledProvidersSync(appContext)
                 val useGalleryDl = "gallery-dl" in enabledProviders
                 val useYtDlp = "yt-dlp" in enabledProviders

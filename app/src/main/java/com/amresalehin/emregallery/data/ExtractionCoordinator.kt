@@ -65,7 +65,7 @@ class ExtractionCoordinator(private val context: Context) {
         var captchaChallengeUrl: String? = null
     }
 
-    fun extract(targetUrl: String, scope: CoroutineScope, directOnly: Boolean = false) {
+    fun extract(targetUrl: String, scope: CoroutineScope) {
         cancel()
 
         val trimmed = targetUrl.trim()
@@ -104,19 +104,18 @@ class ExtractionCoordinator(private val context: Context) {
         _state.value = ExtractionState(
             isRunning = true,
             statusMessage = "Analyzing URL route...",
-            phase = ExtractionPhase.DIRECT_MEDIA,
+            phase = ExtractionPhase.YT_DLP,
             domain = domain,
             items = emptyList()
         )
 
         extractionJob = scope.launch {
-            executeExtractionPipeline(session, directOnly)
+            executeExtractionPipeline(session)
         }
     }
 
     private suspend fun executeExtractionPipeline(
-        session: ExtractionSessionContext,
-        directOnly: Boolean
+        session: ExtractionSessionContext
     ) {
         try {
             val activeProxy = DownloaderPreferencesManager.getActiveProxyUrlSync(context)
@@ -127,18 +126,7 @@ class ExtractionCoordinator(private val context: Context) {
                 timeoutSeconds = networkTimeout
             )
 
-            // Step 1: OkHttp Direct-Media Fast Path Probe (skip for YouTube watch pages)
-            if (!session.isYouTubeTarget && probeDirectMediaFastPath(session)) {
-                finishSuccess(session.itemsMap.size)
-                return
-            }
-
-            if (directOnly) {
-                finalizeEmptyOrSuccess(session)
-                return
-            }
-
-            // Step 2: Concurrent Multi-Engine Discovery
+            // Step 1: Concurrent Multi-Engine Discovery
             updateStatus(
                 session,
                 if (session.isYouTubeTarget) {
@@ -188,42 +176,6 @@ class ExtractionCoordinator(private val context: Context) {
                 errorMessage = err
             )
         }
-    }
-
-    private suspend fun probeDirectMediaFastPath(session: ExtractionSessionContext): Boolean {
-        updateStatus(session, "Probing URL headers with OkHttp...", ExtractionPhase.DIRECT_MEDIA)
-        val directProbe = OkHttpDownloader.probeDirectMedia(session.requestContext.url)
-        if (!directProbe.isConfirmedDirectMedia) return false
-
-        val finalUrl = directProbe.finalUrl
-        val ct = directProbe.contentType
-        val cd = directProbe.contentDisposition
-        val cl = directProbe.contentLength
-
-        val classification = MediaClassifier.classify(finalUrl, mimeHint = ct)
-        val derivedTitle = if (!cd.isNullOrBlank() && cd.contains("filename=", ignoreCase = true)) {
-            cd.substringAfter("filename=").replace("\"", "").trim()
-        } else {
-            MediaClassifier.deriveFileName(finalUrl, classification.format, 0)
-        }
-
-        val directItem = ScrapedMediaItem(
-            id = "direct_${System.currentTimeMillis()}_${(finalUrl.hashCode() and 0xFFFF)}",
-            url = finalUrl,
-            title = derivedTitle,
-            isVideo = classification.isVideo,
-            isAudio = classification.isAudio,
-            isStream = classification.isStream,
-            category = classification.category,
-            format = classification.format,
-            mimeType = classification.mimeType,
-            sizeBytes = cl,
-            source = "Direct HTTP",
-            provenance = MediaProvenance(extractorEngine = "OkHttp Direct", pageUrl = session.requestContext.url)
-        )
-
-        updateItems(session, listOf(directItem), title = derivedTitle, phase = ExtractionPhase.COMPLETED)
-        return true
     }
 
     private fun buildExtractorOptions(
@@ -698,15 +650,6 @@ class ExtractionCoordinator(private val context: Context) {
     }
 
     companion object {
-        fun isDirectMediaUrl(url: String): Boolean {
-            if (!MediaClassifier.isValidMedia(url)) return false
-            val classification = MediaClassifier.classify(url)
-            return classification.isVideo || classification.isAudio || classification.isStream ||
-                    url.endsWith(".jpg", true) || url.endsWith(".jpeg", true) ||
-                    url.endsWith(".png", true) || url.endsWith(".webp", true) ||
-                    url.endsWith(".gif", true) || url.endsWith(".svg", true)
-        }
-
         fun determineExpectation(url: String): TargetMediaExpectation {
             val lower = url.lowercase(java.util.Locale.ROOT)
             if (isVideoPlatformUrl(lower) || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains("/videoplayback")) {

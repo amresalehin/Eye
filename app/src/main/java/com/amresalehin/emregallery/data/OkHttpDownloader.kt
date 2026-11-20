@@ -45,14 +45,6 @@ data class ContentRangeInfo(
     val total: Long
 )
 
-data class DirectMediaProbe(
-    val isConfirmedDirectMedia: Boolean,
-    val finalUrl: String,
-    val contentType: String? = null,
-    val contentDisposition: String? = null,
-    val contentLength: Long? = null
-)
-
 object OkHttpDownloader {
 
     private const val TAG = "OkHttpDownloader"
@@ -1016,36 +1008,6 @@ object OkHttpDownloader {
         val ext = if (dot > 0) clean.substring(dot).take(12) else ""
         val suffix = ((downloadId ?: mediaUrl).hashCode() and 0xFFFF).toString(16)
         return "${stem}_${suffix}${ext}"
-    }
-
-    suspend fun probeDirectMedia(url: String): DirectMediaProbe = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder()
-                .url(url.trim())
-                .head()
-                .header("User-Agent", DEFAULT_USER_AGENT)
-                .build()
-            client.newCall(req).execute().use { resp ->
-                val finalUrl = resp.request.url.toString()
-                val ct = resp.header("Content-Type")?.substringBefore(";")?.trim()?.lowercase(Locale.ROOT)
-                val cd = resp.header("Content-Disposition")
-                val cl = resp.header("Content-Length")?.toLongOrNull()
-                val isMedia = resp.isSuccessful && ct != null && (
-                    ct.startsWith("image/") || ct.startsWith("video/") || ct.startsWith("audio/") ||
-                        ct == "application/vnd.apple.mpegurl" || ct == "application/x-mpegurl" ||
-                        ct == "application/dash+xml"
-                )
-                DirectMediaProbe(
-                    isConfirmedDirectMedia = isMedia,
-                    finalUrl = finalUrl,
-                    contentType = ct,
-                    contentDisposition = cd,
-                    contentLength = cl
-                )
-            }
-        } catch (_: Throwable) {
-            DirectMediaProbe(isConfirmedDirectMedia = false, finalUrl = url)
-        }
     }
 
     fun publishToDownloadsMediaStoreIfAppPrivate(

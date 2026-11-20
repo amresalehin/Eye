@@ -60,6 +60,8 @@ data class GalleryDlOptions(
     val retries: Int = 3
 )
 
+    val pageDescription: String = "",
+    val previewImageUrl: String = "",
 data class GalleryDlExtractResult(
     val success: Boolean,
     val extractorName: String = "",
@@ -230,6 +232,8 @@ object GalleryDlEngine {
                 "VIDEOS" -> MediaCategory.VIDEOS
                 "AUDIO" -> MediaCategory.AUDIO
                 "STREAMS" -> MediaCategory.STREAMS
+                "SUBTITLES" -> MediaCategory.SUBTITLES
+                "FILES" -> MediaCategory.FILES
                 else -> MediaCategory.IMAGES
             }
 
@@ -253,6 +257,8 @@ object GalleryDlEngine {
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 durationSeconds = if (obj.has("durationSeconds") && !obj.isNull("durationSeconds")) obj.optLong("durationSeconds", -1L).takeIf { it > 0L } else null,
+                width = if (obj.has("width") && !obj.isNull("width")) obj.optInt("width").takeIf { it > 0 } else null,
+                height = if (obj.has("height") && !obj.isNull("height")) obj.optInt("height").takeIf { it > 0 } else null,
                 provenance = MediaProvenance(
                     extractorEngine = itemSource,
                     pageUrl = pageUrl
@@ -312,6 +318,8 @@ object GalleryDlEngine {
                 success = true,
                 extractorName = extractorName,
                 pageTitle = pageTitle,
+                pageDescription = root.optString("pageDescription", ""),
+                previewImageUrl = root.optString("previewImageUrl", ""),
                 items = itemsList
             )
         } catch (e: Exception) {
@@ -661,32 +669,32 @@ object GalleryDlEngine {
     }
 
     suspend fun extractReddit(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_reddit", url, options)
+        executePythonExtractor("extract_reddit", url, options)
 
     suspend fun extractInstagram(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_instagram", url, options)
+        executePythonExtractor("extract_instagram", url, options)
 
     suspend fun extractPinterest(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_pinterest", url, options)
+        executePythonExtractor("extract_pinterest", url, options)
 
     suspend fun extractSpotify(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_spotify", url, options)
+        executePythonExtractor("extract_spotify", url, options)
 
     suspend fun extractRadioJavan(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_radiojavan", url, options)
+        executePythonExtractor("extract_radiojavan", url, options)
 
     suspend fun extractXSpace(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_xspace", url, options)
+        executePythonExtractor("extract_xspace", url, options)
 
     suspend fun extractTumblr(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_tumblr", url, options)
+        executePythonExtractor("extract_tumblr", url, options)
 
     suspend fun extractPixiv(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_pixiv", url, options)
+        executePythonExtractor("extract_pixiv", url, options)
 
     suspend fun extractTwitterMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_twitter_media_scraper", url, options)
+        executePythonExtractor("extract_twitter_media_scraper", url, options)
 
     suspend fun extractFacebookMediaScraper(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        extractWithRunner("extract_facebook_media_scraper", url, options)
+        executePythonExtractor("extract_facebook_media_scraper", url, options)
 }

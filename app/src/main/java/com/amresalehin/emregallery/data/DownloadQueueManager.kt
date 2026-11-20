@@ -33,6 +33,7 @@ object DownloadQueueManager {
     val inMemoryDownloading: kotlinx.coroutines.flow.StateFlow<Boolean> = _inMemoryDownloading
 
     private val activeDownloadCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val activeCountLock = Any()
     private var configuredMaxConcurrent = 3
     @Volatile
     private var downloadConcurrencySemaphore = kotlinx.coroutines.sync.Semaphore(3)
@@ -53,10 +54,26 @@ object DownloadQueueManager {
     private val activeWorkIdsByUniqueName = ConcurrentHashMap<String, UUID>()
     private val uniqueNameByItemId = ConcurrentHashMap<String, String>()
     // Allows cancellation of work that has not started yet to release its reservation.
-    // Worker completion and cancellation race through activeItemIds so only one wins.
+    // Cancellation and worker completion race through request-ID ownership so only one wins.
     private val itemIdByWorkId = ConcurrentHashMap<UUID, String>()
     private val activeWorkIds = ConcurrentHashMap.newKeySet<UUID>()
     private val activeWorkIdsByItemId = ConcurrentHashMap<String, MutableSet<UUID>>()
+
+    private fun incrementActiveCount(count: Int = 1) {
+        synchronized(activeCountLock) {
+            val remaining = activeDownloadCount.addAndGet(count).coerceAtLeast(0)
+            activeDownloadCount.set(remaining)
+            _inMemoryDownloading.value = remaining > 0
+        }
+    }
+
+    private fun decrementActiveCount() {
+        synchronized(activeCountLock) {
+            val remaining = (activeDownloadCount.get() - 1).coerceAtLeast(0)
+            activeDownloadCount.set(remaining)
+            _inMemoryDownloading.value = remaining > 0
+        }
+    }
 
     fun isDownloading(itemId: String): Boolean {
         if (activeItemIds.contains(itemId)) return true
@@ -78,14 +95,13 @@ object DownloadQueueManager {
                     }
                 }
             }
-            activeDownloadCount.incrementAndGet()
+            incrementActiveCount()
         } else if (itemId != null) {
             if (!activeItemIds.add(itemId)) return
-            activeDownloadCount.incrementAndGet()
+            incrementActiveCount()
         } else {
-            activeDownloadCount.addAndGet(count)
+            incrementActiveCount(count)
         }
-        _inMemoryDownloading.value = activeDownloadCount.get() > 0
     }
 
     fun markDownloadCompleted(itemId: String? = null, workId: UUID? = null) {
@@ -121,9 +137,7 @@ object DownloadQueueManager {
                 activeWorkIdsByUniqueName.remove(uniqueName)
             }
         }
-        val remaining = activeDownloadCount.decrementAndGet().coerceAtLeast(0)
-        activeDownloadCount.set(remaining)
-        _inMemoryDownloading.value = remaining > 0
+        decrementActiveCount()
     }
 
     private fun serializeHeaders(headers: Map<String, String>): String? {
@@ -334,7 +348,9 @@ object DownloadQueueManager {
         itemIdByWorkId.clear()
         activeWorkIds.clear()
         activeWorkIdsByItemId.clear()
-        activeDownloadCount.set(0)
-        _inMemoryDownloading.value = false
+        synchronized(activeCountLock) {
+            activeDownloadCount.set(0)
+            _inMemoryDownloading.value = false
+        }
     }
 }

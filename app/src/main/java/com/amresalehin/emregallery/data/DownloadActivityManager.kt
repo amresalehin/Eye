@@ -153,8 +153,8 @@ object DownloadActivityManager {
         val prefs = getPrefs() ?: return
         try {
             val jsonArray = JSONArray()
-            // Only persist active, paused, retrying, or failed items (finished are in repository)
-            val toSave = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }.take(500)
+            // Finished rows are also persisted when they are not yet attached to a Pocket/Inbox stack.
+            val toSave = _activities.value.take(500)
             for (item in toSave) {
                 val obj = JSONObject().apply {
                     put("id", item.id)
@@ -272,12 +272,16 @@ object DownloadActivityManager {
     fun syncWithInboxRepository() {
         val ctx = appContext ?: return
         val repo = MediaInboxRepository.getInstance(ctx)
-        val stacks = repo.stacks.value
+        // Pocket bookmarks and the downloader inbox are separate stores. Both can contain
+        // completed local media and must be represented in the Activity screen.
+        val stacks = (repo.stacks.value + PocketRepository.getInstance(ctx).bookmarks.value)
+            .distinctBy { it.id }
         val finishedItems = mutableListOf<DownloadActivityItem>()
         val seenIds = mutableSetOf<String>()
 
         for (stack in stacks) {
             for (item in stack.items) {
+                if (item.localUri.isBlank()) continue
                 val candidateId = item.id.ifBlank { "${stack.id}_${item.localUri.hashCode()}" }
                 val uniqueId = if (seenIds.add(candidateId)) {
                     candidateId
@@ -313,10 +317,21 @@ object DownloadActivityManager {
 
         val activeOrFailed = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }
         val activeIds = activeOrFailed.map { it.id }.toSet()
+        val repositoryIds = finishedItems.map { it.id }.toSet()
+        val repositoryUris = finishedItems.mapNotNull { it.localUri }.toSet()
+        // Keep completed downloads that have not yet been attached to an Inbox/Pocket stack.
+        // Dropping them during sync made a freshly completed download disappear immediately.
+        val standaloneFinished = _activities.value.filter { item ->
+            item.status == DownloadActivityStatus.FINISHED &&
+                item.id !in repositoryIds &&
+                !item.localUri.isNullOrBlank() &&
+                item.localUri !in repositoryUris &&
+                isLocalUriAvailable(ctx, item.localUri)
+        }
         val uniqueFinished = finishedItems.filter { it.id !in activeIds }.distinctBy { it.id }
 
-        // Combined ordered: downloading first, retrying second, paused third, failed fourth, then finished newest first
-        _activities.value = (activeOrFailed + uniqueFinished).distinctBy { it.id }.sortedWith(
+        // Combined ordered: active first, then completed items newest first.
+        _activities.value = (activeOrFailed + standaloneFinished + uniqueFinished).distinctBy { it.id }.sortedWith(
             compareBy<DownloadActivityItem> {
                 when (it.status) {
                     DownloadActivityStatus.DOWNLOADING -> 0
@@ -327,6 +342,17 @@ object DownloadActivityManager {
                 }
             }.thenByDescending { it.timestampMillis }
         )
+    }
+
+    private fun isLocalUriAvailable(context: Context, rawUri: String): Boolean {
+        return runCatching {
+            val uri = android.net.Uri.parse(rawUri)
+            when (uri.scheme?.lowercase(Locale.ROOT)) {
+                "file" -> uri.path?.let { File(it).isFile } == true
+                "content" -> context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+                else -> false
+            }
+        }.getOrDefault(false)
     }
 
     fun recordQueued(

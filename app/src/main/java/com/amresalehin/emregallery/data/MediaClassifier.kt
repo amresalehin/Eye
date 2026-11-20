@@ -1420,7 +1420,7 @@ object MediaClassifier {
 
     /**
      * Resolves a local file path, URI, or filename into an accurate ClassificationResult
-     * with specific audio/*, video/*, or image/* MIME types for ViewerScreen and Share intents.
+     * with the appropriate audio, video, or image MIME types for ViewerScreen and Share intents.
      */
     fun resolveLocalMediaMimeType(uriOrName: String): ClassificationResult {
         val clean = uriOrName.trim()

@@ -1002,11 +1002,14 @@ object OkHttpDownloader {
     }
 
     fun parseContentRangeHeader(header: String?): ContentRangeInfo? {
-        val m = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""", RegexOption.IGNORE_CASE).find(header.trim()) ?: return null
-        val m = Regex("bytes\s+(\d+)-(\d+)/(\d+|\*)", RegexOption.IGNORE_CASE).find(header.trim()) ?: return null
-        val start = m.groupValues[1].toLongOrNull() ?: return null
-        val end = m.groupValues[2].toLongOrNull() ?: return null
-        val total = m.groupValues[3].toLongOrNull() ?: -1L
+        if (header.isNullOrBlank()) return null
+        val match = Regex(
+            """bytes\s+(\d+)-(\d+)/(\d+|\*)""",
+            RegexOption.IGNORE_CASE
+        ).find(header.trim()) ?: return null
+        val start = match.groupValues[1].toLongOrNull() ?: return null
+        val end = match.groupValues[2].toLongOrNull() ?: return null
+        val total = match.groupValues[3].toLongOrNull() ?: -1L
         return ContentRangeInfo(start = start, end = end, total = total)
     }
 

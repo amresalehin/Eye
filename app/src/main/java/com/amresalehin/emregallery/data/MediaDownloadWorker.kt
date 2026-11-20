@@ -361,7 +361,7 @@ class MediaDownloadWorker(
             }
             Result.failure(workDataOf(KEY_ERROR to err))
         } finally {
-            DownloadQueueManager.markDownloadCompleted(itemId)
+            DownloadQueueManager.markDownloadCompleted(itemId, id)
         }
     } }
 

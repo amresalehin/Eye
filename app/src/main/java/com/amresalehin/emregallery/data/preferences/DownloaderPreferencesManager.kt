@@ -27,24 +27,6 @@ enum class DownloaderVideoQuality(val id: String, val label: String, val maxHeig
 
 
 
-    suspend fun setRedditConfig(config: RedditDlConfig) {
-        val encSecret = if (config.clientSecret.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.clientSecret) else ""
-        val encPass = if (config.password.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.password) else ""
-        val encToken = if (config.refreshToken.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.refreshToken) else ""
-        syncPrefs.edit()
-            .putString(PREF_REDDIT_CLIENT_ID, config.clientId)
-            .putString(PREF_REDDIT_CLIENT_SECRET, encSecret)
-            .putString(PREF_REDDIT_USERNAME, config.username)
-            .putString(PREF_REDDIT_PASSWORD, encPass)
-            .putString(PREF_REDDIT_REFRESH_TOKEN, encToken)
-            .putInt(PREF_REDDIT_LIMIT, config.limit.coerceIn(1, 500))
-            .putString(PREF_REDDIT_AFTER_DATE, config.afterDate)
-            .putString(PREF_REDDIT_BEFORE_DATE, config.beforeDate)
-            .putBoolean(PREF_REDDIT_INCLUDE_COMMENTS, config.includeComments)
-            .putBoolean(PREF_REDDIT_INCLUDE_AUTHORS, config.includePostAuthors)
-            .apply()
-    }
-
     companion object {
         fun fromId(id: String?): DownloaderVideoQuality =
             entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: BEST
@@ -94,6 +76,9 @@ data class RedditDlConfig(
 
 class DownloaderPreferencesManager(private val context: Context) {
 
+    private val appContext = context.applicationContext
+    private val syncPrefs = appContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+
     val speedBoostEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
         prefs[KEY_SPEED_BOOST] ?: syncPrefs.getBoolean(PREF_SPEED_BOOST, true)
     }.distinctUntilChanged()
@@ -105,9 +90,6 @@ class DownloaderPreferencesManager(private val context: Context) {
     val formatMode: Flow<DownloaderFormatMode> = appContext.galleryDataStore.data.map { prefs ->
         DownloaderFormatMode.fromId(prefs[KEY_FORMAT_MODE] ?: syncPrefs.getString(PREF_FORMAT_MODE, DownloaderFormatMode.VIDEO_AUDIO.id))
     }.distinctUntilChanged()
-
-    private val appContext = context.applicationContext
-    private val syncPrefs = appContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
 
     val videoQualityCap: Flow<DownloaderVideoQuality> = appContext.galleryDataStore.data.map { prefs ->
         DownloaderVideoQuality.fromId(prefs[KEY_VIDEO_QUALITY] ?: syncPrefs.getString(PREF_VIDEO_QUALITY, "BEST"))
@@ -175,6 +157,24 @@ class DownloaderPreferencesManager(private val context: Context) {
     suspend fun setFormatMode(mode: DownloaderFormatMode) {
         syncPrefs.edit().putString(PREF_FORMAT_MODE, mode.id).apply()
         appContext.galleryDataStore.edit { it[KEY_FORMAT_MODE] = mode.id }
+    }
+
+    suspend fun setRedditConfig(config: RedditDlConfig) {
+        val encSecret = if (config.clientSecret.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.clientSecret) else ""
+        val encPass = if (config.password.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.password) else ""
+        val encToken = if (config.refreshToken.isNotBlank()) com.amresalehin.emregallery.data.VaultCrypto.encryptStringToBase64(config.refreshToken) else ""
+        syncPrefs.edit()
+            .putString(PREF_REDDIT_CLIENT_ID, config.clientId)
+            .putString(PREF_REDDIT_CLIENT_SECRET, encSecret)
+            .putString(PREF_REDDIT_USERNAME, config.username)
+            .putString(PREF_REDDIT_PASSWORD, encPass)
+            .putString(PREF_REDDIT_REFRESH_TOKEN, encToken)
+            .putInt(PREF_REDDIT_LIMIT, config.limit.coerceIn(1, 500))
+            .putString(PREF_REDDIT_AFTER_DATE, config.afterDate)
+            .putString(PREF_REDDIT_BEFORE_DATE, config.beforeDate)
+            .putBoolean(PREF_REDDIT_INCLUDE_COMMENTS, config.includeComments)
+            .putBoolean(PREF_REDDIT_INCLUDE_AUTHORS, config.includePostAuthors)
+            .apply()
     }
 
     suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) {

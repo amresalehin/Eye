@@ -267,9 +267,9 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_MAX_CONCURRENT = "max_concurrent_downloads"
         private const val PREF_SEARCH_ENGINE = "browser_search_engine"
         private const val PREF_ENABLED_PROVIDERS = "enabled_providers"
-        private const val PREF_SPEED_BOOST = "downloader_speed_boost_enabled"
-        private const val PREF_RECURSIVE_CRAWL = "downloader_recursive_crawl_enabled"
-        private const val PREF_FORMAT_MODE = "downloader_format_mode"
+        private const val PREF_SPEED_BOOST = "speed_boost_enabled"
+        private const val PREF_RECURSIVE_CRAWL = "recursive_crawl_enabled"
+        private const val PREF_FORMAT_MODE = "format_mode"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -382,9 +382,6 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_RECURSIVE_CRAWL = booleanPreferencesKey("downloader_recursive_crawl_enabled")
         private val KEY_FORMAT_MODE = stringPreferencesKey("downloader_format_mode")
 
-        private const val PREF_SPEED_BOOST = "speed_boost_enabled"
-        private const val PREF_RECURSIVE_CRAWL = "recursive_crawl_enabled"
-        private const val PREF_FORMAT_MODE = "format_mode"
         private const val PREF_PROXY_ENABLED = "proxy_enabled"
         private const val PREF_PROXY_URL = "proxy_url"
         private const val PREF_NETWORK_TIMEOUT = "network_timeout_seconds"

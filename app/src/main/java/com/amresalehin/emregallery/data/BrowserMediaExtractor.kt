@@ -229,8 +229,9 @@ class BrowserMediaExtractor(private val context: Context) {
                             t.contains("are you human") || t.contains("bot verification") ||
                             t.contains("aws waf") || t.contains("cloudflare") || t.contains("ddos-guard")
                         ) {
-                            detectedProtectionReason = "Verification challenge detected ($title)"
-                            onStatusUpdate(detectedProtectionReason!!)
+                            val reason = "Verification challenge detected ($title)"
+                            detectedProtectionReason = reason
+                            onStatusUpdate(reason)
                         }
                     }
                 }
@@ -500,8 +501,16 @@ class BrowserMediaExtractor(private val context: Context) {
         @Keep
         @android.webkit.JavascriptInterface
         fun reportMedia(url: String?) {
-            if (!url.isNullOrBlank()) {
-                onMediaFound(url)
+            val trimmed = url?.trim() ?: return
+            if (trimmed.isEmpty()) return
+            val lower = trimmed.lowercase()
+            val allowed = lower.startsWith("https://") ||
+                lower.startsWith("http://") ||
+                lower.startsWith("data:image/") ||
+                lower.startsWith("data:video/") ||
+                lower.startsWith("data:audio/")
+            if (allowed) {
+                onMediaFound(trimmed)
             }
         }
     }

@@ -75,9 +75,9 @@ class ShareReceiverActivity : ComponentActivity() {
             val currentUrl by sharedUrlState
 
             EmreGalleryTheme(theme = theme, surfaceColor = Color.Transparent) {
-                if (currentUrl != null) {
+                currentUrl?.let { activeUrl ->
                     ShareReceiverScreen(
-                        url = currentUrl!!,
+                        url = activeUrl,
                         onDismiss = {
                             finishWithFade()
                         },

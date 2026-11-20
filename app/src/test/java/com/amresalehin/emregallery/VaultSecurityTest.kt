@@ -5,7 +5,7 @@ import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
-import com.amresalehin.emregallery.data.BrowserSession
+import com.amresalehin.emregallery.data.BrowserMediaExtractor
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.VaultCrypto
@@ -226,7 +226,7 @@ class VaultSecurityTest {
     @Test
     fun jsBridgeValidation() {
         val captured = mutableListOf<String>()
-        val bridge = BrowserSession.EmreMediaBridge { captured.add(it) }
+        val bridge = BrowserMediaExtractor.EmreMediaBridge { captured.add(it) }
         bridge.reportMedia("javascript:alert(1)")
         bridge.reportMedia("file:///etc/passwd")
         bridge.reportMedia("content://com.android.contacts/contacts")

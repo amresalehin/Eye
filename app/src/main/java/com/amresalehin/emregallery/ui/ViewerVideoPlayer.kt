@@ -41,6 +41,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import com.amresalehin.emregallery.data.VaultAwareDataSourceFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -119,8 +120,9 @@ fun rememberViewerVideoState(
             val httpDataSourceFactory = OkHttpDataSource.Factory(OkHttpDownloader.client)
                 .setUserAgent(OkHttpDownloader.DEFAULT_USER_AGENT)
             val upstreamDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val vaultAwareFactory = VaultAwareDataSourceFactory(context, upstreamDataSourceFactory)
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
-                .setDataSourceFactory(upstreamDataSourceFactory)
+                .setDataSourceFactory(vaultAwareFactory)
 
             val parsedUri = Uri.parse(uri)
             val isHls = uri.contains(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)

@@ -528,6 +528,12 @@ class IndexingForegroundService : Service() {
         return b.build()
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        taskJob?.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()

@@ -46,7 +46,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run Android unit tests, lint, and assemble debug & release APKs
+      - name: Run Android unit tests, lint, and assemble sideloadable APKs
         run: bash ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
 
       - name: Upload unit test & lint reports
@@ -68,10 +68,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload release APK
+      - name: Upload release APK (sideloadable)
         uses: actions/upload-artifact@v4
         with:
           name: emre-gallery-release-${{ github.sha }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+  github-release:
+    name: Publish GitHub Release APK
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: emre-gallery-release-${{ github.sha }}
+          path: release-apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" release-apk/*.apk             --title "Emre Gallery $TAG"             --generate-notes

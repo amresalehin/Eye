@@ -487,7 +487,7 @@ fun formatScrapedMediaDimensionOrSize(
     val knownBytes = item.sizeBytes?.takeIf { it > 0L }
         ?: ImageDimensionProber.getCachedSize(item.url)?.takeIf { it > 0L }
     if (knownBytes != null) {
-        return DownloadActivityManager.formatBytes(knownBytes)
+        return formatMediaBytesLabel(knownBytes)
     }
 
     val formatClean = item.format.trim().uppercase(Locale.ROOT)
@@ -498,6 +498,19 @@ fun formatScrapedMediaDimensionOrSize(
         item.isVideo || item.category == MediaCategory.VIDEOS -> "Video"
         item.isStream || item.category == MediaCategory.STREAMS -> "Stream"
         else -> "Image"
+    }
+}
+
+private fun formatMediaBytesLabel(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
     }
 }
 

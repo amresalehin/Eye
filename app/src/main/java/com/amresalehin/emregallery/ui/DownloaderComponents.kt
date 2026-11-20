@@ -592,6 +592,13 @@ fun DownloaderSearchMainPage(
         )
     }
 
+    if (showDownloaderSettings) {
+        DownloaderSettingsBottomSheet(
+            downloaderPrefs = downloaderPrefs,
+            onDismiss = { showDownloaderSettings = false }
+        )
+    }
+
 }
 
 /**
@@ -770,12 +777,6 @@ fun SavedPreviewSection(
         }
     }
 
-    if (showDownloaderSettings) {
-        DownloaderSettingsBottomSheet(
-            downloaderPrefs = downloaderPrefs,
-            onDismiss = { showDownloaderSettings = false }
-        )
-    }
 }
 
 /**

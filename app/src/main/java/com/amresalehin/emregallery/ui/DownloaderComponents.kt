@@ -1562,6 +1562,8 @@ fun DownloaderResultsPage(
                             DownloaderVideoQuality.Q720P -> "720p"
                             DownloaderVideoQuality.Q480P -> "480p"
                             DownloaderVideoQuality.Q360P -> "360p"
+                            DownloaderVideoQuality.Q240P -> "240p"
+                            DownloaderVideoQuality.Q144P -> "144p"
                         }
                         val isCustomQuality = audioOnlyMode || videoQualityCap != DownloaderVideoQuality.BEST
                         Surface(

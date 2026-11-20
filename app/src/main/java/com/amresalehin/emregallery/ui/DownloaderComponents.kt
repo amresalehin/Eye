@@ -591,6 +591,7 @@ fun DownloaderSearchMainPage(
             modifier = Modifier.fillMaxWidth()
         )
     }
+
 }
 
 /**

@@ -139,7 +139,9 @@ class YtDlpProvider : ExtractionProvider {
 
     override fun isApplicable(context: MediaRequestContext): Boolean {
         if (!GalleryDlEngine.isAvailable()) return false
-        return matchesSupportedHost(context.url)
+        if (matchesSupportedHost(context.url)) return true
+        val support = GalleryDlEngine.checkSupport(context.url)
+        return support.isSupported && support.engine == "yt-dlp"
     }
 
     override suspend fun extract(

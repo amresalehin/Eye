@@ -23,7 +23,6 @@ import com.amresalehin.emregallery.ui.passesDimensionFilter
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -526,238 +525,54 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testMockWebServerRejectsHtmlMimeTypeForImages() = runBlocking {
+    fun testOkHttpDirectMediaDownloadRemoved() {
+        val methods = OkHttpDownloader::class.java.declaredMethods.map { it.name }.toSet()
+        assertFalse("OkHttpDownloader must not expose downloadMediaFileDetailed", "downloadMediaFileDetailed" in methods)
+        assertFalse("OkHttpDownloader must not expose downloadMediaFile", "downloadMediaFile" in methods)
+        assertTrue("OkHttpDownloader must retain getHtml for DOM scraping", "getHtml" in methods)
+        assertTrue("OkHttpDownloader must retain getTargetStorageDir", "getTargetStorageDir" in methods)
+        assertTrue("OkHttpDownloader must retain generateDeterministicId", "generateDeterministicId" in methods)
+    }
+
+    @Test
+    fun testGalleryDlEngineRoutesDownloadsThroughPythonOnly() = runBlocking {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        // Outside Android Chaquopy runtime, downloadMediaDetailed must fail clearly with Python engine notice
+        // instead of falling back to direct OkHttp downloads.
+        val result = com.amresalehin.emregallery.data.GalleryDlEngine.downloadMediaDetailed(
+            context = context,
+            mediaUrl = "https://example.com/media/photo.jpg",
+            fileName = "photo.jpg"
+        )
+        assertFalse(result.isSuccessful)
+        assertNull(result.file)
+        assertTrue(result.errorMessage?.contains("yt-dlp") == true || result.errorMessage?.contains("gallery-dl") == true)
+    }
+
+    @Test
+    fun testOkHttpGetHtmlStillServesStaticScrapingAndParseRetryAfter() = runBlocking {
         val server = MockWebServer()
         server.start()
         try {
-            val context: Context = ApplicationProvider.getApplicationContext()
             server.enqueue(
                 MockResponse()
                     .setResponseCode(200)
                     .setHeader("Content-Type", "text/html; charset=utf-8")
-                    .setBody("<!DOCTYPE html><html><body>Error page</body></html>")
+                    .setBody("<html><head><title>Gallery Page</title></head><body><img src='/a.jpg'/></body></html>")
             )
-            val url = server.url("/test_img.jpg").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "test_img.jpg")
-            assertFalse(result.isSuccessful)
-            assertNull(result.file)
-            assertTrue(result.errorMessage?.contains("webpage") == true || result.errorMessage?.contains("HTML") == true)
+            val url = server.url("/gallery").toString()
+            val htmlRes = OkHttpDownloader.getHtml(url)
+            assertTrue(htmlRes.isSuccessful)
+            assertEquals(200, htmlRes.statusCode)
+            assertTrue(htmlRes.bodyString?.contains("Gallery Page") == true)
         } finally {
             server.shutdown()
         }
-    }
 
-    @Test
-    fun testMockWebServerRejectsJsonErrorPagesEvenForManifest() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "application/json")
-                    .setBody("""{"error":"forbidden","message":"Invalid token"}""")
-            )
-            val url = server.url("/stream.m3u8").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "stream.m3u8")
-            assertFalse(result.isSuccessful)
-            assertNull(result.file)
-            assertTrue(result.errorMessage?.contains("error") == true || result.errorMessage?.contains("JSON") == true || result.errorMessage?.contains("json") == true)
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testMockWebServerResumableRange206() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val downloadId = "test_resumable_video"
-            val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
-            tempFile.writeBytes(ByteArray(5) { 0x41.toByte() })
-
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(206)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setHeader("Content-Range", "bytes 5-9/10")
-                    .setHeader("Content-Length", "5")
-                    .setBody(Buffer().write(ByteArray(5) { 0x42.toByte() }))
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = downloadId
-            )
-
-            val recorded = server.takeRequest()
-            assertEquals("bytes=5-", recorded.getHeader("Range"))
-            assertTrue(result.isSuccessful)
-            assertTrue(result.isResumed)
-            assertEquals(10L, result.bytesDownloaded)
-            assertNotNull(result.file)
-            assertEquals(10L, result.file?.length())
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testMockWebServerHttp200FallbackClearsPartialFile() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val downloadId = "test_fallback_video"
-            val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
-            tempFile.writeBytes(ByteArray(8) { 0x55.toByte() })
-
-            // Server ignores Range and returns HTTP 200 with full 10 bytes
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setBody(Buffer().write(ByteArray(10) { 0x77.toByte() }))
-                    .setHeader("Content-Length", "10")
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = downloadId
-            )
-
-            assertTrue(result.isSuccessful)
-            assertFalse(result.isResumed)
-            assertEquals(10L, result.bytesDownloaded)
-            assertNotNull(result.file)
-            assertEquals(10L, result.file?.length())
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testMockWebServerHttp416SafeHandling() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val downloadId = "test_416_video"
-            val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
-            tempFile.writeBytes(ByteArray(50) { 0x11.toByte() })
-
-            // First request with Range fails with 416
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(416)
-                    .setHeader("Content-Range", "bytes */10")
-            )
-            // Follow-up clean request returns 200 with 10 bytes
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setBody(Buffer().write(ByteArray(10) { 0x22.toByte() }))
-                    .setHeader("Content-Length", "10")
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = downloadId
-            )
-
-            assertTrue(result.isSuccessful)
-            assertEquals(10L, result.bytesDownloaded)
-            assertNotNull(result.file)
-            assertEquals(10L, result.file?.length())
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testMockWebServerInterruptedTransferRejected() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            // Server claims Content-Length 50, but disconnects after sending only 15 bytes
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setBody(Buffer().write(ByteArray(15) { 0x33.toByte() }))
-                    .setHeader("Content-Length", "50")
-                    .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "video.mp4")
-            assertFalse(result.isSuccessful)
-            assertNull(result.file)
-            assertTrue(
-                result.errorMessage?.contains("interrupted") == true ||
-                result.errorMessage?.contains("incomplete") == true ||
-                result.errorMessage?.contains("size mismatch") == true ||
-                result.errorMessage?.contains("stream") == true ||
-                result.errorMessage?.contains("unexpected") == true ||
-                result.errorMessage?.contains("timeout") == true
-            )
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testSupportedNonRasterFormatsValidation() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val nonRasterFormats = listOf(
-                Pair("audio/aac", "song.aac"),
-                Pair("audio/flac", "music.flac"),
-                Pair("audio/opus", "voice.opus"),
-                Pair("audio/x-ms-wma", "audio.wma"),
-                Pair("video/x-msvideo", "movie.avi"),
-                Pair("video/x-flv", "video.flv"),
-                Pair("video/3gpp", "clip.3gp"),
-                Pair("video/mp2t", "segment.ts")
-            )
-
-            for ((mime, name) in nonRasterFormats) {
-                val dummyBytes = ByteArray(32) { (it + 1).toByte() }
-                server.enqueue(
-                    MockResponse()
-                        .setResponseCode(200)
-                        .setHeader("Content-Type", mime)
-                        .setHeader("Content-Length", dummyBytes.size.toString())
-                        .setBody(Buffer().write(dummyBytes))
-                )
-                val url = server.url("/$name").toString()
-                val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, name)
-                assertTrue("Format $name should succeed without BitmapFactory failure", result.isSuccessful)
-                assertNotNull(result.file)
-                assertEquals(32L, result.file?.length())
-            }
-        } finally {
-            server.shutdown()
-        }
+        assertEquals(45L, OkHttpDownloader.parseRetryAfterHeader("45"))
+        assertEquals(1L, OkHttpDownloader.parseRetryAfterHeader("0"))
+        assertEquals(300L, OkHttpDownloader.parseRetryAfterHeader("9999"))
+        assertNull(OkHttpDownloader.parseRetryAfterHeader(null))
     }
 
     @Test
@@ -930,110 +745,20 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testMockWebServerHtmlDisguisedAsJpgRejected() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            // Server responds with 200 and image/jpeg Content-Type, but body is an HTML page (like Wikipedia error or interstitial)
-            val htmlBody = "<!DOCTYPE html><html><head><title>Wikipedia</title></head><body>File details page</body></html>"
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "image/jpeg")
-                    .setBody(htmlBody)
-            )
+    fun testGalleryDlSupportInfoAndDeterministicStorageHelpers() {
+        val redditSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.reddit.com/r/pics/comments/abc/test/")
+        assertTrue(redditSupport.isSupported)
+        assertEquals("reddit", redditSupport.category)
 
-            val url = server.url("/File:Taj_Mahal.jpg").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "File_Taj_Mahal.jpg")
-            assertFalse("HTML content disguised as JPEG must be rejected", result.isSuccessful)
-            assertNull("No file must be committed for HTML content", result.file)
-            assertTrue(result.errorMessage?.contains("HTML webpage") == true || result.errorMessage?.contains("corrupt or invalid") == true)
-        } finally {
-            server.shutdown()
-        }
-    }
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val id1 = OkHttpDownloader.generateDeterministicId("https://cdn.example.com/a/video.mp4", "video.mp4")
+        val id2 = OkHttpDownloader.generateDeterministicId("https://cdn.example.com/a/video.mp4", "video.mp4")
+        assertEquals(id1, id2)
+        assertTrue(id1.endsWith(".mp4"))
 
-    @Test
-    fun testMockWebServerContentRangeMismatchRestartsCleanly() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val downloadId = "test_mismatch_resume"
-            val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
-            // Local file has 10 bytes
-            tempFile.writeBytes(ByteArray(10) { 0x11.toByte() })
-
-            // Server responds with Content-Range starting at 0 instead of 10 or with mismatched range
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(206)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setHeader("Content-Range", "bytes 0-19/20")
-                    .setBody(Buffer().write(ByteArray(20) { 0x22.toByte() }))
-            )
-            // Follow-up clean restart returns full 20 bytes
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "video/mp4")
-                    .setBody(Buffer().write(ByteArray(20) { 0x33.toByte() }))
-                    .setHeader("Content-Length", "20")
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = downloadId
-            )
-
-            assertTrue(result.isSuccessful)
-            assertEquals(20L, result.bytesDownloaded)
-            assertNotNull(result.file)
-            assertEquals(20L, result.file?.length())
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun testMockWebServerHttp416AlreadyCompleteCommitsFile() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            val downloadId = "test_416_complete"
-            val targetDir = OkHttpDownloader.getTargetStorageDir(context)
-            val tempFile = File(targetDir, "$downloadId.mp4.downloading")
-            // Local file has full 30 bytes
-            tempFile.writeBytes(ByteArray(30) { 0x44.toByte() })
-
-            // Server returns 416 with total length 30 matching local existing bytes
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(416)
-                    .setHeader("Content-Range", "bytes */30")
-            )
-
-            val url = server.url("/video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = url,
-                fileName = "video.mp4",
-                downloadId = downloadId
-            )
-
-            assertTrue(result.isSuccessful)
-            assertEquals(30L, result.bytesDownloaded)
-            assertNotNull(result.file)
-            assertEquals(30L, result.file?.length())
-        } finally {
-            server.shutdown()
-        }
+        val targetDir = OkHttpDownloader.getTargetStorageDir(context, "reddit.com")
+        assertTrue(targetDir.exists())
+        assertEquals("reddit.com", targetDir.name)
     }
 
     @Test
@@ -1303,17 +1028,18 @@ class MediaDownloaderTest {
         assertEquals("image/png", parsedInfo?.mimeType)
         assertEquals("PNG", parsedInfo?.format)
 
-        // 3. OkHttpDownloader decode data URI
+        // 3. GalleryDlEngine decodes inline data URI locally without HTTP calls
         val context: Context = ApplicationProvider.getApplicationContext()
-        // 1x1 valid PNG in Base64 padded to > 2048 chars for test
         // Valid 1x1 PNG bytes:
         val validPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         val validDataUri = "data:image/png;base64,$validPngBase64"
-        val res = OkHttpDownloader.downloadMediaFileDetailed(context, validDataUri, "embedded_canvas.png")
+        val res = com.amresalehin.emregallery.data.GalleryDlEngine.downloadMediaDetailed(context, validDataUri, "embedded_canvas.png")
         assertTrue(res.isSuccessful)
         assertNotNull(res.file)
         assertTrue(res.file?.exists() == true)
         assertEquals("image/png", res.mimeType)
+        assertEquals("data-uri", res.engineUsed)
+        assertTrue(res.file?.delete() == true)
     }
 
     @Test
@@ -1348,36 +1074,17 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testCloudflareAndAntiBotChallengePayloadRejection() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            val context: Context = ApplicationProvider.getApplicationContext()
-            // Server returns HTTP 200 with Cloudflare anti-bot challenge page
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "text/html; charset=UTF-8")
-                    .setBody("""
-                        <!DOCTYPE html>
-                        <html>
-                        <head><title>Just a moment...</title></head>
-                        <body>
-                            <h2>DDoS protection by Cloudflare</h2>
-                            <p>Ray ID: 7abc123456</p>
-                        </body>
-                        </html>
-                    """.trimIndent())
-            )
-
-            val url = server.url("/protected_video.mp4").toString()
-            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "protected_video.mp4")
-            assertFalse(result.isSuccessful)
-            assertNull(result.file)
-            assertTrue(result.errorMessage?.contains("webpage") == true || result.errorMessage?.contains("HTML") == true)
-        } finally {
-            server.shutdown()
-        }
+    fun testInvalidDataUriRejectedByGalleryDlEngine() = runBlocking {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val brokenDataUri = "data:image/png;base64,"
+        val result = com.amresalehin.emregallery.data.GalleryDlEngine.downloadMediaDetailed(
+            context = context,
+            mediaUrl = brokenDataUri,
+            fileName = "broken.png"
+        )
+        assertFalse(result.isSuccessful)
+        assertNull(result.file)
+        assertEquals(400, result.statusCode)
     }
 
     @Test

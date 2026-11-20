@@ -5,9 +5,24 @@ import time
 import traceback
 import hashlib
 import re
+import shutil
 import threading
 
 _gdl_lock = threading.Lock()
+
+
+def _parse_cookie_dict(cookies_str):
+    if not cookies_str:
+        return {}
+    cookie_dict = {}
+    for part in str(cookies_str).split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, v = part.split("=", 1)
+            k = k.strip()
+            if k:
+                cookie_dict[k] = v.strip()
+    return cookie_dict
 
 
 def _parse_duration_millis(raw_val):
@@ -142,36 +157,37 @@ def get_engine_status():
 
 def check_support(url):
     """
-    Checks if a URL is handled by gallery-dl or yt-dlp extractors.
+    Checks if a URL is handled by gallery-dl or yt-dlp site extractors.
     """
     if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": ""})
+        return json.dumps({"supported": False, "category": "", "extractor": "", "engine": ""})
 
     clean_url = url.strip()
 
-    # 1. Check gallery-dl
+    # 1. Check gallery-dl site extractors (skip generic directlink matcher)
     if GALLERY_DL_AVAILABLE:
         try:
             ext = gdl_extractor.find(clean_url)
             if ext is not None:
                 cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
-                subcat = getattr(ext, "subcategory", "") or ""
-                name = ext.__class__.__name__
-                return json.dumps({
-                    "supported": True,
-                    "category": cat,
-                    "subcategory": subcat,
-                    "extractor": name,
-                    "engine": "gallery-dl"
-                })
+                if cat != "directlink":
+                    subcat = getattr(ext, "subcategory", "") or ""
+                    name = ext.__class__.__name__
+                    return json.dumps({
+                        "supported": True,
+                        "category": cat,
+                        "subcategory": subcat,
+                        "extractor": name,
+                        "engine": "gallery-dl"
+                    })
         except Exception:
             pass
 
-    # 2. Check yt-dlp
+    # 2. Check yt-dlp site extractors (fast regex check across all built-in extractors, excluding generic)
     if YTDLP_AVAILABLE:
         try:
             lower = clean_url.lower()
-            if any(vh in lower for vh in SOCIAL_VIDEO_HOSTS):
+            if any(vh in lower for vh in SOCIAL_VIDEO_HOSTS) or ".m3u8" in lower or ".mpd" in lower:
                 return json.dumps({
                     "supported": True,
                     "category": "video",
@@ -179,10 +195,20 @@ def check_support(url):
                     "extractor": "YoutubeDL",
                     "engine": "yt-dlp"
                 })
+            for ydl_ext in yt_dlp.extractor.gen_extractors():
+                ie_name = getattr(ydl_ext, "IE_NAME", "generic")
+                if ie_name and ie_name.lower() != "generic" and ydl_ext.suitable(clean_url):
+                    return json.dumps({
+                        "supported": True,
+                        "category": "video",
+                        "subcategory": "extractor",
+                        "extractor": ie_name,
+                        "engine": "yt-dlp"
+                    })
         except Exception:
             pass
 
-    return json.dumps({"supported": False, "category": "", "extractor": ""})
+    return json.dumps({"supported": False, "category": "", "extractor": "", "engine": ""})
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -207,8 +233,12 @@ def extract_gallery_dl(url, options_json="{}"):
     try:
         with _gdl_lock:
             gdl_config.set(("extractor",), "user-agent", user_agent)
+            gdl_config.set(("output",), "mode", "null")
             if cookies:
-                gdl_config.set(("extractor",), "cookies", cookies)
+                gdl_config.set(("extractor",), "headers", {"Cookie": cookies})
+                cookie_dict = _parse_cookie_dict(cookies)
+                if cookie_dict:
+                    gdl_config.set(("extractor",), "cookies", cookie_dict)
 
             ext = gdl_extractor.find(clean_url)
             if ext:
@@ -654,15 +684,350 @@ def extract_media(url, options_json="{}"):
         "items": all_items
     })
 
+def _validate_media_file_payload(file_path):
+    """
+    Verifies a downloaded file is non-empty and does not contain HTML, Cloudflare challenges,
+    JSON error objects, or raw HLS/DASH playlist manifests.
+    Returns (is_valid, error_message).
+    """
+    if not file_path or not os.path.exists(file_path):
+        return False, "Downloaded file missing"
+    if os.path.getsize(file_path) <= 0:
+        return False, "Downloaded file was empty"
+    try:
+        with open(file_path, "rb") as f:
+            prefix = f.read(1024).lower()
+    except Exception as e:
+        return False, f"Failed to read downloaded file: {e}"
+
+    if (
+        b"<!doctype html" in prefix
+        or b"<html" in prefix
+        or b"<head" in prefix
+        or b"<body" in prefix
+        or b"cloudflare" in prefix
+        or b"ray id:" in prefix
+        or b"just a moment..." in prefix
+        or b"ddos protection" in prefix
+        or b"challenge-running" in prefix
+        or b"403 forbidden" in prefix
+        or b"404 not found" in prefix
+        or b"access denied" in prefix
+        or b"502 bad gateway" in prefix
+        or b"503 service" in prefix
+    ):
+        return False, "Downloaded file contains HTML webpage content instead of media"
+
+    trimmed = prefix.strip()
+    if (trimmed.startswith(b"{") or trimmed.startswith(b"[")) and (
+        b'"error"' in trimmed
+        or b'"message"' in trimmed
+        or b'"status"' in trimmed
+        or b'"code"' in trimmed
+        or b'"forbidden"' in trimmed
+        or b'"unauthorized"' in trimmed
+        or b'"success":false' in trimmed
+    ):
+        return False, "Downloaded file contains JSON error response instead of media"
+
+    if b"#extm3u" in prefix or b"<mpd" in prefix or b"urn:mpeg:dash:schema" in prefix:
+        return False, "Cannot save streaming playlist text (.m3u8/.mpd) as finished media file"
+
+    return True, None
+
+
+def _extract_http_status_from_error(err_msg):
+    if not err_msg:
+        return -1
+    m = re.search(r"HTTP\s*(?:Error|Status)?\s*(\d{3})", str(err_msg), re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            pass
+    return -1
+
+
+def _stream_with_gallery_dl_session(session, media_url, target_path, http_headers, progress_callback=None):
+    """
+    Streams media_url to target_path using a gallery-dl extractor session with HTTP Range
+    resumability, byte-level progress callbacks, and HTML/JSON/manifest payload rejection.
+    Returns (success, status_code, error_message, retry_after_seconds).
+    """
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    part_path = target_path + ".downloading"
+    existing_bytes = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+
+    req_headers = dict(http_headers or {})
+    if existing_bytes > 0:
+        req_headers["Range"] = f"bytes={existing_bytes}-"
+
+    try:
+        resp = session.get(media_url, headers=req_headers, stream=True, timeout=35)
+        if resp.status_code == 416 and existing_bytes > 0:
+            content_range = resp.headers.get("Content-Range") or resp.headers.get("content-range") or ""
+            total_len = None
+            if "/" in content_range:
+                try:
+                    total_len = int(content_range.rsplit("/", 1)[-1].strip())
+                except Exception:
+                    total_len = None
+            resp.close()
+            if total_len and total_len > 0 and existing_bytes == total_len and os.path.exists(part_path):
+                valid, v_err = _validate_media_file_payload(part_path)
+                if valid:
+                    os.replace(part_path, target_path)
+                    _notify_progress(progress_callback, total_len, total_len, 0)
+                    return True, 200, None, None
+            if os.path.exists(part_path):
+                os.remove(part_path)
+            existing_bytes = 0
+            req_headers.pop("Range", None)
+            resp = session.get(media_url, headers=req_headers, stream=True, timeout=35)
+
+        if resp.status_code not in (200, 206):
+            code = int(resp.status_code)
+            retry_after = None
+            ra_raw = resp.headers.get("Retry-After")
+            if ra_raw:
+                try:
+                    retry_after = max(1, min(300, int(str(ra_raw).strip())))
+                except Exception:
+                    retry_after = None
+            resp.close()
+            return False, code, f"Server returned HTTP status {code}", retry_after
+
+        content_type = (resp.headers.get("content-type") or "").lower()
+        lower_url = media_url.lower()
+        is_hls_manifest = ".m3u8" in lower_url
+        if (
+            "text/html" in content_type
+            or "application/json" in content_type
+            or ("text/plain" in content_type and not is_hls_manifest and "playlist" not in lower_url)
+        ):
+            resp.close()
+            if os.path.exists(part_path):
+                os.remove(part_path)
+            return False, int(resp.status_code), f"Server returned {content_type} webpage or error response instead of media content", None
+
+        is_partial = (resp.status_code == 206 and existing_bytes > 0)
+        if not is_partial and existing_bytes > 0:
+            existing_bytes = 0
+
+        content_length = 0
+        try:
+            content_length = int(resp.headers.get("content-length") or 0)
+        except Exception:
+            content_length = 0
+
+        if is_partial:
+            cr = resp.headers.get("Content-Range") or ""
+            range_total = None
+            if "/" in cr:
+                try:
+                    range_total = int(cr.rsplit("/", 1)[-1].strip())
+                except Exception:
+                    range_total = None
+            total_bytes = range_total if (range_total and range_total > 0) else ((existing_bytes + content_length) if content_length > 0 else -1)
+        else:
+            total_bytes = content_length if content_length > 0 else -1
+
+        downloaded = existing_bytes
+        last_emit_time = time.time()
+        last_emit_bytes = downloaded
+        mode_str = "ab" if is_partial else "wb"
+
+        with open(part_path, mode_str) as f:
+            for chunk in resp.iter_content(chunk_size=65536):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.time()
+                    if now - last_emit_time >= 0.25:
+                        dt = now - last_emit_time
+                        speed = int((downloaded - last_emit_bytes) / dt) if dt > 0 else 0
+                        last_emit_time = now
+                        last_emit_bytes = downloaded
+                        _notify_progress(progress_callback, downloaded, total_bytes, speed)
+
+        resp.close()
+
+        if total_bytes > 0 and os.path.exists(part_path) and os.path.getsize(part_path) != total_bytes:
+            actual = os.path.getsize(part_path)
+            return False, 200, f"Download interrupted or size mismatch ({actual} of {total_bytes} bytes)", None
+
+        valid, v_err = _validate_media_file_payload(part_path)
+        if not valid:
+            if os.path.exists(part_path):
+                os.remove(part_path)
+            return False, 200, v_err, None
+
+        os.replace(part_path, target_path)
+        final_size = os.path.getsize(target_path)
+        _notify_progress(progress_callback, final_size, total_bytes if total_bytes > 0 else final_size, 0)
+        return True, 200, None, None
+    except Exception as e:
+        err_str = f"{e.__class__.__name__}: {e}"
+        return False, _extract_http_status_from_error(err_str), err_str, None
+
+
+def _download_with_gallery_dl(media_url, target_path, http_headers, cookies=None, progress_callback=None):
+    """
+    Resolves and downloads media through gallery-dl (supporting 280+ site extractors,
+    directlink extractor, gallery-dl session cookies/headers, and DownloadJob staging fallback).
+    Returns (success, status_code, error_message, retry_after_seconds).
+    """
+    if not GALLERY_DL_AVAILABLE:
+        return False, -1, "gallery-dl is not available", None
+
+    ua = http_headers.get("User-Agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    candidates = []
+    gdl_session = None
+    has_extractor = False
+
+    try:
+        with _gdl_lock:
+            gdl_config.set(("extractor",), "user-agent", ua)
+            gdl_config.set(("extractor",), "headers", dict(http_headers))
+            gdl_config.set(("output",), "mode", "null")
+            if cookies:
+                cookie_dict = _parse_cookie_dict(cookies)
+                if cookie_dict:
+                    gdl_config.set(("extractor",), "cookies", cookie_dict)
+
+            ext = gdl_extractor.find(media_url)
+            if ext is not None:
+                has_extractor = True
+                gdl_session = getattr(ext, "session", None)
+                cat = getattr(ext, "category", "")
+                if cat == "directlink":
+                    # Direct media link matched by gallery-dl DirectlinkExtractor: resolve immediately with ext.session
+                    try:
+                        ext.initialize()
+                    except Exception:
+                        pass
+                    gdl_session = getattr(ext, "session", None) or gdl_session
+                    candidates.append((media_url, {}))
+                else:
+                    # Site extractor: resolve canonical media URL + site-specific referer/headers via DataJob
+                    try:
+                        data_job = gdl_job.DataJob(ext, file=None, resolve=True)
+                        data_job.run()
+                        gdl_session = getattr(ext, "session", None) or gdl_session
+                        for entry in getattr(data_job, "data", []):
+                            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                                continue
+                            resolved_u = None
+                            kwdict = {}
+                            if len(entry) >= 3 and isinstance(entry[1], str) and (entry[1].startswith("http://") or entry[1].startswith("https://")):
+                                resolved_u = entry[1]
+                                if isinstance(entry[2], dict):
+                                    kwdict = entry[2]
+                            elif isinstance(entry[1], dict):
+                                kwdict = entry[1]
+                                resolved_u = kwdict.get("url") or kwdict.get("file_url")
+                            if resolved_u:
+                                item_hdrs = kwdict.get("_http_headers") if isinstance(kwdict.get("_http_headers"), dict) else {}
+                                candidates.append((resolved_u, item_hdrs))
+                    except Exception:
+                        pass
+            if not candidates:
+                candidates.append((media_url, {}))
+    except Exception as e:
+        return False, _extract_http_status_from_error(str(e)), f"gallery-dl init failed: {e}", None
+
+    if gdl_session is None:
+        # Use gallery-dl's HTTP requests session configured with our headers/cookies
+        import requests
+        gdl_session = requests.Session()
+        gdl_session.headers.update(http_headers)
+        if cookies:
+            gdl_session.cookies.update(_parse_cookie_dict(cookies))
+
+    last_code = -1
+    last_err = "gallery-dl download failed"
+    last_retry = None
+
+    for cand_url, extra_item_hdrs in candidates:
+        merged_hdrs = dict(http_headers)
+        if extra_item_hdrs:
+            merged_hdrs.update({str(k): str(v) for k, v in extra_item_hdrs.items()})
+        ok, code, err, retry_after = _stream_with_gallery_dl_session(
+            gdl_session,
+            cand_url,
+            target_path,
+            merged_hdrs,
+            progress_callback=progress_callback,
+        )
+        if ok:
+            return True, 200, None, None
+        last_code, last_err, last_retry = code, (err or last_err), retry_after
+
+    # Fallback inside gallery-dl: DownloadJob into an isolated staging directory for special extractors (e.g., ugoira)
+    if has_extractor:
+        staging_dir = target_path + ".gdl_stage"
+        try:
+            if os.path.exists(staging_dir):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+            os.makedirs(staging_dir, exist_ok=True)
+            with _gdl_lock:
+                gdl_config.set(("extractor",), "base-directory", staging_dir)
+                gdl_config.set(("extractor",), "directory", [])
+                gdl_config.set(("extractor",), "skip", False)
+                gdl_config.set(("extractor",), "user-agent", ua)
+                gdl_config.set(("extractor",), "headers", dict(http_headers))
+                gdl_config.set(("downloader",), "retries", 3)
+                gdl_config.set(("downloader",), "timeout", 30.0)
+                gdl_config.set(("downloader",), "part", True)
+                gdl_config.set(("output",), "mode", "null")
+                if cookies:
+                    cookie_dict = _parse_cookie_dict(cookies)
+                    if cookie_dict:
+                        gdl_config.set(("extractor",), "cookies", cookie_dict)
+                dl_job = gdl_job.DownloadJob(media_url)
+                dl_job.run()
+
+            downloaded_files = []
+            for root_dir, _, files in os.walk(staging_dir):
+                for fname in files:
+                    if not fname.endswith(".part"):
+                        fpath = os.path.join(root_dir, fname)
+                        if os.path.getsize(fpath) > 0:
+                            downloaded_files.append(fpath)
+            if downloaded_files:
+                best_file = max(downloaded_files, key=lambda p: os.path.getsize(p))
+                valid, v_err = _validate_media_file_payload(best_file)
+                if valid:
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    shutil.move(best_file, target_path)
+                    size = os.path.getsize(target_path)
+                    _notify_progress(progress_callback, size, size, 0)
+                    return True, 200, None, None
+                last_err = v_err or last_err
+        except Exception as e:
+            err_str = f"{e.__class__.__name__}: {e}"
+            code = _extract_http_status_from_error(err_str)
+            if code != -1:
+                last_code = code
+            last_err = err_str
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+    return False, last_code, last_err, last_retry
+
+
 def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=None, progress_callback=None, max_height=0, audio_only=False):
     """
-    Downloads a video/stream with yt-dlp, ensuring audio is always preserved:
+    Downloads a video/audio/stream with yt-dlp, ensuring audio is always preserved:
     1. Probes available formats for media_url (or referer if media_url is a raw v.redd.it DASH video).
-    2. If split DASH video + audio tracks are needed, downloads video_part.mp4 and audio_part.m4a
+    2. If split DASH video + audio tracks are needed, downloads video_part and audio_part
        and muxes them with AndroidMediaMuxer (or leaves the parts for GalleryDlEngine to mux).
-    3. Otherwise downloads a verified pre-muxed format (vcodec!=none and acodec!=none), never falling back
-       to a silent video-only stream when audio tracks exist.
+    3. Otherwise downloads a verified pre-muxed format or best available file.
+    Returns (success, status_code, error_message, retry_after_seconds).
     """
+    if not YTDLP_AVAILABLE:
+        return False, -1, "yt-dlp is not available", None
+
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     probe_url = referer if ("v.redd.it/" in media_url.lower() and referer and ("reddit.com" in referer.lower() or "redd.it" in referer.lower())) else media_url
 
@@ -685,249 +1050,256 @@ def _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=N
         info = None
 
     formats = (info or {}).get("formats") or []
-    if audio_only:
-        a_opts = {
+    try:
+        if audio_only:
+            a_opts = {
+                "outtmpl": target_path,
+                "quiet": True,
+                "no_warnings": True,
+                "continuedl": True,
+                "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+                "socket_timeout": 30,
+                "http_headers": http_headers,
+                "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 1.0)]
+            }
+            with yt_dlp.YoutubeDL(a_opts) as ydl_a:
+                ydl_a.download([probe_url])
+            valid, v_err = _validate_media_file_payload(target_path)
+            if valid:
+                return True, 200, None, None
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            return False, -1, v_err or "yt-dlp audio-only download produced invalid file", None
+
+        if max_height and max_height > 0:
+            capped = [f for f in formats if not f.get("height") or int(f.get("height") or 0) <= max_height]
+            if capped:
+                formats = capped
+        mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats)
+
+        # Case A: Split DASH video + audio tracks (up to 2K/4K/8K MP4 or WebM VP9+Opus, Reddit v.redd.it, YouTube, Reels)
+        if mode == "split" and primary_fmt and secondary_fmt:
+            video_fmt_id = primary_fmt.get("format_id")
+            audio_fmt_id = secondary_fmt.get("format_id")
+            is_webm = _is_webm_pair(primary_fmt, secondary_fmt)
+            video_part_path = target_path + (".video_part.webm" if is_webm else ".video_part.mp4")
+            audio_part_path = target_path + (".audio_part.webm" if is_webm else ".audio_part.m4a")
+            try:
+                for p in (video_part_path, audio_part_path):
+                    if os.path.exists(p):
+                        os.remove(p)
+
+                v_fallback = "bestvideo[ext=webm]/bestvideo" if is_webm else "bestvideo[ext=mp4]/bestvideo"
+                v_opts = {
+                    "outtmpl": video_part_path,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "continuedl": True,
+                    "format": f"{video_fmt_id}/{v_fallback}",
+                    "socket_timeout": 30,
+                    "http_headers": http_headers,
+                    "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 0.78)]
+                }
+                with yt_dlp.YoutubeDL(v_opts) as ydl_v:
+                    ydl_v.download([probe_url])
+
+                a_fallback = "bestaudio[acodec^=opus]/bestaudio[ext=webm]/bestaudio" if is_webm else "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio"
+                a_opts = {
+                    "outtmpl": audio_part_path,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "continuedl": True,
+                    "format": f"{audio_fmt_id}/{a_fallback}",
+                    "socket_timeout": 30,
+                    "http_headers": http_headers,
+                    "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.78, 0.20)]
+                }
+                with yt_dlp.YoutubeDL(a_opts) as ydl_a:
+                    ydl_a.download([probe_url])
+
+                if os.path.exists(video_part_path) and os.path.getsize(video_part_path) > 0 and os.path.exists(audio_part_path) and os.path.getsize(audio_part_path) > 0:
+                    muxed = _mux_with_android_media_muxer(video_part_path, audio_part_path, target_path)
+                    if muxed and os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                        return True, 200, None, None
+                    # If running outside Android JVM or if Kotlin side will mux, keep both part files so GalleryDlEngine can mux them
+                    if os.path.exists(video_part_path) and os.path.exists(audio_part_path):
+                        return True, 200, None, None
+            except Exception:
+                for p in (video_part_path, audio_part_path):
+                    try:
+                        if os.path.exists(p):
+                            os.remove(p)
+                    except Exception:
+                        pass
+
+        # Case B: Pre-muxed stream with both video and audio (never bare /best unless server has no audio at all)
+        has_any_audio = any(f.get("acodec") not in (None, "none") for f in formats)
+        if mode == "muxed" and primary_fmt and primary_fmt.get("format_id"):
+            fmt_spec = f"{primary_fmt['format_id']}/b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]"
+        elif has_any_audio or not formats:
+            fmt_spec = "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best"
+        else:
+            fmt_spec = "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best"
+
+        ydl_opts = {
             "outtmpl": target_path,
             "quiet": True,
             "no_warnings": True,
             "continuedl": True,
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+            "format": fmt_spec,
             "socket_timeout": 30,
             "http_headers": http_headers,
             "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 1.0)]
         }
-        with yt_dlp.YoutubeDL(a_opts) as ydl_a:
-            ydl_a.download([probe_url])
-        return os.path.exists(target_path) and os.path.getsize(target_path) > 0
-    if max_height and max_height > 0:
-        capped = [f for f in formats if not f.get("height") or int(f.get("height") or 0) <= max_height]
-        if capped:
-            formats = capped
-    mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([probe_url])
 
-    # Case A: Split DASH video + audio tracks (up to 2K/4K/8K MP4 or WebM VP9+Opus, Reddit v.redd.it, YouTube, Reels)
-    if mode == "split" and primary_fmt and secondary_fmt:
-        video_fmt_id = primary_fmt.get("format_id")
-        audio_fmt_id = secondary_fmt.get("format_id")
-        is_webm = _is_webm_pair(primary_fmt, secondary_fmt)
-        video_part_path = target_path + (".video_part.webm" if is_webm else ".video_part.mp4")
-        audio_part_path = target_path + (".audio_part.webm" if is_webm else ".audio_part.m4a")
-        try:
-            for p in (video_part_path, audio_part_path):
-                if os.path.exists(p):
-                    os.remove(p)
-
-            v_fallback = "bestvideo[ext=webm]/bestvideo" if is_webm else "bestvideo[ext=mp4]/bestvideo"
-            v_opts = {
-                "outtmpl": video_part_path,
-                "quiet": True,
-                "no_warnings": True,
-                "continuedl": True,
-                "format": f"{video_fmt_id}/{v_fallback}",
-                "socket_timeout": 30,
-                "http_headers": http_headers,
-                "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 0.78)]
-            }
-            with yt_dlp.YoutubeDL(v_opts) as ydl_v:
-                ydl_v.download([probe_url])
-
-            a_fallback = "bestaudio[acodec^=opus]/bestaudio[ext=webm]/bestaudio" if is_webm else "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio"
-            a_opts = {
-                "outtmpl": audio_part_path,
-                "quiet": True,
-                "no_warnings": True,
-                "continuedl": True,
-                "format": f"{audio_fmt_id}/{a_fallback}",
-                "socket_timeout": 30,
-                "http_headers": http_headers,
-                "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.78, 0.20)]
-            }
-            with yt_dlp.YoutubeDL(a_opts) as ydl_a:
-                ydl_a.download([probe_url])
-
-            if os.path.exists(video_part_path) and os.path.getsize(video_part_path) > 0 and os.path.exists(audio_part_path) and os.path.getsize(audio_part_path) > 0:
-                muxed = _mux_with_android_media_muxer(video_part_path, audio_part_path, target_path)
-                if muxed and os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                    return True
-                # If running outside Android JVM or if Kotlin side will mux, keep both part files so GalleryDlEngine can mux them
-                if os.path.exists(video_part_path) and os.path.exists(audio_part_path):
-                    return True
-        except Exception:
-            for p in (video_part_path, audio_part_path):
-                try:
-                    if os.path.exists(p):
-                        os.remove(p)
-                except Exception:
-                    pass
-
-    # Case B: Pre-muxed stream with both video and audio (never bare /best unless server has no audio at all)
-    has_any_audio = any(f.get("acodec") not in (None, "none") for f in formats)
-    if mode == "muxed" and primary_fmt and primary_fmt.get("format_id"):
-        fmt_spec = f"{primary_fmt['format_id']}/b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]"
-    elif has_any_audio or not formats:
-        fmt_spec = "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]"
-    else:
-        fmt_spec = "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best"
-
-    ydl_opts = {
-        "outtmpl": target_path,
-        "quiet": True,
-        "no_warnings": True,
-        "continuedl": True,
-        "format": fmt_spec,
-        "socket_timeout": 30,
-        "http_headers": http_headers,
-        "progress_hooks": [_make_ydl_progress_hook(progress_callback, 0.0, 1.0)]
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([probe_url])
-
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-        with open(target_path, "rb") as f:
-            head = f.read(512).lower()
-        if b"#extm3u" in head or b"<mpd" in head:
+        valid, v_err = _validate_media_file_payload(target_path)
+        if valid:
+            return True, 200, None, None
+        if os.path.exists(target_path):
             os.remove(target_path)
-            return False
-        return True
-    return False
+        return False, -1, v_err or "yt-dlp produced empty or invalid file", None
+    except Exception as e:
+        err_str = f"{e.__class__.__name__}: {e}"
+        if os.path.exists(target_path):
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+        return False, _extract_http_status_from_error(err_str), err_str, None
 
-def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, progress_callback=None):
+
+def download_media_file_detailed(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, progress_callback=None):
     """
-    Downloads media file using yt-dlp (with pre-muxed or split DASH muxing) or resumable requests with cookies/headers.
-    Never commits raw .m3u8/.mpd playlist text or silent video-only streams when audio is available.
+    Routes EVERY media download exclusively through yt-dlp and gallery-dl (with zero OkHttp direct download).
+    Returns a JSON summary with success, file_path, bytes_downloaded, status_code, error, retry_after_seconds, and engine.
     """
     extra_headers = {}
     max_height = 0
     audio_only = False
+    source_engine = ""
+    is_video_hint = False
+    is_audio_hint = False
+    is_stream_hint = False
+
     if headers_json:
         try:
             parsed = json.loads(headers_json)
             if isinstance(parsed, dict):
                 max_height = int(parsed.pop("__max_height", 0) or 0)
                 audio_only = bool(parsed.pop("__audio_only", False))
+                source_engine = str(parsed.pop("__source_engine", "") or "")
+                is_video_hint = bool(parsed.pop("__is_video", False))
+                is_audio_hint = bool(parsed.pop("__is_audio", False))
+                is_stream_hint = bool(parsed.pop("__is_stream", False))
                 extra_headers = {str(k): str(v) for k, v in parsed.items() if not str(k).startswith("__")}
         except Exception:
             pass
 
     ua = user_agent or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    http_headers = {"User-Agent": ua}
+    if referer:
+        http_headers["Referer"] = referer
+    if cookies:
+        http_headers["Cookie"] = cookies
+    http_headers.update(extra_headers)
+
     lower_url = media_url.lower()
-    is_stream = (".m3u8" in lower_url) or (".mpd" in lower_url)
-    is_social_or_video = any(h in lower_url for h in SOCIAL_VIDEO_HOSTS)
+    clean_path = lower_url.split("?")[0].split("#")[0]
+    is_stream = is_stream_hint or (".m3u8" in lower_url) or (".mpd" in lower_url)
+    is_social_host = any(h in lower_url for h in SOCIAL_VIDEO_HOSTS)
+    is_image_ext = any(clean_path.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".svg", ".ico"])
+    is_av_ext = any(clean_path.endswith(ext) for ext in [".mp4", ".m4v", ".webm", ".mkv", ".mov", ".avi", ".flv", ".3gp", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"])
+    prefer_ytdlp = (
+        is_stream
+        or is_social_host
+        or audio_only
+        or ("yt-dlp" in source_engine.lower())
+        or ((is_video_hint or is_audio_hint or is_av_ext) and not is_image_ext)
+    )
 
-    # 1. For streams or social pages, prioritize yt-dlp with DASH audio+video mux support
-    if (is_stream or is_social_or_video) and YTDLP_AVAILABLE:
-        try:
-            http_headers = {"User-Agent": ua}
-            if referer:
-                http_headers["Referer"] = referer
-            if cookies:
-                http_headers["Cookie"] = cookies
-            http_headers.update(extra_headers)
+    last_code = -1
+    last_err = "Download failed"
+    last_retry = None
+    engine_used = ""
 
-            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback, max_height=max_height, audio_only=audio_only):
-                return True
-        except Exception:
-            pass
+    def _result_json(ok, code, err, retry_after, eng):
+        size = os.path.getsize(target_path) if (ok and os.path.exists(target_path)) else 0
+        return json.dumps({
+            "success": bool(ok),
+            "file_path": target_path if ok else None,
+            "bytes_downloaded": int(size),
+            "status_code": int(code if code is not None else -1),
+            "error": err,
+            "retry_after_seconds": retry_after,
+            "engine": eng
+        })
 
-    # 2. Direct HTTP requests download with HTTP Range resume and progress reporting
+    if prefer_ytdlp:
+        if YTDLP_AVAILABLE:
+            ok, code, err, retry_after = _download_with_ytdlp_and_mux(
+                media_url, target_path, http_headers, referer=referer,
+                progress_callback=progress_callback, max_height=max_height, audio_only=audio_only
+            )
+            if ok:
+                return _result_json(True, 200, None, None, "yt-dlp")
+            last_code, last_err, last_retry = code, (err or last_err), retry_after
+
+        if GALLERY_DL_AVAILABLE and not is_stream:
+            ok, code, err, retry_after = _download_with_gallery_dl(
+                media_url, target_path, http_headers, cookies=cookies, progress_callback=progress_callback
+            )
+            if ok:
+                return _result_json(True, 200, None, None, "gallery-dl")
+            if code != -1:
+                last_code = code
+            if err:
+                last_err = err
+            if retry_after is not None:
+                last_retry = retry_after
+    else:
+        if GALLERY_DL_AVAILABLE:
+            ok, code, err, retry_after = _download_with_gallery_dl(
+                media_url, target_path, http_headers, cookies=cookies, progress_callback=progress_callback
+            )
+            if ok:
+                return _result_json(True, 200, None, None, "gallery-dl")
+            last_code, last_err, last_retry = code, (err or last_err), retry_after
+
+        if YTDLP_AVAILABLE and not is_image_ext:
+            ok, code, err, retry_after = _download_with_ytdlp_and_mux(
+                media_url, target_path, http_headers, referer=referer,
+                progress_callback=progress_callback, max_height=max_height, audio_only=audio_only
+            )
+            if ok:
+                return _result_json(True, 200, None, None, "yt-dlp")
+            if code != -1:
+                last_code = code
+            if err:
+                last_err = err
+            if retry_after is not None:
+                last_retry = retry_after
+
+    return _result_json(False, last_code, last_err, last_retry, engine_used)
+
+
+def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None, progress_callback=None):
+    """
+    Boolean wrapper around download_media_file_detailed for backwards-compatible callers.
+    All downloads run exclusively through yt-dlp and gallery-dl.
+    """
     try:
-        import requests
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        part_path = target_path + ".downloading"
-        existing_bytes = os.path.getsize(part_path) if os.path.exists(part_path) else 0
-
-        headers = {"User-Agent": ua}
-        if referer:
-            headers["Referer"] = referer
-        if cookies:
-            headers["Cookie"] = cookies
-        headers.update(extra_headers)
-        if existing_bytes > 0:
-            headers["Range"] = f"bytes={existing_bytes}-"
-
-        resp = requests.get(media_url, headers=headers, stream=True, timeout=35)
-        if resp.status_code == 416 and existing_bytes > 0:
-            resp.close()
-            if os.path.exists(part_path):
-                os.remove(part_path)
-            existing_bytes = 0
-            headers.pop("Range", None)
-            resp = requests.get(media_url, headers=headers, stream=True, timeout=35)
-
-        if resp.status_code in [200, 206]:
-            content_type = (resp.headers.get("content-type") or "").lower()
-            if "text/html" in content_type or "application/json" in content_type:
-                return False
-
-            is_partial = (resp.status_code == 206 and existing_bytes > 0)
-            if not is_partial and existing_bytes > 0:
-                existing_bytes = 0
-
-            content_length = int(resp.headers.get("content-length") or 0)
-            total_bytes = (existing_bytes + content_length) if (is_partial and content_length > 0) else (content_length if content_length > 0 else -1)
-
-            first_chunk = not is_partial
-            downloaded = existing_bytes
-            last_emit_time = time.time()
-            last_emit_bytes = downloaded
-            mode_str = "ab" if is_partial else "wb"
-
-            with open(part_path, mode_str) as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        if first_chunk:
-                            first_chunk = False
-                            prefix = chunk[:1024].lower()
-                            if (b"<!doctype html" in prefix or b"<html" in prefix or b"<head" in prefix or
-                                b"cloudflare" in prefix or b"just a moment..." in prefix or
-                                b"403 forbidden" in prefix or b"404 not found" in prefix or b"access denied" in prefix):
-                                f.close()
-                                if os.path.exists(part_path):
-                                    os.remove(part_path)
-                                return False
-                            trimmed = prefix.strip()
-                            if (trimmed.startswith(b"{") or trimmed.startswith(b"[")) and (
-                                b'"error"' in trimmed or b'"message"' in trimmed or b'"status"' in trimmed or b'"forbidden"' in trimmed
-                            ):
-                                f.close()
-                                if os.path.exists(part_path):
-                                    os.remove(part_path)
-                                return False
-                            if b"#extm3u" in prefix or b"<mpd" in prefix:
-                                f.close()
-                                if os.path.exists(part_path):
-                                    os.remove(part_path)
-                                return False
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        now = time.time()
-                        if now - last_emit_time >= 0.25:
-                            dt = now - last_emit_time
-                            speed = int((downloaded - last_emit_bytes) / dt) if dt > 0 else 0
-                            last_emit_time = now
-                            last_emit_bytes = downloaded
-                            _notify_progress(progress_callback, downloaded, total_bytes, speed)
-
-            if os.path.exists(part_path) and os.path.getsize(part_path) > 0:
-                os.replace(part_path, target_path)
-                _notify_progress(progress_callback, downloaded, total_bytes if total_bytes > 0 else downloaded, 0)
-                return True
+        res_str = download_media_file_detailed(
+            media_url=media_url,
+            target_path=target_path,
+            referer=referer,
+            user_agent=user_agent,
+            cookies=cookies,
+            headers_json=headers_json,
+            progress_callback=progress_callback
+        )
+        res = json.loads(res_str)
+        return bool(res.get("success", False))
     except Exception:
-        pass
-
-    # 3. Fallback to yt-dlp if direct request failed and target is a video/stream
-    if YTDLP_AVAILABLE and (is_stream or any(ext in lower_url for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd"] + SOCIAL_VIDEO_HOSTS)):
-        try:
-            http_headers = {"User-Agent": ua}
-            if referer:
-                http_headers["Referer"] = referer
-            if cookies:
-                http_headers["Cookie"] = cookies
-            http_headers.update(extra_headers)
-
-            if _download_with_ytdlp_and_mux(media_url, target_path, http_headers, referer=referer, progress_callback=progress_callback, max_height=max_height, audio_only=audio_only):
-                return True
-        except Exception:
-            pass
-
-    return False
+        return False

@@ -133,113 +133,33 @@ class MediaDownloadWorker(
         }
 
         try {
-            var downloadedFile: File? = null
-            var errorDiagnostic: String? = null
-
-            val socialHosts = listOf(
-                "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com",
-                "twitter.com", "x.com", "reddit.com", "redd.it", "v.redd.it", "facebook.com", "fb.watch"
-            )
-            val isSocialUrl = socialHosts.any { host ->
-                mediaUrl.contains(host, ignoreCase = true) ||
-                    (isVideo && sourceUrl.contains(host, ignoreCase = true))
-            }
-            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine.contains("yt-dlp", ignoreCase = true) || isSocialUrl || isStreamingMedia
-
-            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp + AndroidMediaMuxer)
-            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.1f, KEY_STATUS to "Downloading stream/video: $title..."))
-                downloadedFile = GalleryDlEngine.downloadMedia(
-                    context = applicationContext,
-                    mediaUrl = mediaUrl,
-                    fileName = fileName,
-                    referer = referer ?: sourceUrl,
-                    downloadId = itemId,
-                    headers = downloadHeaders,
-                    cookies = cookieString,
-                    subfolder = resolvedSubfolder,
-                    onProgress = { bytesRead, totalBytes, speed ->
-                        reportLiveProgress(bytesRead, totalBytes, speed)
-                    }
-                )
-            }
-
-            // 2. Standard or fallback download via OkHttp with HTTP Range resumability
-            var okHttpResult: OkHttpDownloader.DownloadResult? = null
-            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
-                var lastProgressUpdate = System.currentTimeMillis()
-                var lastBytes = 0L
-                val result = OkHttpDownloader.downloadMediaFileDetailed(
-                    context = applicationContext,
-                    mediaUrl = mediaUrl,
-                    fileName = fileName,
-                    referer = referer,
-                    downloadId = itemId,
-                    headers = downloadHeaders,
-                    subfolder = resolvedSubfolder,
-                    onProgress = { bytesRead, totalBytes ->
-                        val now = System.currentTimeMillis()
-                        if (now - lastProgressUpdate > 250) {
-                            val dt = (now - lastProgressUpdate) / 1000.0
-                            val db = bytesRead - lastBytes
-                            val speed = if (dt > 0) (db / dt).toLong() else 0L
-                            lastBytes = bytesRead
-                            lastProgressUpdate = now
-                            reportLiveProgress(bytesRead, totalBytes, speed)
-                        }
-                    }
-                )
-                okHttpResult = result
-
-                if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
-                    downloadedFile = if (isVideo || mediaUrl.contains("v.redd.it/", ignoreCase = true)) {
-                        GalleryDlEngine.ensureRedditAudioMuxed(
-                            context = applicationContext,
-                            videoFile = result.file,
-                            mediaUrl = mediaUrl,
-                            referer = referer ?: sourceUrl,
-                            headers = downloadHeaders
-                        )
-                    } else {
-                        result.file
-                    }
-                } else {
-                    errorDiagnostic = result.errorMessage
-                    val isRateLimited = result.statusCode == 429
-                    val isInvalidContent = result.errorMessage?.let { msg ->
-                        msg.contains("webpage", ignoreCase = true) ||
-                        msg.contains("HTML", ignoreCase = true) ||
-                        msg.contains("JSON error", ignoreCase = true) ||
-                        msg.contains("corrupt or invalid raster", ignoreCase = true)
-                    } ?: false
-
-                    // 3. Fallback to Python runner only if OkHttp download failed and NOT 429 rate limit and NOT an invalid non-media response
-                    if (!isRateLimited && !isInvalidContent && GalleryDlEngine.isAvailable()) {
-                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
-                        downloadedFile = GalleryDlEngine.downloadMedia(
-                            context = applicationContext,
-                            mediaUrl = mediaUrl,
-                            fileName = fileName,
-                            referer = referer ?: sourceUrl,
-                            downloadId = itemId,
-                            headers = downloadHeaders,
-                            cookies = cookieString,
-                            subfolder = resolvedSubfolder,
-                            onProgress = { bytesRead, totalBytes, speed ->
-                                reportLiveProgress(bytesRead, totalBytes, speed)
-                            }
-                        )
-                    }
+            setProgress(workDataOf(KEY_PROGRESS to 0.1f, KEY_STATUS to "Downloading via yt-dlp / gallery-dl: $title..."))
+            val downloadResult = GalleryDlEngine.downloadMediaDetailed(
+                context = applicationContext,
+                mediaUrl = mediaUrl,
+                fileName = fileName,
+                referer = referer ?: sourceUrl,
+                downloadId = itemId,
+                headers = downloadHeaders,
+                cookies = cookieString,
+                subfolder = resolvedSubfolder,
+                sourceEngine = sourceEngine,
+                isVideo = isVideo,
+                isAudio = isAudio,
+                isStream = isStream,
+                onProgress = { bytesRead, totalBytes, speed ->
+                    reportLiveProgress(bytesRead, totalBytes, speed)
                 }
-            }
+            )
+            val downloadedFile: File? = downloadResult.file
+            val errorDiagnostic: String? = downloadResult.errorMessage
 
             if (isStopped) {
                 Log.d(TAG, "MediaDownloadWorker was stopped for $mediaUrl")
                 return@withContext Result.failure()
             }
 
-            if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
+            if (downloadResult.isSuccessful && downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
                 setProgress(workDataOf(KEY_PROGRESS to 1.0f, KEY_STATUS to "Saved successfully"))
 
                 val inboxItem = MediaInboxItem(
@@ -278,8 +198,8 @@ class MediaDownloadWorker(
                 )
             } else {
                 val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
-                val statusCode = okHttpResult?.statusCode ?: -1
-                val retryAfter = okHttpResult?.retryAfterSeconds
+                val statusCode = downloadResult.statusCode
+                val retryAfter = downloadResult.retryAfterSeconds
 
                 val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
                 val isPausedOrCancelled = isStopped ||

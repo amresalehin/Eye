@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.data
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import androidx.annotation.Keep
 import android.os.Environment
 import android.util.Log
@@ -11,6 +12,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 
 data class GalleryDlStatus(
     val available: Boolean,
@@ -31,7 +33,8 @@ data class GalleryDlSupportInfo(
     val category: String,
     val subcategory: String,
     val extractorName: String,
-    val displayName: String
+    val displayName: String,
+    val engine: String = ""
 )
 
 data class GalleryDlOptions(
@@ -47,6 +50,17 @@ data class GalleryDlExtractResult(
     val pageTitle: String = "",
     val items: List<ScrapedMediaItem> = emptyList(),
     val errorMessage: String? = null
+)
+
+data class GalleryDlDownloadResult(
+    val file: File?,
+    val isSuccessful: Boolean,
+    val statusCode: Int = -1,
+    val bytesDownloaded: Long = 0L,
+    val mimeType: String? = null,
+    val errorMessage: String? = null,
+    val retryAfterSeconds: Long? = null,
+    val engineUsed: String? = null
 )
 
 /**
@@ -186,7 +200,8 @@ object GalleryDlEngine {
                 category = json.optString("category", ""),
                 subcategory = json.optString("subcategory", ""),
                 extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", ""))
+                displayName = json.optString("display_name", json.optString("category", "")),
+                engine = json.optString("engine", "")
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
@@ -316,8 +331,93 @@ object GalleryDlEngine {
         executePythonExtractor("extract_media", url, options)
 
     /**
+     * Decodes and stores high-resolution Base64 inline data URIs directly to persistent media storage
+     * without making network requests.
+     */
+    fun downloadDataUriMedia(
+        context: Context,
+        dataUri: String,
+        fileName: String,
+        downloadId: String? = null,
+        subfolder: String? = null
+    ): GalleryDlDownloadResult {
+        return try {
+            val targetDir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
+            val dataInfo = MediaClassifier.parseDataUriInfo(dataUri)
+            val ext = dataInfo?.format?.lowercase(Locale.ROOT) ?: "png"
+            val mimeType = dataInfo?.mimeType ?: "image/png"
+            val cleanName = if (!downloadId.isNullOrBlank()) {
+                val base = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                if (base.endsWith(".$ext", ignoreCase = true)) base else "$base.$ext"
+            } else {
+                val sanitized = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                if (sanitized.endsWith(".$ext", ignoreCase = true)) sanitized else "$sanitized.$ext"
+            }
+
+            val finalFile = File(targetDir, cleanName)
+            val base64Content = dataUri.substringAfter(";base64,", "")
+            if (base64Content.isBlank()) {
+                return GalleryDlDownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = 400,
+                    errorMessage = "Invalid base64 payload in data URI"
+                )
+            }
+
+            val decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT)
+            if (decodedBytes == null || decodedBytes.isEmpty()) {
+                return GalleryDlDownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = 400,
+                    errorMessage = "Failed to decode base64 data"
+                )
+            }
+
+            if (mimeType != "image/svg+xml") {
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size, opts)
+                if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                    return GalleryDlDownloadResult(
+                        file = null,
+                        isSuccessful = false,
+                        statusCode = 422,
+                        errorMessage = "Data URI raster image is invalid or corrupt"
+                    )
+                }
+            }
+
+            finalFile.writeBytes(decodedBytes)
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(finalFile.absolutePath),
+                arrayOf(mimeType),
+                null
+            )
+
+            GalleryDlDownloadResult(
+                file = finalFile,
+                isSuccessful = true,
+                statusCode = 200,
+                bytesDownloaded = finalFile.length(),
+                mimeType = mimeType,
+                engineUsed = "data-uri"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decode data URI", e)
+            GalleryDlDownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = 500,
+                errorMessage = e.message ?: "Failed to write data URI"
+            )
+        }
+    }
+
+    /**
      * Ensures a downloaded Reddit `v.redd.it` video file contains its companion audio track,
-     * probing and muxing the separate DASH audio stream if needed.
+     * probing and muxing the separate DASH audio stream via yt-dlp / gallery-dl if needed.
      */
     suspend fun ensureRedditAudioMuxed(
         context: Context,
@@ -329,35 +429,58 @@ object GalleryDlEngine {
         if (!videoFile.exists() || videoFile.length() <= 0L) return@withContext videoFile
         if (!mediaUrl.contains("v.redd.it/", ignoreCase = true)) return@withContext videoFile
         if (AndroidMediaMuxer.hasAudioTrack(videoFile)) return@withContext videoFile
+        if (!isAvailable()) return@withContext videoFile
+
+        val userAgent = headers?.get("User-Agent") ?: OkHttpDownloader.DEFAULT_USER_AGENT
+        val effectiveCookies = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
+            ?: headers?.get("Cookie")
+        val headersJson = run {
+            val json = JSONObject()
+            headers?.forEach { (k, v) -> json.put(k, v) }
+            json.put("__is_audio", true)
+            json.toString()
+        }
 
         val candidateAudioUrls = AndroidMediaMuxer.tryResolveRedditAudioUrls(mediaUrl)
+        val py = Python.getInstance()
+        val runner = py.getModule("gallery_dl_runner")
+
         for (audioUrl in candidateAudioUrls) {
-            val audioTempName = "${videoFile.nameWithoutExtension}_reddit_audio.m4a"
-            val audioRes = OkHttpDownloader.downloadMediaFileDetailed(
-                context = context,
-                mediaUrl = audioUrl,
-                fileName = audioTempName,
-                referer = referer,
-                headers = headers
-            )
-            val audioFile = audioRes.file
-            if (audioRes.isSuccessful && audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
-                val muxed = AndroidMediaMuxer.muxVideoAndAudio(videoFile, audioFile, videoFile)
-                runCatching { if (audioFile.exists()) audioFile.delete() }
+            val audioTempFile = File(videoFile.parentFile ?: context.cacheDir, "${videoFile.nameWithoutExtension}_reddit_audio.m4a")
+            runCatching { if (audioTempFile.exists()) audioTempFile.delete() }
+            val rawJson = runCatching {
+                runner.callAttr(
+                    "download_media_file_detailed",
+                    audioUrl,
+                    audioTempFile.absolutePath,
+                    referer ?: "",
+                    userAgent,
+                    effectiveCookies ?: "",
+                    headersJson,
+                    null
+                ).toString()
+            }.getOrNull()
+            val ok = rawJson?.let { runCatching { JSONObject(it).optBoolean("success", false) }.getOrDefault(false) } == true
+            if (ok && audioTempFile.exists() && audioTempFile.length() > 0L) {
+                val muxed = AndroidMediaMuxer.muxVideoAndAudio(videoFile, audioTempFile, videoFile)
+                runCatching { if (audioTempFile.exists()) audioTempFile.delete() }
                 if (muxed) {
-                    Log.d(TAG, "Successfully muxed companion Reddit DASH audio from $audioUrl")
+                    Log.d(TAG, "Successfully muxed companion Reddit DASH audio via yt-dlp/gallery-dl from $audioUrl")
                     break
                 }
+            } else {
+                runCatching { if (audioTempFile.exists()) audioTempFile.delete() }
             }
         }
         videoFile
     }
 
     /**
-     * Downloads a media file with deterministic filename generation, live progress callbacks,
-     * split DASH video+audio muxing via [AndroidMediaMuxer], and OkHttp fallback.
+     * Downloads any media item exclusively through yt-dlp and gallery-dl (with split DASH video+audio
+     * muxing via [AndroidMediaMuxer], live progress callbacks, and detailed failure diagnostics).
+     * Does NOT perform OkHttp direct downloads.
      */
-    suspend fun downloadMedia(
+    suspend fun downloadMediaDetailed(
         context: Context,
         mediaUrl: String,
         fileName: String,
@@ -366,8 +489,31 @@ object GalleryDlEngine {
         headers: Map<String, String>? = null,
         cookies: String? = null,
         subfolder: String? = null,
+        sourceEngine: String = "",
+        isVideo: Boolean = false,
+        isAudio: Boolean = false,
+        isStream: Boolean = false,
         onProgress: ((bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit)? = null
-    ): File? = withContext(Dispatchers.IO) {
+    ): GalleryDlDownloadResult = withContext(Dispatchers.IO) {
+        if (mediaUrl.startsWith("data:image/", ignoreCase = true)) {
+            return@withContext downloadDataUriMedia(
+                context = context,
+                dataUri = mediaUrl,
+                fileName = fileName,
+                downloadId = downloadId,
+                subfolder = subfolder
+            )
+        }
+
+        if (!isAvailable()) {
+            return@withContext GalleryDlDownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = -1,
+                errorMessage = "Python yt-dlp / gallery-dl engine is not available"
+            )
+        }
+
         try {
             val dir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -393,6 +539,10 @@ object GalleryDlEngine {
                 headers?.forEach { (k, v) -> json.put(k, v) }
                 if (qualityCap.maxHeight > 0) json.put("__max_height", qualityCap.maxHeight)
                 if (audioOnly) json.put("__audio_only", true)
+                if (sourceEngine.isNotBlank()) json.put("__source_engine", sourceEngine)
+                if (isVideo) json.put("__is_video", true)
+                if (isAudio) json.put("__is_audio", true)
+                if (isStream) json.put("__is_stream", true)
                 json.toString()
             }
 
@@ -400,71 +550,98 @@ object GalleryDlEngine {
                 PythonProgressBridge(onProgress)
             } else null
 
-            // Try Python download if available
-            if (isAvailable()) {
-                val py = Python.getInstance()
-                val runner = py.getModule("gallery_dl_runner")
-                val success = runner.callAttr(
-                    "download_media_file",
-                    mediaUrl,
-                    targetFile.absolutePath,
-                    referer ?: "",
-                    userAgent,
-                    effectiveCookies ?: "",
-                    headersJson,
-                    progressBridge
-                ).toBoolean()
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            val rawResult = runner.callAttr(
+                "download_media_file_detailed",
+                mediaUrl,
+                targetFile.absolutePath,
+                referer ?: "",
+                userAgent,
+                effectiveCookies ?: "",
+                headersJson,
+                progressBridge
+            ).toString()
 
-                val mp4VideoPart = File("${targetFile.absolutePath}.video_part.mp4")
-                val mp4AudioPart = File("${targetFile.absolutePath}.audio_part.m4a")
-                val webmVideoPart = File("${targetFile.absolutePath}.video_part.webm")
-                val webmAudioPart = File("${targetFile.absolutePath}.audio_part.webm")
-                if (mp4VideoPart.exists() && mp4AudioPart.exists()) {
-                    AndroidMediaMuxer.muxVideoAndAudio(mp4VideoPart, mp4AudioPart, targetFile)
-                } else if (webmVideoPart.exists() && webmAudioPart.exists()) {
-                    AndroidMediaMuxer.muxVideoAndAudio(webmVideoPart, webmAudioPart, targetFile)
-                }
+            val resultJson = runCatching { JSONObject(rawResult) }.getOrNull()
+            val success = resultJson?.optBoolean("success", false) == true
+            val statusCode = resultJson?.optInt("status_code", -1) ?: -1
+            val errorMsg = resultJson?.optString("error")?.takeIf { it.isNotBlank() && it != "null" }
+            val retryAfter = if (resultJson != null && resultJson.has("retry_after_seconds") && !resultJson.isNull("retry_after_seconds")) {
+                resultJson.optLong("retry_after_seconds", -1L).takeIf { it > 0L }
+            } else null
+            val engineUsed = resultJson?.optString("engine")?.takeIf { it.isNotBlank() && it != "null" }
 
-                if (success && targetFile.exists() && targetFile.length() > 0L) {
-                    val finalizedFile = ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
-                    android.media.MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(finalizedFile.absolutePath),
-                        null,
-                        null
-                    )
-                    return@withContext finalizedFile
-                }
+            val mp4VideoPart = File("${targetFile.absolutePath}.video_part.mp4")
+            val mp4AudioPart = File("${targetFile.absolutePath}.audio_part.m4a")
+            val webmVideoPart = File("${targetFile.absolutePath}.video_part.webm")
+            val webmAudioPart = File("${targetFile.absolutePath}.audio_part.webm")
+            if (mp4VideoPart.exists() && mp4AudioPart.exists()) {
+                AndroidMediaMuxer.muxVideoAndAudio(mp4VideoPart, mp4AudioPart, targetFile)
+            } else if (webmVideoPart.exists() && webmAudioPart.exists()) {
+                AndroidMediaMuxer.muxVideoAndAudio(webmVideoPart, webmAudioPart, targetFile)
             }
 
-            // Fallback to OkHttp download with shared session cookies and headers
-            var lastTick = System.currentTimeMillis()
-            var lastBytes = 0L
-            val fallbackFile = OkHttpDownloader.downloadMediaFile(
-                context = context,
-                mediaUrl = mediaUrl,
-                fileName = fileName,
-                referer = referer,
-                downloadId = downloadId,
-                headers = headers,
-                onProgress = if (onProgress != null) { bytesRead, totalBytes ->
-                    val now = System.currentTimeMillis()
-                    val dt = (now - lastTick) / 1000.0
-                    val speed = if (dt > 0) ((bytesRead - lastBytes) / dt).toLong() else 0L
-                    lastTick = now
-                    lastBytes = bytesRead
-                    onProgress(bytesRead, totalBytes, speed)
-                } else null
+            if (success && targetFile.exists() && targetFile.length() > 0L) {
+                val finalizedFile = ensureRedditAudioMuxed(context, targetFile, mediaUrl, referer, headers)
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(finalizedFile.absolutePath),
+                    null,
+                    null
+                )
+                return@withContext GalleryDlDownloadResult(
+                    file = finalizedFile,
+                    isSuccessful = true,
+                    statusCode = 200,
+                    bytesDownloaded = finalizedFile.length(),
+                    engineUsed = engineUsed
+                )
+            }
+
+            GalleryDlDownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = statusCode,
+                errorMessage = errorMsg ?: "yt-dlp / gallery-dl download failed for $mediaUrl",
+                retryAfterSeconds = retryAfter,
+                engineUsed = engineUsed
             )
-            if (fallbackFile != null && fallbackFile.exists() && fallbackFile.length() > 0L) {
-                return@withContext ensureRedditAudioMuxed(context, fallbackFile, mediaUrl, referer, headers)
-            }
-            null
         } catch (e: Exception) {
-            Log.e(TAG, "downloadMedia failed", e)
-            null
+            Log.e(TAG, "downloadMediaDetailed failed", e)
+            GalleryDlDownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = -1,
+                errorMessage = e.localizedMessage ?: "Download error"
+            )
         }
     }
+
+    /**
+     * Downloads a media file exclusively via yt-dlp and gallery-dl.
+     */
+    suspend fun downloadMedia(
+        context: Context,
+        mediaUrl: String,
+        fileName: String,
+        referer: String? = null,
+        downloadId: String? = null,
+        headers: Map<String, String>? = null,
+        cookies: String? = null,
+        subfolder: String? = null,
+        onProgress: ((bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit)? = null
+    ): File? = downloadMediaDetailed(
+        context = context,
+        mediaUrl = mediaUrl,
+        fileName = fileName,
+        referer = referer,
+        downloadId = downloadId,
+        headers = headers,
+        cookies = cookies,
+        subfolder = subfolder,
+        onProgress = onProgress
+    ).file
 
     fun defaultPopularSites(): List<GalleryDlSite> = listOf(
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),

@@ -1879,19 +1879,17 @@ class MediaDownloaderTest {
 
     @Test
     fun testReleaseProguardKeepBridges() {
-        // Verify PythonProgressBridge, AndroidMediaMuxer, and EmreMediaBridge carry @Keep for R8/ProGuard safety
-        assertTrue(
-            com.amresalehin.emregallery.data.PythonProgressBridge::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
-        )
-        assertTrue(
-            com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
-        )
-        assertTrue(
-            com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java
-                .isAnnotationPresent(androidx.annotation.Keep::class.java)
-        )
+        // AndroidX @Keep has BINARY retention, so Java reflection cannot see it at runtime.
+        // Inspect the class-file annotation attribute instead of asserting runtime visibility.
+        fun hasKeepAnnotation(type: Class<*>): Boolean {
+            val resource = "/${type.name.replace('.', '/')}.class"
+            val bytes = type.getResourceAsStream(resource)?.use { it.readBytes() } ?: return false
+            val classFileText = String(bytes, Charsets.ISO_8859_1)
+            return classFileText.contains("Landroidx/annotation/Keep;")
+        }
+        assertTrue(hasKeepAnnotation(com.amresalehin.emregallery.data.PythonProgressBridge::class.java))
+        assertTrue(hasKeepAnnotation(com.amresalehin.emregallery.data.AndroidMediaMuxer::class.java))
+        assertTrue(hasKeepAnnotation(com.amresalehin.emregallery.data.BrowserMediaExtractor.EmreMediaBridge::class.java))
     }
 
     @Test

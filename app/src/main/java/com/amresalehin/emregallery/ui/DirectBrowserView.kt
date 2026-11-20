@@ -54,10 +54,42 @@ import com.amresalehin.emregallery.data.DownloaderSession
 import com.amresalehin.emregallery.data.ExtractionSource
 import com.amresalehin.emregallery.data.MediaCaptureEngine
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+
+private data class PendingBrowserMediaCandidate(
+    val rawUrl: String,
+    val baseUrl: String,
+    val source: ExtractionSource
+)
+
+@Composable
+private fun BrowserLoadingProgressBar(
+    isLoading: Boolean,
+    progressState: FloatState
+) {
+    if (isLoading) {
+        LinearProgressIndicator(
+            progress = { progressState.floatValue },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    }
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -89,14 +121,85 @@ fun DirectBrowserView(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
-    var loadingProgress by remember { mutableFloatStateOf(0f) }
+    val loadingProgressState = remember { mutableFloatStateOf(0f) }
     var browserMenuExpanded by remember { mutableStateOf(false) }
     var isDesktopMode by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
+    val historyManager = remember { BrowserHistoryManager(context) }
+
+    val seenRawUrls = remember { ConcurrentHashMap.newKeySet<String>() }
+    val pendingCandidateChannel = remember { Channel<PendingBrowserMediaCandidate>(capacity = 512) }
+    val activeBaseUrlRef = remember { AtomicReference(startUrl) }
+    val pageTitleRef = remember { AtomicReference("") }
+    var lastNotifiedUrl by remember { mutableStateOf(startUrl) }
+    var lastRecordedHistoryUrl by remember { mutableStateOf("") }
+    var lastScannedDomUrl by remember { mutableStateOf("") }
+    var pendingDomScanJob by remember { mutableStateOf<Job?>(null) }
+
+    val latestOnBatchExtracted by rememberUpdatedState(onBatchExtracted)
+
+    // Batch-process intercepted network & MutationObserver media off Chromium's IO/JS threads
+    LaunchedEffect(Unit) {
+        val batch = ArrayList<PendingBrowserMediaCandidate>(24)
+        while (true) {
+            val first = pendingCandidateChannel.receive()
+            batch.clear()
+            batch.add(first)
+
+            val deadlineMs = System.currentTimeMillis() + 180L
+            while (batch.size < 24) {
+                val next = pendingCandidateChannel.tryReceive().getOrNull()
+                if (next != null) {
+                    batch.add(next)
+                    continue
+                }
+                val remainingMs = deadlineMs - System.currentTimeMillis()
+                if (remainingMs <= 0L) break
+                val awaited = withTimeoutOrNull(remainingMs) {
+                    pendingCandidateChannel.receive()
+                } ?: break
+                batch.add(awaited)
+            }
+
+            val builtItems = withContext(Dispatchers.Default) {
+                val cookieCache = HashMap<String, String>(4)
+                val built = ArrayList<ScrapedMediaItem>(batch.size)
+                for ((idx, cand) in batch.withIndex()) {
+                    val cookieHeader = cookieCache.getOrPut(cand.baseUrl) {
+                        OkHttpDownloader.sharedCookieJar.getCookieString(cand.baseUrl)
+                    }
+                    val item = MediaCaptureEngine.buildMediaItem(
+                        rawUrl = cand.rawUrl,
+                        source = cand.source,
+                        baseUrl = cand.baseUrl,
+                        indexHint = idx,
+                        precomputedCookieHeader = cookieHeader
+                    )
+                    if (item != null) {
+                        built.add(item)
+                    }
+                }
+                built
+            }
+
+            if (builtItems.isNotEmpty()) {
+                val title = pageTitleRef.get().ifBlank { null }
+                val domain = runCatching { URL(activeBaseUrlRef.get()).host }.getOrDefault("")
+                DownloaderSession.addDiscoveredItems(builtItems, title)
+                latestOnBatchExtracted(builtItems, title, domain)
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            pendingDomScanJob?.cancel()
+            pendingCandidateChannel.close()
             webViewInstance?.let { wv ->
                 wv.stopLoading()
                 wv.webViewClient = WebViewClient()
@@ -107,25 +210,35 @@ fun DirectBrowserView(
         }
     }
 
-    val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
-    val coroutineScope = rememberCoroutineScope()
-    val historyManager = remember { BrowserHistoryManager(context) }
-
     // Intercept back button when browser can navigate back
     BackHandler(enabled = canGoBack) {
         webViewInstance?.goBack()
+    }
+
+    fun notifyUrlIfChanged(newUrl: String) {
+        activeBaseUrlRef.set(newUrl)
+        if (newUrl != lastNotifiedUrl) {
+            lastNotifiedUrl = newUrl
+            onUrlChange?.invoke(newUrl)
+        }
     }
 
     fun navigateToUrl(target: String) {
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
         val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
+        if (formatted != currentUrl) {
+            seenRawUrls.clear()
+            lastScannedDomUrl = ""
+        }
         addressInput = formatted
         currentUrl = formatted
-        onUrlChange?.invoke(formatted)
-        coroutineScope.launch {
-            historyManager.recordVisit(formatted)
+        notifyUrlIfChanged(formatted)
+        if (formatted != lastRecordedHistoryUrl) {
+            lastRecordedHistoryUrl = formatted
+            coroutineScope.launch {
+                historyManager.recordVisit(formatted)
+            }
         }
         webViewInstance?.loadUrl(formatted)
         focusManager.clearFocus()
@@ -137,11 +250,17 @@ fun DirectBrowserView(
         if (current.isBlank() || current == "about:blank" || currentUrl.isBlank()) return
 
         wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { jsonRaw ->
-            val discovered = MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
-            if (discovered.isNotEmpty()) {
-                val domain = runCatching { java.net.URL(current).host }.getOrDefault("")
-                onBatchExtracted(discovered, pageTitle, domain)
-                DownloaderSession.addDiscoveredItems(discovered, pageTitle)
+            if (jsonRaw.isNullOrBlank() || jsonRaw == "null") return@evaluateJavascript
+            coroutineScope.launch {
+                val discovered = withContext(Dispatchers.Default) {
+                    MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
+                }
+                if (discovered.isNotEmpty()) {
+                    val domain = runCatching { URL(current).host }.getOrDefault("")
+                    val title = pageTitleRef.get()
+                    DownloaderSession.addDiscoveredItems(discovered, title)
+                    latestOnBatchExtracted(discovered, title, domain)
+                }
             }
         }
     }
@@ -535,17 +654,11 @@ fun DirectBrowserView(
                 }
             }
 
-            // Loading Progress Bar
-            if (isLoading) {
-                LinearProgressIndicator(
-                    progress = { loadingProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            }
+            // Loading Progress Bar (isolated so progress updates do not recompose the toolbar or WebView)
+            BrowserLoadingProgressBar(
+                isLoading = isLoading,
+                progressState = loadingProgressState
+            )
 
             // 2. Interactive WebView and Home Page Container
             Box(
@@ -565,25 +678,30 @@ fun DirectBrowserView(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                databaseEnabled = true
+                                cacheMode = WebSettings.LOAD_DEFAULT
                                 builtInZoomControls = true
                                 displayZoomControls = false
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 mediaPlaybackRequiresUserGesture = false
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                             }
 
                             addJavascriptInterface(
                                 BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
-                                    val item = MediaCaptureEngine.buildMediaItem(
-                                        rawUrl = rawUrl,
-                                        source = ExtractionSource.DOM_SCRAPE,
-                                        baseUrl = currentUrl
-                                    )
-                                    if (item != null) {
-                                        onMediaExtracted(item)
-                                        DownloaderSession.addDiscoveredItem(item)
+                                    if (seenRawUrls.size < 2500 && seenRawUrls.add(rawUrl)) {
+                                        val base = activeBaseUrlRef.get()
+                                        if (base.isNotBlank()) {
+                                            pendingCandidateChannel.trySend(
+                                                PendingBrowserMediaCandidate(
+                                                    rawUrl = rawUrl,
+                                                    baseUrl = base,
+                                                    source = ExtractionSource.DOM_SCRAPE
+                                                )
+                                            )
+                                        }
                                     }
                                 },
                                 "EmreBridge"
@@ -591,13 +709,20 @@ fun DirectBrowserView(
 
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    loadingProgress = newProgress / 100f
-                                    isLoading = newProgress < 100
+                                    loadingProgressState.floatValue = newProgress / 100f
+                                    val stillLoading = newProgress < 100
+                                    if (isLoading != stillLoading) {
+                                        isLoading = stillLoading
+                                    }
                                 }
 
                                 override fun onReceivedTitle(view: WebView?, title: String?) {
-                                    pageTitle = title.orEmpty()
-                                    onPageTitleChanged?.invoke(pageTitle)
+                                    val resolvedTitle = title.orEmpty()
+                                    if (resolvedTitle != pageTitle) {
+                                        pageTitle = resolvedTitle
+                                        pageTitleRef.set(resolvedTitle)
+                                        onPageTitleChanged?.invoke(resolvedTitle)
+                                    }
                                 }
                             }
 
@@ -702,17 +827,28 @@ fun DirectBrowserView(
                                     return handleExternalNavigation(view, url)
                                 }
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    isLoading = true
+                                    if (!isLoading) isLoading = true
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
+                                            pendingDomScanJob?.cancel()
+                                            seenRawUrls.clear()
+                                            lastScannedDomUrl = ""
                                             currentUrl = ""
                                             addressInput = ""
                                             pageTitle = ""
-                                            onUrlChange?.invoke("")
+                                            pageTitleRef.set("")
+                                            notifyUrlIfChanged("")
                                         } else {
+                                            if (it != lastNotifiedUrl) {
+                                                pendingDomScanJob?.cancel()
+                                                if (seenRawUrls.size > 1500) {
+                                                    seenRawUrls.clear()
+                                                }
+                                                lastScannedDomUrl = ""
+                                            }
                                             currentUrl = it
                                             addressInput = it
-                                            onUrlChange?.invoke(it)
+                                            notifyUrlIfChanged(it)
                                         }
                                     }
                                     canGoBack = view?.canGoBack() == true
@@ -726,17 +862,29 @@ fun DirectBrowserView(
                                             currentUrl = ""
                                             addressInput = ""
                                             pageTitle = ""
-                                            onUrlChange?.invoke("")
+                                            pageTitleRef.set("")
+                                            notifyUrlIfChanged("")
                                         } else {
                                             currentUrl = it
                                             addressInput = it
-                                            onUrlChange?.invoke(it)
-                                            coroutineScope.launch {
-                                                historyManager.recordVisit(it, view?.title)
+                                            notifyUrlIfChanged(it)
+                                            if (it != lastRecordedHistoryUrl) {
+                                                lastRecordedHistoryUrl = it
+                                                val recordedTitle = view?.title
+                                                coroutineScope.launch {
+                                                    historyManager.recordVisit(it, recordedTitle)
+                                                }
                                             }
-                                            // Setup live MutationObserver and scan page DOM
+                                            // Setup live MutationObserver and defer DOM scan slightly so first paint stays snappy
                                             view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
-                                            scanCurrentPageDOM(view)
+                                            if (it != lastScannedDomUrl) {
+                                                lastScannedDomUrl = it
+                                                pendingDomScanJob?.cancel()
+                                                pendingDomScanJob = coroutineScope.launch {
+                                                    delay(220L)
+                                                    scanCurrentPageDOM(view)
+                                                }
+                                            }
                                         }
                                     }
                                     canGoBack = view?.canGoBack() == true
@@ -747,16 +895,28 @@ fun DirectBrowserView(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): WebResourceResponse? {
-                                    val reqUrl = request?.url?.toString() ?: return null
-                                    if (reqUrl.startsWith("about:")) return null
+                                    if (request == null) return null
+                                    val uri = request.url ?: return null
+                                    val scheme = uri.scheme
+                                    if (scheme != "http" && scheme != "https") return null
+                                    val reqUrl = uri.toString()
 
-                                    return MediaCaptureEngine.shouldInterceptRequest(
-                                        request = request,
-                                        baseUrl = currentUrl
-                                    ) { item ->
-                                        DownloaderSession.addDiscoveredItem(item)
-                                        onMediaExtracted(item)
+                                    if (AdBlockEngine.isAdOrTracker(reqUrl, uri.host)) {
+                                        return AdBlockEngine.createEmptyResponse()
                                     }
+
+                                    val candidateUrl = MediaCaptureEngine.matchCandidateMediaUrl(request)
+                                    if (candidateUrl != null && seenRawUrls.size < 2500 && seenRawUrls.add(candidateUrl)) {
+                                        val base = activeBaseUrlRef.get().ifBlank { reqUrl }
+                                        pendingCandidateChannel.trySend(
+                                            PendingBrowserMediaCandidate(
+                                                rawUrl = candidateUrl,
+                                                baseUrl = base,
+                                                source = ExtractionSource.NETWORK_INTERCEPT
+                                            )
+                                        )
+                                    }
+                                    return null
                                 }
                             }
 
@@ -768,7 +928,9 @@ fun DirectBrowserView(
                         }
                     },
                     update = { wv ->
-                        webViewInstance = wv
+                        if (webViewInstance !== wv) {
+                            webViewInstance = wv
+                        }
                     },
                     onRelease = { wv ->
                         wv.stopLoading()

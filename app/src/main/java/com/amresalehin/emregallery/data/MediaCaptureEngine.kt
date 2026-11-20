@@ -27,18 +27,29 @@ object MediaCaptureEngine {
      * - Content container CSS background-image
      * - IFrames pointing directly to media
      */
+    private val IMAGE_FORMAT_QUERY_REGEX = Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""")
+
     fun getJsDomScanScript(): String {
         return """
             (function() {
                 var list = [];
+                var seen = Object.create(null);
+                var baseHref = document.baseURI || window.location.href;
                 function resolveAbs(u) {
-                    if (!u) return null;
+                    if (!u || u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return null;
                     try {
-                        return new URL(u, document.baseURI || window.location.href).href;
+                        return new URL(u, baseHref).href;
                     } catch(e) {
                         if (u.indexOf('//') === 0) return 'https:' + u;
                         return u;
                     }
+                }
+                function pushCandidate(entry) {
+                    if (!entry || !entry.u) return;
+                    var key = entry.u + '|' + (entry.s || '');
+                    if (seen[key]) return;
+                    seen[key] = true;
+                    list.push(entry);
                 }
 
                 function isChromeElement(el) {
@@ -63,8 +74,6 @@ object MediaCaptureEngine {
                     var img = images[i];
                     if (isChromeElement(img)) continue;
 
-                    var candidateUrls = [];
-
                     // Extract srcset highest resolution candidates
                     var srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
                     if (srcset) {
@@ -75,33 +84,26 @@ object MediaCaptureEngine {
                                 var splitBits = trimmed.split(/\s+/);
                                 var u = splitBits[0];
                                 var descriptor = splitBits[1] || '';
-                                if (u && u.indexOf('data:') !== 0) {
-                                    var absSrcset = resolveAbs(u);
-                                    if (absSrcset) {
-                                        list.push({u: absSrcset, s: 'SRCSET', r: descriptor});
-                                    }
+                                var absSrcset = resolveAbs(u);
+                                if (absSrcset) {
+                                    pushCandidate({u: absSrcset, s: 'SRCSET', r: descriptor});
                                 }
                             }
                         }
                     }
 
                     // Direct src & data-lazy attributes
-                    var rawSrc = img.src || img.getAttribute('src');
                     var dataSrc = img.getAttribute('data-src') || img.getAttribute('data-original') ||
                                   img.getAttribute('data-lazy-src') || img.getAttribute('data-large-file') ||
                                   img.getAttribute('data-hi-res-src') || img.getAttribute('data-zoom-image');
-
-                    if (dataSrc && dataSrc.indexOf('data:') !== 0) {
+                    if (dataSrc) {
                         var absData = resolveAbs(dataSrc);
-                        if (absData) candidateUrls.push({u: absData, s: 'DATA_SRC'});
+                        if (absData) pushCandidate({u: absData, s: 'DATA_SRC'});
                     }
-                    if (rawSrc && rawSrc.indexOf('data:') !== 0) {
+                    var rawSrc = img.src || img.getAttribute('src');
+                    if (rawSrc) {
                         var absRaw = resolveAbs(rawSrc);
-                        if (absRaw) candidateUrls.push({u: absRaw, s: 'DOM'});
-                    }
-
-                    for (var c = 0; c < candidateUrls.length; c++) {
-                        list.push(candidateUrls[c]);
+                        if (absRaw) pushCandidate({u: absRaw, s: 'DOM'});
                     }
                 }
 
@@ -113,23 +115,18 @@ object MediaCaptureEngine {
                     var vDur = (typeof vid.duration === 'number' && isFinite(vid.duration) && vid.duration > 0)
                         ? vid.duration
                         : (vid.getAttribute('duration') || vid.getAttribute('data-duration') || null);
-                    var chosenVideo = null;
-                    if (vid.src && !vid.src.startsWith('blob:') && !vid.src.startsWith('data:')) {
-                        chosenVideo = resolveAbs(vid.src);
-                    } else {
+                    var chosenVideo = resolveAbs(vid.src);
+                    if (!chosenVideo) {
                         var vsources = vid.querySelectorAll('source');
                         for (var j = 0; j < vsources.length; j++) {
-                            var vsRaw = vsources[j].src;
-                            if (vsRaw && !vsRaw.startsWith('blob:') && !vsRaw.startsWith('data:')) {
-                                chosenVideo = resolveAbs(vsRaw);
-                                break;
-                            }
+                            chosenVideo = resolveAbs(vsources[j].src);
+                            if (chosenVideo) break;
                         }
                     }
                     if (chosenVideo) {
-                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video', d: vDur});
+                        pushCandidate({u: chosenVideo, s: 'DOM', p: poster, r: 'video', d: vDur});
                     } else if (poster) {
-                        list.push({u: poster, s: 'POSTER', r: 'poster'});
+                        pushCandidate({u: poster, s: 'POSTER', r: 'poster'});
                     }
                 }
 
@@ -140,21 +137,16 @@ object MediaCaptureEngine {
                     var aDur = (typeof au.duration === 'number' && isFinite(au.duration) && au.duration > 0)
                         ? au.duration
                         : (au.getAttribute('duration') || au.getAttribute('data-duration') || null);
-                    var chosenAudio = null;
-                    if (au.src && !au.src.startsWith('blob:') && !au.src.startsWith('data:')) {
-                        chosenAudio = resolveAbs(au.src);
-                    } else {
+                    var chosenAudio = resolveAbs(au.src);
+                    if (!chosenAudio) {
                         var asources = au.querySelectorAll('source');
                         for (var k = 0; k < asources.length; k++) {
-                            var asRaw = asources[k].src;
-                            if (asRaw && !asRaw.startsWith('blob:') && !asRaw.startsWith('data:')) {
-                                chosenAudio = resolveAbs(asRaw);
-                                break;
-                            }
+                            chosenAudio = resolveAbs(asources[k].src);
+                            if (chosenAudio) break;
                         }
                     }
                     if (chosenAudio) {
-                        list.push({u: chosenAudio, s: 'DOM', r: 'audio', d: aDur});
+                        pushCandidate({u: chosenAudio, s: 'DOM', r: 'audio', d: aDur});
                     }
                 }
 
@@ -168,33 +160,35 @@ object MediaCaptureEngine {
                             var item = arr[idx];
                             if (item.contentUrl) {
                                 var cu = resolveAbs(item.contentUrl);
-                                if (cu) list.push({u: cu, s: 'DOM', r: 'json-ld', d: item.duration || null});
+                                if (cu) pushCandidate({u: cu, s: 'DOM', r: 'json-ld', d: item.duration || null});
                             }
                             if (item.thumbnailUrl) {
                                 var tu = resolveAbs(item.thumbnailUrl);
-                                if (tu) list.push({u: tu, s: 'DOM', r: 'json-ld-thumb'});
+                                if (tu) pushCandidate({u: tu, s: 'DOM', r: 'json-ld-thumb'});
                             }
                             if (item.image && typeof item.image === 'string') {
                                 var iu = resolveAbs(item.image);
-                                if (iu) list.push({u: iu, s: 'DOM', r: 'json-ld-image'});
+                                if (iu) pushCandidate({u: iu, s: 'DOM', r: 'json-ld-image'});
                             }
                         }
                     } catch(e) {}
                 }
 
-                // 5. CSS background-image in content containers
+                // 5. CSS background-image in content containers (check inline style before forced getComputedStyle)
                 var bgElements = document.querySelectorAll('main, article, figure, [role="main"], #content, .gallery, .shots-grid, .shots, .photo, .hero');
-                var count = Math.min(bgElements.length, 60);
+                var count = Math.min(bgElements.length, 24);
                 for (var b = 0; b < count; b++) {
                     var bEl = bgElements[b];
-                    if (bEl.clientWidth >= 120 && bEl.clientHeight >= 120 && !isChromeElement(bEl)) {
-                        var style = window.getComputedStyle(bEl);
-                        var bg = style.backgroundImage;
+                    if (!isChromeElement(bEl)) {
+                        var inlineBg = bEl.style ? bEl.style.backgroundImage : '';
+                        var bg = (inlineBg && inlineBg.indexOf('url(') !== -1)
+                            ? inlineBg
+                            : ((bEl.clientWidth >= 120 && bEl.clientHeight >= 120) ? window.getComputedStyle(bEl).backgroundImage : '');
                         if (bg && bg.indexOf('url(') !== -1) {
                             var match = bg.match(/url\(['"]?(.*?)['"]?\)/);
-                            if (match && match[1] && !match[1].startsWith('data:')) {
+                            if (match && match[1]) {
                                 var bgu = resolveAbs(match[1]);
-                                if (bgu) list.push({u: bgu, s: 'CSS', r: 'background'});
+                                if (bgu) pushCandidate({u: bgu, s: 'CSS', r: 'background'});
                             }
                         }
                     }
@@ -205,7 +199,7 @@ object MediaCaptureEngine {
                 for (var f = 0; f < iframes.length; f++) {
                     var ifr = resolveAbs(iframes[f].src);
                     if (ifr && /\.(?:mp4|webm|mkv|mov|mp3|m4a|wav|jpe?g|png|webp|gif|avif)(?:[?#]|$)/i.test(ifr)) {
-                        list.push({u: ifr, s: 'IFRAME', r: 'iframe'});
+                        pushCandidate({u: ifr, s: 'IFRAME', r: 'iframe'});
                     }
                 }
 
@@ -222,19 +216,27 @@ object MediaCaptureEngine {
             (function() {
                 if (window.__emreObserverInstalled) return;
                 window.__emreObserverInstalled = true;
+                var seenUrls = new Set();
+                var pendingNodes = new Set();
+                var flushTimer = null;
 
                 function report(u) {
                     if (!u || u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return;
+                    if (seenUrls.has(u)) return;
                     try {
                         var abs = new URL(u, document.baseURI || window.location.href).href;
+                        if (seenUrls.has(abs)) return;
+                        if (seenUrls.size > 2500) seenUrls.clear();
+                        seenUrls.add(u);
+                        seenUrls.add(abs);
                         if (window.EmreBridge && window.EmreBridge.reportMedia) {
                             window.EmreBridge.reportMedia(abs);
                         }
                     } catch(e) {}
                 }
 
-                function checkNode(node) {
-                    if (!node || node.nodeType !== 1) return;
+                function inspectSingleElement(node) {
+                    if (!node || node.nodeType !== 1) return false;
                     var tag = node.tagName ? node.tagName.toUpperCase() : '';
                     if (tag === 'IMG') {
                         report(node.src);
@@ -251,6 +253,7 @@ object MediaCaptureEngine {
                                 if (bit) report(bit);
                             }
                         }
+                        return true;
                     } else if (tag === 'VIDEO') {
                         if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
                             report(node.src);
@@ -265,6 +268,7 @@ object MediaCaptureEngine {
                             }
                         }
                         report(node.getAttribute('poster'));
+                        return true;
                     } else if (tag === 'AUDIO') {
                         if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
                             report(node.src);
@@ -278,18 +282,39 @@ object MediaCaptureEngine {
                                 }
                             }
                         }
+                        return true;
                     } else if (tag === 'SOURCE') {
                         var parentTag = node.parentNode ? (node.parentNode.tagName || '').toUpperCase() : '';
                         if (parentTag !== 'VIDEO' && parentTag !== 'AUDIO') {
                             report(node.src);
-                            report(node.getAttribute('srcset'));
+                            var sSrcset = node.getAttribute('srcset');
+                            if (sSrcset) {
+                                var sParts = sSrcset.split(',');
+                                for (var si = 0; si < sParts.length; si++) {
+                                    var sBit = sParts[si].trim().split(/\s+/)[0];
+                                    if (sBit) report(sBit);
+                                }
+                            }
                         }
+                        return true;
                     }
+                    return false;
+                }
 
-                    if (node.querySelectorAll) {
-                        var children = node.querySelectorAll('img, video, audio, source');
-                        for (var c = 0; c < children.length; c++) {
-                            checkNode(children[c]);
+                function flushPending() {
+                    flushTimer = null;
+                    if (pendingNodes.size === 0) return;
+                    var batch = Array.from(pendingNodes);
+                    pendingNodes.clear();
+                    for (var idx = 0; idx < batch.length; idx++) {
+                        var node = batch[idx];
+                        if (!node || !node.isConnected) continue;
+                        var isLeaf = inspectSingleElement(node);
+                        if (!isLeaf && node.querySelectorAll) {
+                            var children = node.querySelectorAll('img, video, audio, source');
+                            for (var c = 0; c < children.length; c++) {
+                                inspectSingleElement(children[c]);
+                            }
                         }
                     }
                 }
@@ -299,11 +324,15 @@ object MediaCaptureEngine {
                         var mut = mutations[m];
                         if (mut.type === 'childList') {
                             for (var i = 0; i < mut.addedNodes.length; i++) {
-                                checkNode(mut.addedNodes[i]);
+                                var added = mut.addedNodes[i];
+                                if (added && added.nodeType === 1) pendingNodes.add(added);
                             }
-                        } else if (mut.type === 'attributes') {
-                            checkNode(mut.target);
+                        } else if (mut.type === 'attributes' && mut.target && mut.target.nodeType === 1) {
+                            pendingNodes.add(mut.target);
                         }
+                    }
+                    if (pendingNodes.size > 0 && !flushTimer) {
+                        flushTimer = setTimeout(flushPending, 250);
                     }
                 });
 
@@ -406,7 +435,8 @@ object MediaCaptureEngine {
         resolutionHint: String? = null,
         mimeHint: String? = null,
         indexHint: Int = 0,
-        durationMillis: Long? = null
+        durationMillis: Long? = null,
+        precomputedCookieHeader: String? = null
     ): ScrapedMediaItem? {
         val trimmed = rawUrl.trim()
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
@@ -440,7 +470,7 @@ object MediaCaptureEngine {
         val headers = mutableMapOf<String, String>()
         headers["Referer"] = baseUrl
         headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
-        val cookieStr = OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
+        val cookieStr = precomputedCookieHeader ?: OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
         if (cookieStr.isNotBlank()) {
             headers["Cookie"] = cookieStr
         }
@@ -476,50 +506,41 @@ object MediaCaptureEngine {
     }
 
     /**
-     * Unified network request interception for both BrowserMediaExtractor and DirectBrowserView.
+     * Fast-path network request inspection suitable for Chromium's IO thread.
+     * Performs zero CookieManager IPC, zero Regex compilation, and zero URI allocations.
      */
-    fun shouldInterceptRequest(
-        request: WebResourceRequest?,
-        baseUrl: String,
-        onMediaDiscovered: (ScrapedMediaItem) -> Unit
-    ): WebResourceResponse? {
-        if (request == null) return null
+    fun matchCandidateMediaUrl(request: WebResourceRequest): String? {
         val reqUrl = request.url.toString()
-
-        // 1. Instant zero-payload response for ad/tracker networks
-        if (AdBlockEngine.isAdOrTracker(reqUrl)) {
-            return AdBlockEngine.createEmptyResponse()
-        }
-
-        // 2. Reject streaming slice fragments (.ts slices, dash segments)
-        if (MediaClassifier.isMediaFragment(reqUrl)) {
-            return null
-        }
+        if (MediaClassifier.isMediaFragment(reqUrl)) return null
 
         val reqLower = reqUrl.lowercase()
         val cleanReqPath = reqLower.substringBefore("?").substringBefore("#")
+
+        // Skip common non-media web documents, scripts, stylesheets, and telemetry before touching headers
+        if (cleanReqPath.endsWith(".html") || cleanReqPath.endsWith(".htm") ||
+            cleanReqPath.endsWith(".php") || cleanReqPath.endsWith(".js") || cleanReqPath.endsWith(".css") ||
+            cleanReqPath.endsWith(".json") || cleanReqPath.endsWith(".xml") || cleanReqPath.endsWith(".txt") ||
+            cleanReqPath.endsWith(".do") || cleanReqPath.endsWith(".asp") || cleanReqPath.endsWith(".aspx") ||
+            cleanReqPath.endsWith(".woff2") || cleanReqPath.endsWith(".woff") || cleanReqPath.endsWith(".ttf")
+        ) {
+            return null
+        }
+
+        if (cleanReqPath.contains("/api/") || cleanReqPath.contains("/apis/") ||
+            cleanReqPath.contains("/youtubei/") || cleanReqPath.contains("/stats/") ||
+            cleanReqPath.contains("/log") || cleanReqPath.contains("/logging") ||
+            cleanReqPath.contains("/ptracking") || cleanReqPath.contains("/beacon") ||
+            cleanReqPath.contains("/telemetry") || cleanReqPath.contains("/metrics") ||
+            cleanReqPath.contains("generate_204") || cleanReqPath.contains("/recaptcha") ||
+            cleanReqPath.contains("/embed/") || cleanReqPath.contains("play.google.com/log") ||
+            cleanReqPath.contains("youtube.com/api/") || cleanReqPath.contains("/wiki/") ||
+            cleanReqPath.contains("/geohack") || cleanReqPath.contains("centralautologin")
+        ) {
+            return null
+        }
+
         val headers = request.requestHeaders ?: emptyMap()
         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
-
-        // Reject non-media API, logging, telemetry endpoints
-        val isNonMediaEndpoint = cleanReqPath.contains("/api/") || cleanReqPath.contains("/apis/") ||
-                cleanReqPath.contains("/youtubei/") || cleanReqPath.contains("/stats/") ||
-                cleanReqPath.contains("/log") || cleanReqPath.contains("/logging") ||
-                cleanReqPath.contains("/ptracking") || cleanReqPath.contains("/beacon") ||
-                cleanReqPath.contains("/telemetry") || cleanReqPath.contains("/metrics") ||
-                cleanReqPath.contains("generate_204") || cleanReqPath.contains("/recaptcha") ||
-                cleanReqPath.contains("/embed/") || cleanReqPath.contains("play.google.com/log") ||
-                cleanReqPath.contains("youtube.com/api/") || cleanReqPath.contains("/wiki/") ||
-                cleanReqPath.contains("/geohack") || cleanReqPath.contains("centralautologin")
-
-        if (isNonMediaEndpoint) return null
-
-        val isNonMediaPage = cleanReqPath.endsWith(".html") || cleanReqPath.endsWith(".htm") ||
-                cleanReqPath.endsWith(".php") || cleanReqPath.endsWith(".js") || cleanReqPath.endsWith(".css") ||
-                cleanReqPath.endsWith(".json") || cleanReqPath.endsWith(".xml") || cleanReqPath.endsWith(".txt") ||
-                cleanReqPath.endsWith(".do") || cleanReqPath.endsWith(".asp") || cleanReqPath.endsWith(".aspx")
-
-        if (isNonMediaPage) return null
 
         val isStream = cleanReqPath.endsWith(".m3u8") || cleanReqPath.endsWith(".mpd") ||
                 cleanReqPath.contains("chunklist") || acceptHeader.contains("mpegurl") ||
@@ -539,21 +560,43 @@ object MediaCaptureEngine {
                 cleanReqPath.endsWith(".gif") || cleanReqPath.endsWith(".avif") ||
                 cleanReqPath.endsWith(".svg") || cleanReqPath.endsWith(".bmp") ||
                 cleanReqPath.contains("/vi/") || cleanReqPath.contains("/vi_webp/") ||
-                Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""").containsMatchIn(reqLower)
+                IMAGE_FORMAT_QUERY_REGEX.containsMatchIn(reqLower)
 
         val isImage = hasImageExt && !acceptHeader.contains("text/html")
 
-        if (isVideo || isAudio || isImage) {
-            val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
-            val item = buildMediaItem(
-                rawUrl = cleanReqUrl,
-                source = ExtractionSource.NETWORK_INTERCEPT,
-                baseUrl = baseUrl,
-                mimeHint = null
-            )
-            if (item != null) {
-                onMediaDiscovered(item)
-            }
+        return when {
+            isVideo || isStream -> MediaClassifier.cleanMediaUrl(reqUrl)
+            isAudio || isImage -> reqUrl
+            else -> null
+        }
+    }
+
+    /**
+     * Unified network request interception for both BrowserMediaExtractor and DirectBrowserView.
+     */
+    fun shouldInterceptRequest(
+        request: WebResourceRequest?,
+        baseUrl: String,
+        onMediaDiscovered: (ScrapedMediaItem) -> Unit
+    ): WebResourceResponse? {
+        if (request == null) return null
+        val reqUrl = request.url.toString()
+
+        // 1. Instant zero-payload response for ad/tracker networks
+        if (AdBlockEngine.isAdOrTracker(reqUrl, request.url.host)) {
+            return AdBlockEngine.createEmptyResponse()
+        }
+
+        // 2. Candidate media matching
+        val candidateUrl = matchCandidateMediaUrl(request) ?: return null
+        val item = buildMediaItem(
+            rawUrl = candidateUrl,
+            source = ExtractionSource.NETWORK_INTERCEPT,
+            baseUrl = baseUrl,
+            mimeHint = null
+        )
+        if (item != null) {
+            onMediaDiscovered(item)
         }
 
         return null
@@ -576,7 +619,9 @@ object MediaCaptureEngine {
             }
 
             val jsonArray = JSONArray(unescaped)
-            val results = mutableListOf<ScrapedMediaItem>()
+            if (jsonArray.length() == 0) return emptyList()
+            val batchCookieHeader = OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
+            val results = ArrayList<ScrapedMediaItem>(jsonArray.length())
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val rawUrl = obj.optString("u", "")
@@ -598,7 +643,8 @@ object MediaCaptureEngine {
                         poster = poster,
                         resolutionHint = res,
                         indexHint = i,
-                        durationMillis = durationMs
+                        durationMillis = durationMs,
+                        precomputedCookieHeader = batchCookieHeader
                     )
                     if (item != null) {
                         results.add(item)

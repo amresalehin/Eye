@@ -2385,7 +2385,7 @@ fun FullScreenBrowserView(
         Box(modifier = Modifier.fillMaxSize()) {
             // DirectBrowserView taking full screen with its unified, interactive toolbar
             DirectBrowserView(
-                initialUrl = currentUrl,
+                initialUrl = initialUrl,
                 onClose = onClose,
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
@@ -2415,9 +2415,11 @@ fun FullScreenBrowserView(
                         }
                     }
                 },
-                onBatchExtracted = { batch, title, domain ->
+                onBatchExtracted = { batch, title, _ ->
                     title?.let { if (it.isNotBlank()) pageTitle = it }
-                    discoveredItems = MediaClassifier.deduplicateScrapedItems(discoveredItems + batch)
+                    if (batch.isNotEmpty()) {
+                        discoveredItems = MediaClassifier.deduplicateScrapedItems(discoveredItems + batch)
+                    }
                 },
                 onSwitchToMediaTab = {
                     showDiscoveredMediaSheet = true

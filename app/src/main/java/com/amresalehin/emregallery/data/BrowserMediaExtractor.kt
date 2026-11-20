@@ -39,9 +39,16 @@ import java.util.Locale
 class BrowserMediaExtractor(private val context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val seenCandidateUrls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var webView: WebView? = null
     @Volatile
     private var isCancelled = false
+
+    companion object {
+        private val mediaProcessingExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "BrowserMediaExtractor-Worker").apply { isDaemon = true }
+        }
+    }
 
     private fun findActivity(ctx: Context): Activity? {
         var current: Context? = ctx
@@ -181,6 +188,7 @@ class BrowserMediaExtractor(private val context: Context) {
                     mimeHint: String? = null
                 ) {
                     if (isCancelled) return
+                    val currentCount = synchronized(seenMap) { seenMap.size }
                     val candidateItem = MediaCaptureEngine.buildMediaItem(
                         rawUrl = rawUrl,
                         source = source,
@@ -188,7 +196,7 @@ class BrowserMediaExtractor(private val context: Context) {
                         poster = poster,
                         resolutionHint = resolution,
                         mimeHint = mimeHint,
-                        indexHint = seenMap.size
+                        indexHint = currentCount
                     ) ?: return
 
                     val key = MediaClassifier.canonicalKey(candidateItem.url)
@@ -205,14 +213,22 @@ class BrowserMediaExtractor(private val context: Context) {
                         } else candidateItem
                     }
 
-                    onMediaDiscovered(candidateItem)
                     DownloaderSession.addDiscoveredItem(candidateItem)
+                    mainHandler.post {
+                        if (!isCancelled) {
+                            onMediaDiscovered(candidateItem)
+                        }
+                    }
                 }
 
                 wv.addJavascriptInterface(
                     EmreMediaBridge { rawUrl ->
-                        mainHandler.post {
-                            dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE)
+                        if (!isCancelled && seenCandidateUrls.size < 2500 && seenCandidateUrls.add(rawUrl)) {
+                            mediaProcessingExecutor.execute {
+                                if (!isCancelled) {
+                                    dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE)
+                                }
+                            }
                         }
                     },
                     "EmreBridge"
@@ -246,30 +262,20 @@ class BrowserMediaExtractor(private val context: Context) {
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
                         if (isCancelled || request == null) return null
-                        return MediaCaptureEngine.shouldInterceptRequest(
-                            request = request,
-                            baseUrl = normalizedUrl,
-                            onMediaDiscovered = { item ->
-                                mainHandler.post {
-                                    if (isCancelled) return@post
-                                    val key = MediaClassifier.canonicalKey(item.url)
-                                    synchronized(seenMap) {
-                                        val existing = seenMap[key]
-                                        if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
-                                            return@synchronized
-                                        }
-                                        seenMap[key] = if (existing != null) {
-                                            item.copy(
-                                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
-                                                durationMillis = item.durationMillis ?: existing.durationMillis
-                                            )
-                                        } else item
-                                    }
-                                    onMediaDiscovered(item)
-                                    DownloaderSession.addDiscoveredItem(item)
+                        val uri = request.url ?: return null
+                        val reqUrl = uri.toString()
+                        if (AdBlockEngine.isAdOrTracker(reqUrl, uri.host)) {
+                            return AdBlockEngine.createEmptyResponse()
+                        }
+                        val candidateUrl = MediaCaptureEngine.matchCandidateMediaUrl(request)
+                        if (candidateUrl != null && seenCandidateUrls.size < 2500 && seenCandidateUrls.add(candidateUrl)) {
+                            mediaProcessingExecutor.execute {
+                                if (!isCancelled) {
+                                    dispatchMediaItem(candidateUrl, ExtractionSource.NETWORK_INTERCEPT)
                                 }
                             }
-                        )
+                        }
+                        return null
                     }
 
                     override fun shouldOverrideUrlLoading(
@@ -397,8 +403,9 @@ class BrowserMediaExtractor(private val context: Context) {
                                     DownloaderSession.addDiscoveredItem(item)
                                 }
 
-                                if (seenMap.isNotEmpty()) {
-                                    onStatusUpdate("Discovered media (${seenMap.size}). Auto-scrolling to trigger lazy loading...")
+                                val currentCountAfterInitial = synchronized(seenMap) { seenMap.size }
+                                if (currentCountAfterInitial > 0) {
+                                    onStatusUpdate("Discovered media ($currentCountAfterInitial). Auto-scrolling to trigger lazy loading...")
                                     executeAdaptiveScrollSequence(wv) {
                                         if (isCancelled || isExtractionCompleted) return@executeAdaptiveScrollSequence
                                         wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { postScrollJson ->
@@ -421,7 +428,8 @@ class BrowserMediaExtractor(private val context: Context) {
                                                 onMediaDiscovered(item)
                                                 DownloaderSession.addDiscoveredItem(item)
                                             }
-                                            onStatusUpdate("Live browser extraction completed (${seenMap.size} items).")
+                                            val totalCount = synchronized(seenMap) { seenMap.size }
+                                            onStatusUpdate("Live browser extraction completed ($totalCount items).")
                                             safeComplete(null)
                                         }
                                     }
@@ -496,7 +504,8 @@ class BrowserMediaExtractor(private val context: Context) {
                                 onMediaDiscovered(item)
                                 DownloaderSession.addDiscoveredItem(item)
                             }
-                            val finalReason = if (seenMap.isEmpty()) {
+                            val isSeenEmpty = synchronized(seenMap) { seenMap.isEmpty() }
+                            val finalReason = if (isSeenEmpty) {
                                 detectedProtectionReason ?: "Page scan timed out (anti-bot protection or dynamic content failed to render)"
                             } else null
                             safeComplete(finalReason)
@@ -582,6 +591,7 @@ class BrowserMediaExtractor(private val context: Context) {
     fun cleanup() {
         isCancelled = true
         mainHandler.removeCallbacksAndMessages(null)
+        seenCandidateUrls.clear()
         try {
             (webView?.parent as? ViewGroup)?.removeView(webView)
             webView?.stopLoading()

@@ -147,6 +147,19 @@ object AdBlockEngine {
         "tr.snapchat.com"
     )
 
+    private val EMPTY_BYTES = ByteArray(0)
+
+    private fun extractHostFast(lowerUrl: String): String? {
+        val schemeEnd = lowerUrl.indexOf("://")
+        val hostStart = if (schemeEnd >= 0) schemeEnd + 3 else 0
+        if (hostStart >= lowerUrl.length) return null
+        val end = lowerUrl.indexOfAny(charArrayOf('/', '?', '#', ':'), startIndex = hostStart)
+        val rawHost = if (end == -1) lowerUrl.substring(hostStart) else lowerUrl.substring(hostStart, end)
+        val atIdx = rawHost.lastIndexOf('@')
+        val cleanHost = if (atIdx >= 0) rawHost.substring(atIdx + 1) else rawHost
+        return cleanHost.takeIf { it.isNotEmpty() }
+    }
+
     /**
      * Checks if a target hostname belongs to an ad network or tracker.
      */
@@ -165,7 +178,7 @@ object AdBlockEngine {
     /**
      * Evaluates whether a complete URL or network request is an ad, tracker, or telemetry endpoint.
      */
-    fun isAdOrTracker(url: String): Boolean {
+    fun isAdOrTracker(url: String, preParsedHost: String? = null): Boolean {
         if (url.isBlank()) return false
         val lowerUrl = url.lowercase(Locale.ROOT)
 
@@ -174,16 +187,8 @@ object AdBlockEngine {
             if (lowerUrl.contains(pattern)) return true
         }
 
-        // 2. Extract and check hostname
-        val host = runCatching {
-            val candidate = if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
-                "https://$lowerUrl"
-            } else {
-                lowerUrl
-            }
-            URI(candidate).host
-        }.getOrNull()
-
+        // 2. Check pre-parsed or fast-sliced hostname without URI allocation overhead
+        val host = preParsedHost?.takeIf { it.isNotBlank() } ?: extractHostFast(lowerUrl)
         if (!host.isNullOrBlank() && isAdHost(host)) {
             return true
         }
@@ -199,7 +204,7 @@ object AdBlockEngine {
         return WebResourceResponse(
             "text/plain",
             "UTF-8",
-            ByteArrayInputStream(ByteArray(0))
+            ByteArrayInputStream(EMPTY_BYTES)
         )
     }
 }

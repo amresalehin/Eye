@@ -137,6 +137,12 @@ object MediaClassifier {
         }
     }
 
+    private val TS_SEGMENT_REGEX = Regex("""(?i)(?:seg|segment|chunk|frag|fragment|track|stream|hls)?[_\-.]?\d+\.ts""")
+    private val TS_NUMBER_REGEX = Regex("""(?i)\d+\.ts""")
+    private val SEGMENT_PATH_REGEX = Regex("""[/_.-](?:seg|segment|frag|fragment|chunk|part)[-_.]?\d+""", RegexOption.IGNORE_CASE)
+    private val NUMBERED_FRAGMENT_REGEX = Regex("""\d+-(?:frag|seg|segment|chunk)\.(?:mp4|ts|m4s|m4v)""", RegexOption.IGNORE_CASE)
+    private val CHUNK_STREAM_REGEX = Regex("""chunk-stream\d+-\d+\.m4s""", RegexOption.IGNORE_CASE)
+
     /**
      * Detects if a URL is an unmerged streaming chunk, segment, or initialization fragment.
      * Standalone downloading of individual video chunks causes broken, partial, and multiplied downloads.
@@ -161,8 +167,8 @@ object MediaClassifier {
         // Standalone videos on websites are MP4/WebM/MKV/MOV/M3U8. A .ts with numeric/segment numbering is an HLS chunk
         if (clean.endsWith(".ts")) {
             val fileName = clean.substringAfterLast('/')
-            val isSegmentTs = fileName.matches(Regex("""(?i)(?:seg|segment|chunk|frag|fragment|track|stream|hls)?[_\-.]?\d+\.ts""")) ||
-                    fileName.matches(Regex("""(?i)\d+\.ts""")) ||
+            val isSegmentTs = TS_SEGMENT_REGEX.matches(fileName) ||
+                    TS_NUMBER_REGEX.matches(fileName) ||
                     fileName.contains("slice") || fileName.contains("stream") ||
                     clean.contains("/hls/") || clean.contains("/dash/") || clean.contains("/segments/") || clean.contains("/chunks/") ||
                     clean.contains("/live/")
@@ -179,16 +185,13 @@ object MediaClassifier {
         }
 
         // 4. Fragment / segment naming in URL path
-        val segmentPattern = Regex("""[/_.-](?:seg|segment|frag|fragment|chunk|part)[-_.]?\d+""", RegexOption.IGNORE_CASE)
-        if (segmentPattern.containsMatchIn(clean)) {
+        if (SEGMENT_PATH_REGEX.containsMatchIn(clean)) {
             return true
         }
-        val numberedFragment = Regex("""\d+-(?:frag|seg|segment|chunk)\.(?:mp4|ts|m4s|m4v)""", RegexOption.IGNORE_CASE)
-        if (numberedFragment.containsMatchIn(clean)) {
+        if (NUMBERED_FRAGMENT_REGEX.containsMatchIn(clean)) {
             return true
         }
-        val chunkStreamPattern = Regex("""chunk-stream\d+-\d+\.m4s""", RegexOption.IGNORE_CASE)
-        if (chunkStreamPattern.containsMatchIn(clean)) {
+        if (CHUNK_STREAM_REGEX.containsMatchIn(clean)) {
             return true
         }
 

@@ -326,6 +326,12 @@ class DownloaderPreferencesManager(private val context: Context) {
                 ?: DEFAULT_PROVIDERS
         }
 
+        fun isSpeedBoostEnabledSync(context: Context): Boolean {
+            return context.applicationContext
+                .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_SPEED_BOOST, true)
+        }
+
         fun getMaxConcurrentDownloadsSync(context: Context): Int {
             return context.applicationContext
                 .getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)

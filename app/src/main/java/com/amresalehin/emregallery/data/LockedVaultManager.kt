@@ -6,7 +6,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.system.Os
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -104,8 +105,21 @@ class LockedVaultManager(private val context: Context) {
             stream.write(encrypted)
             stream.fd.sync()
         }
-        // Same-directory rename is atomic on Android/Linux filesystems.
-        Os.rename(temp.absolutePath, metaFile.absolutePath)
+        // Prefer an atomic same-directory replacement; retain a checked rename fallback for
+        // Android filesystem implementations that do not expose ATOMIC_MOVE.
+        try {
+            Files.move(
+                temp.toPath(),
+                metaFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (atomicFailure: Exception) {
+            if (!temp.renameTo(metaFile)) {
+                temp.delete()
+                throw IllegalStateException("Unable to atomically commit vault metadata", atomicFailure)
+            }
+        }
         // Keep the legacy index until its plaintext media files have been migrated.
         // Deleting it here would make those pre-encryption vault items undiscoverable.
     }

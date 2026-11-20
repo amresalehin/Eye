@@ -463,13 +463,19 @@ fun GalleryApp() {
                         }.getOrDefault(false)
                     }
                 }
-                prefs.setHiddenBatch(committedSourceUris, true)
+                // Do not hide a source whose MediaStore deletion was denied. Keeping both
+                // copies visible is safer than creating an inaccessible hidden original.
                 lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
                 refreshMedia()
 
+                val failedDeletes = sourceDeleteSucceeded.values.count { !it }
+                val message = when {
+                    failedDeletes > 0 -> "Encrypted ${lockedList.size} item(s); ${failedDeletes} original(s) remain in the gallery"
+                    lockedList.size == 1 -> "Moved to Locked folder"
+                    else -> "${lockedList.size} items moved to Locked folder"
+                }
                 val res = snackbarHostState.showSnackbar(
-                    message = if (lockedList.size == 1) "Moved to Locked folder"
-                    else "${lockedList.size} items moved to Locked folder",
+                    message = message,
                     actionLabel = "Undo",
                     duration = SnackbarDuration.Short
                 )
@@ -489,7 +495,6 @@ fun GalleryApp() {
                         if (retainOriginal.isNotEmpty()) lockedVaultManager.deletePermanently(retainOriginal)
                     }
                     lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                    prefs.setHiddenBatch(committedSourceUris, false)
                     refreshMedia()
                 }
             } catch (failure: Exception) {
@@ -1012,7 +1017,7 @@ fun GalleryApp() {
                             media.filter { it.uri in hidden && !it.isTrashed && it.uri !in inBin }
                         }
                         val allLockedItems = remember(lockedVaultItems, legacyLocked) {
-                            (lockedVaultItems + legacyLocked).distinctBy { it.id }
+                            (lockedVaultItems + legacyLocked).distinctBy { it.uri }
                         }
                         LockedFolderScreen(
                             items = allLockedItems,

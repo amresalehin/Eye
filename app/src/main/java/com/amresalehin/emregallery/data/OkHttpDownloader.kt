@@ -352,6 +352,7 @@ object OkHttpDownloader {
         downloadId: String? = null,
         headers: Map<String, String>? = null,
         subfolder: String? = null,
+        domain: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): DownloadResult = withContext(Dispatchers.IO) {
         // Handle Base64 inline data URIs directly without network calls
@@ -359,7 +360,7 @@ object OkHttpDownloader {
             return@withContext downloadDataUriMedia(context, mediaUrl, fileName, downloadId)
         }
 
-        val targetDir = getTargetStorageDir(context, subfolder)
+        val targetDir = getTargetStorageDir(context, domain?.takeIf { it.isNotBlank() } ?: subfolder)
 
         val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         val deterministicBase = if (!downloadId.isNullOrBlank()) {
@@ -1001,7 +1002,7 @@ object OkHttpDownloader {
     }
 
     fun parseContentRangeHeader(header: String?): ContentRangeInfo? {
-        if (header.isNullOrBlank()) return null
+        val m = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""", RegexOption.IGNORE_CASE).find(header.trim()) ?: return null
         val m = Regex("bytes\s+(\d+)-(\d+)/(\d+|\*)", RegexOption.IGNORE_CASE).find(header.trim()) ?: return null
         val start = m.groupValues[1].toLongOrNull() ?: return null
         val end = m.groupValues[2].toLongOrNull() ?: return null
@@ -1052,7 +1053,7 @@ object OkHttpDownloader {
         context: Context,
         file: File,
         mimeType: String? = null,
-        subfolder: String? = null
+        domain: String? = null
     ) {
         if (!file.exists() || file.length() <= 0L) return
         try {

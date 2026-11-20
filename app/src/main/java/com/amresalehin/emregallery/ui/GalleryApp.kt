@@ -435,26 +435,67 @@ fun GalleryApp() {
         if (uris.isEmpty()) return
         if (lockedFolderPinHash.isNullOrBlank()) {
             showLockedFolderSetupPrompt = true
-        } else {
-            scope.launch {
-                val itemsToLock = media.filter { it.uri in uris }
-                if (itemsToLock.isNotEmpty()) {
-                    val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(itemsToLock) }
-                    lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                    prefs.setHiddenBatch(uris, true)
-                    refreshMedia()
-                    val res = snackbarHostState.showSnackbar(
-                        message = if (uris.size == 1) "Moved to Locked folder" else "${uris.size} items moved to Locked folder",
-                        actionLabel = "Undo",
-                        duration = SnackbarDuration.Short
-                    )
-                    if (res == SnackbarResult.ActionPerformed) {
-                        withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(lockedList) }
-                        lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                        prefs.setHiddenBatch(uris, false)
-                        refreshMedia()
+            return
+        }
+        scope.launch {
+            val itemsToLock = media.filter { it.uri in uris }.distinctBy { it.uri }
+            if (itemsToLock.isEmpty()) return@launch
+
+            try {
+                // Phase 1: encrypt and atomically commit the vault metadata. No original is
+                // hidden or deleted unless its encrypted copy is now durably represented.
+                val result = withContext(Dispatchers.IO) {
+                    lockedVaultManager.lockItemsWithPendingDeletes(itemsToLock)
+                }
+                val lockedList = result.lockedItems
+                val committedSourceUris = result.pendingDeleteUris.toSet()
+                if (lockedList.isEmpty()) {
+                    snackbarHostState.showSnackbar("No items could be added to the Locked folder")
+                    return@launch
+                }
+
+                // Phase 2: remove originals only after the vault commit. A denied/failed delete
+                // leaves the original intact; hiding it prevents duplicate presentation.
+                val sourceDeleteSucceeded = withContext(Dispatchers.IO) {
+                    committedSourceUris.associateWith { source ->
+                        runCatching {
+                            context.contentResolver.delete(Uri.parse(source), null, null) > 0
+                        }.getOrDefault(false)
                     }
                 }
+                prefs.setHiddenBatch(committedSourceUris, true)
+                lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                refreshMedia()
+
+                val res = snackbarHostState.showSnackbar(
+                    message = if (lockedList.size == 1) "Moved to Locked folder"
+                    else "${lockedList.size} items moved to Locked folder",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    // If deleting an original was denied, retain that original and discard only
+                    // its encrypted duplicate. Restore from the vault only deleted originals.
+                    val restoreFromVault = lockedList.filterIndexed { index, _ ->
+                        val source = result.pendingDeleteUris.getOrNull(index)
+                        source != null && sourceDeleteSucceeded[source] == true
+                    }
+                    val retainOriginal = lockedList.filterIndexed { index, _ ->
+                        val source = result.pendingDeleteUris.getOrNull(index)
+                        source == null || sourceDeleteSucceeded[source] != true
+                    }
+                    withContext(Dispatchers.IO) {
+                        if (restoreFromVault.isNotEmpty()) lockedVaultManager.unlockItems(restoreFromVault)
+                        if (retainOriginal.isNotEmpty()) lockedVaultManager.deletePermanently(retainOriginal)
+                    }
+                    lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                    prefs.setHiddenBatch(committedSourceUris, false)
+                    refreshMedia()
+                }
+            } catch (failure: Exception) {
+                snackbarHostState.showSnackbar(
+                    "Could not move items to Locked folder: ${failure.message ?: "vault operation failed"}"
+                )
             }
         }
     }

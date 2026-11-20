@@ -1988,4 +1988,146 @@ class MediaDownloaderTest {
         prefs.setSubfolderMode(com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode.FLAT)
         prefs.setVideoQualityCap(com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality.BEST)
     }
+
+    @Test
+    fun testVideoDurationExtractionAndPreviewResolution() {
+        // 1. GalleryDlEngine.parseExtractedItems reads durationMillis
+        val rootJson = org.json.JSONObject(
+            """
+            {
+              "pageTitle": "Sample Clip",
+              "engine": "yt-dlp",
+              "items": [
+                {
+                  "id": "yt_1",
+                  "url": "https://cdn.example.com/watch/video.mp4",
+                  "title": "Sample Clip",
+                  "category": "VIDEOS",
+                  "isVideo": true,
+                  "format": "MP4",
+                  "mimeType": "video/mp4",
+                  "durationMillis": 125000,
+                  "source": "yt-dlp"
+                },
+                {
+                  "id": "gdl_2",
+                  "url": "https://cdn.example.com/watch/no_dur.mp4",
+                  "title": "No Duration",
+                  "category": "VIDEOS",
+                  "isVideo": true,
+                  "format": "MP4",
+                  "mimeType": "video/mp4",
+                  "durationMillis": 0,
+                  "source": "gallery-dl"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val (_, parsed) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(
+            rootJson,
+            "https://example.com/watch"
+        )
+        assertEquals(2, parsed.size)
+        assertEquals(125_000L, parsed[0].durationMillis)
+        assertNull(parsed[1].durationMillis)
+
+        // 2. MediaCaptureEngine.parseDurationToMillis supports numbers, MM:SS, HH:MM:SS, ISO-8601
+        assertEquals(84_000L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis(84))
+        assertEquals(12_500L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("12.5"))
+        assertEquals(205_000L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("3:25"))
+        assertEquals(3_723_000L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("1:02:03"))
+        assertEquals(84_000L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("PT1M24S"))
+        assertEquals(3_665_500L, com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("PT1H1M5.5S"))
+        assertNull(com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis("NaN"))
+        assertNull(com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis(0))
+        assertNull(com.amresalehin.emregallery.data.MediaCaptureEngine.parseDurationToMillis(-5))
+
+        // 3. MediaCaptureEngine.parseJsDomScanResult propagates duration into ScrapedMediaItem
+        val domJson = """
+            [
+              {"u": "https://cdn.example.com/media/trailer.mp4", "s": "DOM", "r": "video", "d": 95.5, "p": "https://cdn.example.com/poster.jpg"},
+              {"u": "https://cdn.example.com/media/podcast.mp3", "s": "DOM", "r": "audio", "d": "PT4M10S"}
+            ]
+        """.trimIndent()
+        val domItems = com.amresalehin.emregallery.data.MediaCaptureEngine.parseJsDomScanResult(
+            domJson,
+            "https://example.com/"
+        )
+        assertEquals(2, domItems.size)
+        assertEquals(95_500L, domItems[0].durationMillis)
+        assertEquals("95500", domItems[0].metadata["duration_ms"])
+        assertEquals(250_000L, domItems[1].durationMillis)
+
+        // 4. StaticMediaScraper extracts og:video:duration & <video data-duration>
+        val html = """
+            <html>
+              <head>
+                <meta property="og:video" content="https://cdn.example.com/og_clip.mp4" />
+                <meta property="og:video:duration" content="42" />
+              </head>
+              <body>
+                <video src="https://cdn.example.com/inline_clip.mp4" data-duration="2:15" poster="https://cdn.example.com/thumb.jpg"></video>
+              </body>
+            </html>
+        """.trimIndent()
+        val doc = org.jsoup.Jsoup.parse(html, "https://example.com/")
+        val staticItems = com.amresalehin.emregallery.data.StaticMediaScraper().parseDocumentMedia(doc, "https://example.com/")
+        val ogVideo = staticItems.firstOrNull { it.url.contains("og_clip.mp4") }
+        val inlineVideo = staticItems.firstOrNull { it.url.contains("inline_clip.mp4") }
+        assertNotNull(ogVideo)
+        assertNotNull(inlineVideo)
+        assertEquals(42_000L, ogVideo?.durationMillis)
+        assertEquals(135_000L, inlineVideo?.durationMillis)
+
+        // 5. MediaClassifier.deduplicateScrapedItems merges and preserves durationMillis
+        val noDur = ScrapedMediaItem(
+            id = "dup_1",
+            url = "https://cdn.example.com/same_video.mp4",
+            title = "same_video.mp4",
+            category = MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4",
+            isVideo = true,
+            resolutionHint = "Network",
+            durationMillis = null,
+            source = "Network"
+        )
+        val withDur = noDur.copy(
+            id = "dup_2",
+            durationMillis = 67_000L,
+            source = "DOM"
+        )
+        val merged = MediaClassifier.deduplicateScrapedItems(listOf(noDur, withDur))
+        assertEquals(1, merged.size)
+        assertEquals(67_000L, merged[0].durationMillis)
+
+        // 6. VideoDurationProber eligibility, resolveScrapedDurationMillis, and formatting
+        assertTrue(com.amresalehin.emregallery.ui.VideoDurationProber.isDirectlyProbable(noDur))
+        val hlsStream = ScrapedMediaItem(
+            id = "hls_1",
+            url = "https://cdn.example.com/live/master.m3u8",
+            title = "master.m3u8",
+            category = MediaCategory.STREAMS,
+            format = "M3U8",
+            mimeType = "application/x-mpegURL",
+            isStream = true,
+            source = "Network"
+        )
+        assertFalse(com.amresalehin.emregallery.ui.VideoDurationProber.isDirectlyProbable(hlsStream))
+
+        assertEquals(
+            67_000L,
+            com.amresalehin.emregallery.ui.resolveScrapedDurationMillis(withDur)
+        )
+        assertEquals(
+            185_000L,
+            com.amresalehin.emregallery.ui.resolveScrapedDurationMillis(
+                noDur,
+                dynamicDurations = mapOf("dup_1" to 185_000L)
+            )
+        )
+        assertEquals("3:05", com.amresalehin.emregallery.ui.formatDuration(185_000L))
+        assertEquals("1:02:03", com.amresalehin.emregallery.ui.formatDuration(3_723_000L))
+    }
 }

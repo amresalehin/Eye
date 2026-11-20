@@ -110,6 +110,9 @@ object MediaCaptureEngine {
                 for (var v = 0; v < videos.length; v++) {
                     var vid = videos[v];
                     var poster = resolveAbs(vid.getAttribute('poster') || vid.poster);
+                    var vDur = (typeof vid.duration === 'number' && isFinite(vid.duration) && vid.duration > 0)
+                        ? vid.duration
+                        : (vid.getAttribute('duration') || vid.getAttribute('data-duration') || null);
                     var chosenVideo = null;
                     if (vid.src && !vid.src.startsWith('blob:') && !vid.src.startsWith('data:')) {
                         chosenVideo = resolveAbs(vid.src);
@@ -124,7 +127,7 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenVideo) {
-                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video'});
+                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video', d: vDur});
                     } else if (poster) {
                         list.push({u: poster, s: 'POSTER', r: 'poster'});
                     }
@@ -134,6 +137,9 @@ object MediaCaptureEngine {
                 var audios = document.querySelectorAll('audio');
                 for (var a = 0; a < audios.length; a++) {
                     var au = audios[a];
+                    var aDur = (typeof au.duration === 'number' && isFinite(au.duration) && au.duration > 0)
+                        ? au.duration
+                        : (au.getAttribute('duration') || au.getAttribute('data-duration') || null);
                     var chosenAudio = null;
                     if (au.src && !au.src.startsWith('blob:') && !au.src.startsWith('data:')) {
                         chosenAudio = resolveAbs(au.src);
@@ -148,7 +154,7 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenAudio) {
-                        list.push({u: chosenAudio, s: 'DOM', r: 'audio'});
+                        list.push({u: chosenAudio, s: 'DOM', r: 'audio', d: aDur});
                     }
                 }
 
@@ -162,7 +168,7 @@ object MediaCaptureEngine {
                             var item = arr[idx];
                             if (item.contentUrl) {
                                 var cu = resolveAbs(item.contentUrl);
-                                if (cu) list.push({u: cu, s: 'DOM', r: 'json-ld'});
+                                if (cu) list.push({u: cu, s: 'DOM', r: 'json-ld', d: item.duration || null});
                             }
                             if (item.thumbnailUrl) {
                                 var tu = resolveAbs(item.thumbnailUrl);
@@ -338,6 +344,57 @@ object MediaCaptureEngine {
     }
 
     /**
+     * Parses duration values expressed as numeric seconds, "MM:SS"/"HH:MM:SS", or ISO-8601 ("PT1M24S")
+     * into positive milliseconds, or null if invalid/non-positive.
+     */
+    fun parseDurationToMillis(raw: Any?): Long? {
+        if (raw == null || raw == JSONObject.NULL || raw is Boolean) return null
+        if (raw is Number) {
+            val sec = raw.toDouble()
+            return if (sec.isFinite() && sec > 0.0) (sec * 1000.0).toLong().takeIf { it > 0L } else null
+        }
+        val text = raw.toString().trim()
+        if (text.isBlank() || text.equals("null", ignoreCase = true) || text.equals("NaN", ignoreCase = true)) {
+            return null
+        }
+
+        // Plain numeric seconds string (e.g., "84" or "12.5")
+        text.toDoubleOrNull()?.let { sec ->
+            return if (sec.isFinite() && sec > 0.0) (sec * 1000.0).toLong().takeIf { it > 0L } else null
+        }
+
+        // Colon-separated MM:SS or HH:MM:SS
+        if (text.contains(':')) {
+            val parts = text.split(':')
+            if (parts.size in 2..3) {
+                val nums = parts.mapNotNull { it.trim().toDoubleOrNull() }
+                if (nums.size == parts.size) {
+                    val totalSec = if (nums.size == 3) {
+                        nums[0] * 3600.0 + nums[1] * 60.0 + nums[2]
+                    } else {
+                        nums[0] * 60.0 + nums[1]
+                    }
+                    return if (totalSec.isFinite() && totalSec > 0.0) (totalSec * 1000.0).toLong().takeIf { it > 0L } else null
+                }
+            }
+        }
+
+        // ISO-8601 duration (e.g., "PT1M24S", "PT1H2M3.5S", "P0DT0H1M5S")
+        val isoRegex = Regex("""^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$""", RegexOption.IGNORE_CASE)
+        val match = isoRegex.matchEntire(text)
+        if (match != null && match.groupValues.drop(1).any { it.isNotEmpty() }) {
+            val days = match.groupValues[1].toDoubleOrNull() ?: 0.0
+            val hours = match.groupValues[2].toDoubleOrNull() ?: 0.0
+            val mins = match.groupValues[3].toDoubleOrNull() ?: 0.0
+            val secs = match.groupValues[4].toDoubleOrNull() ?: 0.0
+            val totalSec = days * 86400.0 + hours * 3600.0 + mins * 60.0 + secs
+            return if (totalSec.isFinite() && totalSec > 0.0) (totalSec * 1000.0).toLong().takeIf { it > 0L } else null
+        }
+
+        return null
+    }
+
+    /**
      * Builds and validates a ScrapedMediaItem with provenance, clean titles,
      * download headers (User-Agent, Referer, Cookie), and thumbnail classification.
      */
@@ -348,7 +405,8 @@ object MediaCaptureEngine {
         poster: String? = null,
         resolutionHint: String? = null,
         mimeHint: String? = null,
-        indexHint: Int = 0
+        indexHint: Int = 0,
+        durationMillis: Long? = null
     ): ScrapedMediaItem? {
         val trimmed = rawUrl.trim()
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
@@ -390,6 +448,7 @@ object MediaCaptureEngine {
         val metadataMap = mutableMapOf<String, String>()
         resolutionHint?.let { metadataMap["resolution"] = it }
         mimeHint?.let { metadataMap["mime_hint"] = it }
+        durationMillis?.takeIf { it > 0L }?.let { metadataMap["duration_ms"] = it.toString() }
         metadataMap["source_url"] = baseUrl
 
         return ScrapedMediaItem(
@@ -405,6 +464,7 @@ object MediaCaptureEngine {
             source = source.label,
             mimeType = classification.mimeType,
             resolutionHint = resolutionHint,
+            durationMillis = durationMillis?.takeIf { it > 0L },
             provenance = MediaProvenance(
                 extractorEngine = "MediaCaptureEngine (${source.label})",
                 pageUrl = baseUrl,
@@ -530,13 +590,15 @@ object MediaCaptureEngine {
                     }
                     val poster = obj.optString("p", "").ifBlank { null }
                     val res = obj.optString("r", "").ifBlank { null }
+                    val durationMs = parseDurationToMillis(obj.opt("d"))
                     val item = buildMediaItem(
                         rawUrl = rawUrl,
                         source = source,
                         baseUrl = baseUrl,
                         poster = poster,
                         resolutionHint = res,
-                        indexHint = i
+                        indexHint = i,
+                        durationMillis = durationMs
                     )
                     if (item != null) {
                         results.add(item)

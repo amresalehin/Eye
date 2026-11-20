@@ -1029,6 +1029,7 @@ fun DownloaderResultsPage(
     var showDownloaderSettings by remember { mutableStateOf(false) }
 
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
+    val dynamicDurations = remember { mutableStateMapOf<String, Long>() }
 
     // Trigger extraction on mount or URL change
     LaunchedEffect(activeUrl) {
@@ -1037,6 +1038,7 @@ fun DownloaderResultsPage(
             downloadedItemIds = emptySet()
             isDownloaded = false
             dynamicDimensions.clear()
+            dynamicDurations.clear()
             DownloaderSession.startSession(activeUrl)
             dualExtractor.extract(activeUrl, scope)
         }
@@ -1053,6 +1055,7 @@ fun DownloaderResultsPage(
                 downloadedItemIds = emptySet()
                 isDownloaded = false
                 dynamicDimensions.clear()
+                dynamicDurations.clear()
                 DownloaderSession.startSession(sanitized)
                 dualExtractor.extract(sanitized, scope)
             }
@@ -1156,6 +1159,71 @@ fun DownloaderResultsPage(
             }
         }
         flushStaged(force = true)
+    }
+
+    // Throttled & batched duration prober for direct video/audio URLs missing page metadata
+    LaunchedEffect(allScrapedItems) {
+        val itemsToProbe = allScrapedItems.filter { item ->
+            resolveScrapedDurationMillis(item, dynamicDurations) == null &&
+                    VideoDurationProber.isDirectlyProbable(item) &&
+                    !VideoDurationProber.hasAttempted(item.url)
+        }.take(25)
+        if (itemsToProbe.isEmpty()) return@LaunchedEffect
+
+        val cachedBatch = mutableMapOf<String, Long>()
+        val remainingToProbe = mutableListOf<ScrapedMediaItem>()
+        for (item in itemsToProbe) {
+            val cached = VideoDurationProber.getCached(item.url)
+            if (cached != null && cached > 0L) {
+                cachedBatch[item.id] = cached
+            } else {
+                remainingToProbe.add(item)
+            }
+        }
+        if (cachedBatch.isNotEmpty()) {
+            dynamicDurations.putAll(cachedBatch)
+        }
+        if (remainingToProbe.isEmpty()) return@LaunchedEffect
+
+        val probeSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+        val stagedUpdates = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val flushMutex = kotlinx.coroutines.sync.Mutex()
+        var lastFlushTime = System.currentTimeMillis()
+
+        suspend fun flushDurations(force: Boolean = false) {
+            flushMutex.lock()
+            try {
+                val now = System.currentTimeMillis()
+                if (stagedUpdates.isNotEmpty() && (force || stagedUpdates.size >= 3 || now - lastFlushTime >= 250L)) {
+                    val snapshot = HashMap(stagedUpdates)
+                    stagedUpdates.clear()
+                    lastFlushTime = now
+                    kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                        dynamicDurations.putAll(snapshot)
+                    }
+                }
+            } finally {
+                flushMutex.unlock()
+            }
+        }
+
+        kotlinx.coroutines.coroutineScope {
+            for (item in remainingToProbe) {
+                launch(Dispatchers.IO) {
+                    probeSemaphore.acquire()
+                    try {
+                        val probed = VideoDurationProber.probe(item.url, referer = activeUrl)
+                        if (probed != null && probed > 0L) {
+                            stagedUpdates[item.id] = probed
+                            flushDurations(force = false)
+                        }
+                    } finally {
+                        probeSemaphore.release()
+                    }
+                }
+            }
+        }
+        flushDurations(force = true)
     }
 
     val minKbVal = minKbInput.toFloatOrNull() ?: 0f
@@ -1870,6 +1938,7 @@ fun DownloaderResultsPage(
                                 isSelected = item.id in selectedItemIds,
                                 isDownloaded = item.id in finishedIds || item.url in finishedMediaUrls,
                                 dynamicDimensions = dynamicDimensions,
+                                dynamicDurations = dynamicDurations,
                                 onToggle = {
                                     isDownloaded = false
                                     selectedItemIds = if (item.id in selectedItemIds) {
@@ -2261,9 +2330,11 @@ fun DownloaderMediaCard(
     dynamicDimensions: Map<String, Pair<Int, Int>>,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    isDownloaded: Boolean = false
+    isDownloaded: Boolean = false,
+    dynamicDurations: Map<String, Long> = emptyMap()
 ) {
     val dimText = formatScrapedMediaDimensionOrSize(item, dynamicDimensions)
+    val durationMillis = resolveScrapedDurationMillis(item, dynamicDurations)
     val categoryText = when {
         item.isVideo -> "Videos"
         item.isAudio -> "Audio"
@@ -2374,6 +2445,39 @@ fun DownloaderMediaCard(
                             tint = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.size(13.dp)
                         )
+                    }
+                }
+
+                // Bottom-Right Duration Pill for video, audio, and stream previews
+                if (durationMillis != null && durationMillis > 0L && (item.isVideo || item.isAudio || item.isStream)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.72f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 6.dp, bottom = 6.dp)
+                            .testTag("scraped_media_duration_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (item.isAudio || item.category == MediaCategory.AUDIO) Icons.Default.Audiotrack else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = formatDuration(durationMillis),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp,
+                                color = Color.White,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

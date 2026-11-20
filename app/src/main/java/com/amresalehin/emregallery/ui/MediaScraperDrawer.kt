@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -69,8 +71,10 @@ fun RealScrapedCard(
     isSelected: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    dynamicDimensions: Map<String, Pair<Int, Int>> = emptyMap()
+    dynamicDimensions: Map<String, Pair<Int, Int>> = emptyMap(),
+    dynamicDurations: Map<String, Long> = emptyMap()
 ) {
+    val durationMillis = resolveScrapedDurationMillis(item, dynamicDurations)
     val mosaicHeight = remember(item, dynamicDimensions[item.id]) {
         val (width, height) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
         if (width != null && height != null && width > 0) {
@@ -216,6 +220,39 @@ fun RealScrapedCard(
                             border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.75f)),
                             modifier = Modifier.fillMaxSize()
                         ) {}
+                    }
+                }
+
+                // Bottom-Right Duration Badge for videos, audio, and streams
+                if (durationMillis != null && durationMillis > 0L && (item.isVideo || item.isAudio || item.isStream)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.72f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .testTag("scraped_media_duration_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (item.isAudio || item.category == MediaCategory.AUDIO) Icons.Default.Audiotrack else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = formatDuration(durationMillis),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -610,5 +647,122 @@ object ImageDimensionProber {
     fun getCachedSize(url: String): Long? {
         val cleanUrl = if (url.startsWith("//")) "https:$url" else url
         return sizeCache[cleanUrl]
+    }
+}
+
+/**
+ * Resolves the best available media duration (in milliseconds) for a pre-download scraped item:
+ * 1. Scraped item's explicit [ScrapedMediaItem.durationMillis]
+ * 2. Metadata `"duration_ms"`
+ * 3. Dynamically probed duration in [dynamicDurations]
+ * 4. Cached result in [VideoDurationProber]
+ */
+fun resolveScrapedDurationMillis(
+    item: ScrapedMediaItem,
+    dynamicDurations: Map<String, Long> = emptyMap()
+): Long? {
+    item.durationMillis?.takeIf { it > 0L }?.let { return it }
+    item.metadata["duration_ms"]?.toLongOrNull()?.takeIf { it > 0L }?.let { return it }
+    dynamicDurations[item.id]?.takeIf { it > 0L }?.let { return it }
+    return VideoDurationProber.getCached(item.url)
+}
+
+/**
+ * Lightweight background prober for direct video/audio URLs missing page-level duration metadata.
+ * Uses MediaMetadataRetriever with Semaphore(2) throttling, timeout guard, and negative caching (-1L).
+ */
+object VideoDurationProber {
+    val probeSemaphore = Semaphore(2)
+    private val durationCache = ConcurrentHashMap<String, Long>()
+
+    private val DIRECT_MEDIA_EXTENSIONS = setOf(
+        "mp4", "m4v", "webm", "mov", "mkv", "avi", "3gp",
+        "mp3", "m4a", "aac", "ogg", "opus", "wav", "flac"
+    )
+
+    private val STREAM_MANIFEST_MARKERS = listOf(".m3u8", ".mpd", "master.json", "playlist.json")
+
+    fun normalizeUrl(url: String): String = if (url.startsWith("//")) "https:$url" else url.trim()
+
+    fun isDirectlyProbable(item: ScrapedMediaItem): Boolean {
+        if (item.isStream || item.category == MediaCategory.STREAMS) return false
+        if (!item.isVideo && !item.isAudio &&
+            item.category != MediaCategory.VIDEOS && item.category != MediaCategory.AUDIO
+        ) {
+            return false
+        }
+
+        val cleanUrl = normalizeUrl(item.url)
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) return false
+
+        val lowerUrl = cleanUrl.lowercase(Locale.ROOT)
+        if (STREAM_MANIFEST_MARKERS.any { lowerUrl.contains(it) }) return false
+
+        val path = lowerUrl.substringBefore('?').substringBefore('#')
+        val ext = path.substringAfterLast('.', "")
+        if (ext in DIRECT_MEDIA_EXTENSIONS) return true
+
+        if (lowerUrl.contains("videoplayback") || lowerUrl.contains("googlevideo.com")) return true
+
+        val mimeLower = item.mimeType.lowercase(Locale.ROOT)
+        val isMediaMime = (mimeLower.startsWith("video/") || mimeLower.startsWith("audio/")) &&
+                !mimeLower.contains("mpegurl") && !mimeLower.contains("dash")
+        if (isMediaMime && (item.source.equals("Network", ignoreCase = true) || item.source.equals("DOM", ignoreCase = true))) {
+            return true
+        }
+
+        return false
+    }
+
+    suspend fun probe(url: String, referer: String? = null): Long? = withContext(Dispatchers.IO) {
+        val cleanUrl = normalizeUrl(url)
+        durationCache[cleanUrl]?.let { cached ->
+            return@withContext if (cached > 0L) cached else null
+        }
+
+        if (cleanUrl.toHttpUrlOrNull() == null) return@withContext null
+
+        probeSemaphore.withPermit {
+            durationCache[cleanUrl]?.let { cached ->
+                return@withPermit if (cached > 0L) cached else null
+            }
+
+            val parsedDuration = withTimeoutOrNull(6000L) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    val headers = HashMap<String, String>()
+                    headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
+                    if (!referer.isNullOrBlank()) {
+                        headers["Referer"] = referer
+                    }
+                    retriever.setDataSource(cleanUrl, headers)
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()
+                        ?.takeIf { it > 0L }
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    runCatching { retriever.release() }
+                }
+            }
+
+            if (parsedDuration != null && parsedDuration > 0L) {
+                durationCache[cleanUrl] = parsedDuration
+                parsedDuration
+            } else {
+                durationCache[cleanUrl] = -1L
+                null
+            }
+        }
+    }
+
+    fun getCached(url: String): Long? {
+        val cleanUrl = normalizeUrl(url)
+        return durationCache[cleanUrl]?.takeIf { it > 0L }
+    }
+
+    fun hasAttempted(url: String): Boolean {
+        val cleanUrl = normalizeUrl(url)
+        return durationCache.containsKey(cleanUrl)
     }
 }

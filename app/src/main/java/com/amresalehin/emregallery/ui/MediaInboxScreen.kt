@@ -73,8 +73,11 @@ import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -2309,6 +2312,44 @@ fun FullScreenBrowserView(
     var selectedFilter by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
+    val dynamicDurations = remember { mutableStateMapOf<String, Long>() }
+
+    LaunchedEffect(currentUrl) {
+        dynamicDurations.clear()
+    }
+
+    // Probe durations for direct video/audio URLs when the discovered media sheet opens
+    LaunchedEffect(showDiscoveredMediaSheet, discoveredItems) {
+        if (!showDiscoveredMediaSheet) return@LaunchedEffect
+        val toProbe = discoveredItems.filter { item ->
+            resolveScrapedDurationMillis(item, dynamicDurations) == null &&
+                    VideoDurationProber.isDirectlyProbable(item) &&
+                    !VideoDurationProber.hasAttempted(item.url)
+        }.take(20)
+        if (toProbe.isEmpty()) return@LaunchedEffect
+
+        val cached = mutableMapOf<String, Long>()
+        val remaining = mutableListOf<ScrapedMediaItem>()
+        for (item in toProbe) {
+            val c = VideoDurationProber.getCached(item.url)
+            if (c != null && c > 0L) cached[item.id] = c else remaining.add(item)
+        }
+        if (cached.isNotEmpty()) dynamicDurations.putAll(cached)
+        if (remaining.isEmpty()) return@LaunchedEffect
+
+        coroutineScope {
+            for (item in remaining) {
+                launch(Dispatchers.IO) {
+                    val probed = VideoDurationProber.probe(item.url, referer = currentUrl)
+                    if (probed != null && probed > 0L) {
+                        withContext(Dispatchers.Main.immediate) {
+                            dynamicDurations[item.id] = probed
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Intercept back button when modal sheet is open or to close browser
     BackHandler {
@@ -2359,7 +2400,15 @@ fun FullScreenBrowserView(
                             val updated = discoveredItems.toMutableList()
                             updated[existingIndex] = item.copy(
                                 id = existing.id,
-                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                                durationMillis = item.durationMillis ?: existing.durationMillis
+                            )
+                            discoveredItems = updated
+                        } else if (existing.durationMillis == null && item.durationMillis != null) {
+                            val updated = discoveredItems.toMutableList()
+                            updated[existingIndex] = existing.copy(
+                                thumbnailUrl = existing.thumbnailUrl ?: item.thumbnailUrl,
+                                durationMillis = item.durationMillis
                             )
                             discoveredItems = updated
                         }
@@ -2567,6 +2616,14 @@ fun FullScreenBrowserView(
                                         }
                                     }
 
+                                    val durationMillis = resolveScrapedDurationMillis(item, dynamicDurations)
+                                    val subtitleText = if ((item.isVideo || item.isAudio || item.isStream) &&
+                                        durationMillis != null && durationMillis > 0L
+                                    ) {
+                                        "${item.category.label} • ${item.format} • ${formatDuration(durationMillis)}"
+                                    } else {
+                                        "${item.category.label} • ${item.format}"
+                                    }
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = item.title,
@@ -2576,9 +2633,10 @@ fun FullScreenBrowserView(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${item.category.label} • ${item.format}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = subtitleText,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.testTag("discovered_media_subtitle_${item.id}")
                                         )
                                     }
 

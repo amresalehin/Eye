@@ -197,7 +197,12 @@ class BrowserMediaExtractor(private val context: Context) {
                         if (existing != null && MediaClassifier.compareMediaQuality(candidateItem, existing) <= 0) {
                             return
                         }
-                        seenMap[key] = candidateItem
+                        seenMap[key] = if (existing != null) {
+                            candidateItem.copy(
+                                thumbnailUrl = candidateItem.thumbnailUrl ?: existing.thumbnailUrl,
+                                durationMillis = candidateItem.durationMillis ?: existing.durationMillis
+                            )
+                        } else candidateItem
                     }
 
                     onMediaDiscovered(candidateItem)
@@ -253,7 +258,12 @@ class BrowserMediaExtractor(private val context: Context) {
                                         if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
                                             return@synchronized
                                         }
-                                        seenMap[key] = item
+                                        seenMap[key] = if (existing != null) {
+                                            item.copy(
+                                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                                                durationMillis = item.durationMillis ?: existing.durationMillis
+                                            )
+                                        } else item
                                     }
                                     onMediaDiscovered(item)
                                     DownloaderSession.addDiscoveredItem(item)
@@ -376,7 +386,12 @@ class BrowserMediaExtractor(private val context: Context) {
                                         if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
                                             continue
                                         }
-                                        seenMap[key] = item
+                                        seenMap[key] = if (existing != null) {
+                                            item.copy(
+                                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                                                durationMillis = item.durationMillis ?: existing.durationMillis
+                                            )
+                                        } else item
                                     }
                                     onMediaDiscovered(item)
                                     DownloaderSession.addDiscoveredItem(item)
@@ -396,7 +411,12 @@ class BrowserMediaExtractor(private val context: Context) {
                                                     if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
                                                         continue
                                                     }
-                                                    seenMap[key] = item
+                                                    seenMap[key] = if (existing != null) {
+                                                        item.copy(
+                                                            thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                                                            durationMillis = item.durationMillis ?: existing.durationMillis
+                                                        )
+                                                    } else item
                                                 }
                                                 onMediaDiscovered(item)
                                                 DownloaderSession.addDiscoveredItem(item)

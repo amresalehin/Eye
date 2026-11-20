@@ -140,7 +140,7 @@ class StaticMediaScraper {
         }
     }
 
-    private fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
+    internal fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
         val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
 
         fun addCandidate(
@@ -151,7 +151,8 @@ class StaticMediaScraper {
             domSelector: String? = null,
             declaredWidth: Int? = null,
             declaredHeight: Int? = null,
-            itemTitleHint: String? = null
+            itemTitleHint: String? = null,
+            durationMillis: Long? = null
         ) {
             val resolved = MediaClassifier.resolveUrl(rawUrl, baseUrl) ?: return
             if (!MediaClassifier.isValidMedia(resolved)) return
@@ -199,8 +200,10 @@ class StaticMediaScraper {
                 headers["Cookie"] = sessionCookies
             }
 
+            val validDuration = durationMillis?.takeIf { it > 0L }
             val metadataMap = mutableMapOf<String, String>()
             resolution?.let { metadataMap["resolution"] = it }
+            validDuration?.let { metadataMap["duration_ms"] = it.toString() }
             metadataMap["source_url"] = baseUrl
 
             val item = ScrapedMediaItem(
@@ -216,6 +219,7 @@ class StaticMediaScraper {
                 source = source.label,
                 mimeType = targetClassification.mimeType,
                 resolutionHint = resolution,
+                durationMillis = validDuration,
                 provenance = MediaProvenance(
                     extractorEngine = "Static HTML (${source.label})",
                     pageUrl = baseUrl,
@@ -227,11 +231,15 @@ class StaticMediaScraper {
 
             val existing = itemsMap[key]
             if (existing != null) {
+                val mergedDuration = item.durationMillis ?: existing.durationMillis
                 if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
                     itemsMap[key] = item.copy(
                         id = existing.id,
-                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                        durationMillis = mergedDuration
                     )
+                } else if (existing.durationMillis == null && mergedDuration != null) {
+                    itemsMap[key] = existing.copy(durationMillis = mergedDuration)
                 }
                 return
             }
@@ -240,6 +248,18 @@ class StaticMediaScraper {
         }
 
         // 1. OpenGraph, Twitter & schema.org meta tags (Explicit publisher content)
+        val pageVideoDurationMs = listOf(
+            "meta[property=og:video:duration]",
+            "meta[property=video:duration]",
+            "meta[name=video:duration]",
+            "meta[itemprop=duration]"
+        ).firstNotNullOfOrNull { sel ->
+            doc.selectFirst(sel)?.let { el ->
+                val raw = el.attr("content").ifBlank { el.attr("value") }
+                MediaCaptureEngine.parseDurationToMillis(raw)
+            }
+        }
+
         val metaSelectors = listOf(
             "meta[property=og:video]", "meta[content][property=og:video]",
             "meta[property=og:image]", "meta[content][property=og:image]",
@@ -250,7 +270,14 @@ class StaticMediaScraper {
             for (meta in doc.select(sel)) {
                 val content = meta.attr("content").ifBlank { meta.attr("value") }
                 if (content.isNotBlank()) {
-                    addCandidate(content, ExtractionSource.STATIC_HTML, "OpenGraph", domSelector = sel)
+                    val isVideoMeta = sel.contains("video", ignoreCase = true) || sel.contains("stream", ignoreCase = true)
+                    addCandidate(
+                        content,
+                        ExtractionSource.STATIC_HTML,
+                        "OpenGraph",
+                        domSelector = sel,
+                        durationMillis = if (isVideoMeta) pageVideoDurationMs else null
+                    )
                 }
             }
         }
@@ -261,6 +288,9 @@ class StaticMediaScraper {
             val vw = video.attr("width").toIntOrNull()
             val vh = video.attr("height").toIntOrNull()
             val vRes = if (vw != null && vh != null) "${vw}x${vh}" else null
+            val vDurMs = MediaCaptureEngine.parseDurationToMillis(
+                video.attr("duration").ifBlank { video.attr("data-duration") }
+            )
 
             val rawSrc = video.attr("src").ifBlank { video.attr("data-src") }
             var chosenUrl: String? = rawSrc.takeIf { it.isNotBlank() && !it.startsWith("blob:", true) && !it.startsWith("data:", true) }
@@ -275,7 +305,14 @@ class StaticMediaScraper {
                 }
             }
             if (!chosenUrl.isNullOrBlank()) {
-                addCandidate(chosenUrl, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster, domSelector = "video")
+                addCandidate(
+                    chosenUrl,
+                    ExtractionSource.DOM_SCRAPE,
+                    resolution = vRes,
+                    posterUrl = poster,
+                    domSelector = "video",
+                    durationMillis = vDurMs
+                )
             }
             if (!poster.isNullOrBlank() && chosenUrl == null) {
                 addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster", domSelector = "video[poster]")
@@ -354,13 +391,17 @@ class StaticMediaScraper {
                 val trailer = el.attr("data-trailer").ifBlank { el.attr("data-video").ifBlank { el.attr("data-mp4") } }
                 val thumb = el.attr("data-main-thumb").ifBlank { el.attr("data-thumb").ifBlank { el.attr("data-poster") } }
                 val title = el.attr("title").ifBlank { el.selectFirst("a[title]")?.attr("title") ?: el.selectFirst(".title, h2, h3")?.text() }
+                val elDurMs = MediaCaptureEngine.parseDurationToMillis(
+                    el.attr("data-duration").ifBlank { el.attr("duration") }
+                )
                 if (trailer.isNotBlank() && !trailer.startsWith("data:", true)) {
                     addCandidate(
                         rawUrl = trailer,
                         source = ExtractionSource.DOM_SCRAPE,
                         posterUrl = thumb.takeIf { it.isNotBlank() && !it.startsWith("data:", true) },
                         domSelector = "$sel (container)",
-                        itemTitleHint = title
+                        itemTitleHint = title,
+                        durationMillis = elDurMs
                     )
                 }
                 if (thumb.isNotBlank() && !thumb.startsWith("data:", true)) {

@@ -4,9 +4,47 @@ import sys
 import time
 import traceback
 import hashlib
+import re
 import threading
 
 _gdl_lock = threading.Lock()
+
+
+def _parse_duration_millis(raw_val):
+    if raw_val is None or isinstance(raw_val, bool):
+        return None
+    if isinstance(raw_val, (int, float)):
+        val = float(raw_val)
+        return int(round(val * 1000.0)) if val > 0 else None
+    text = str(raw_val).strip()
+    if not text:
+        return None
+    # Numeric string (seconds)
+    try:
+        val = float(text)
+        return int(round(val * 1000.0)) if val > 0 else None
+    except Exception:
+        pass
+    # HH:MM:SS or MM:SS
+    if ":" in text:
+        parts = text.split(":")
+        if 2 <= len(parts) <= 3:
+            try:
+                nums = [float(p.strip()) for p in parts]
+                total_sec = (nums[0] * 3600 + nums[1] * 60 + nums[2]) if len(nums) == 3 else (nums[0] * 60 + nums[1])
+                return int(round(total_sec * 1000.0)) if total_sec > 0 else None
+            except Exception:
+                pass
+    # ISO-8601 duration e.g. PT1H2M34S
+    iso_match = re.match(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$", text, re.IGNORECASE)
+    if iso_match and any(iso_match.groups()):
+        days = float(iso_match.group(1) or 0)
+        hours = float(iso_match.group(2) or 0)
+        mins = float(iso_match.group(3) or 0)
+        secs = float(iso_match.group(4) or 0)
+        total_sec = days * 86400 + hours * 3600 + mins * 60 + secs
+        return int(round(total_sec * 1000.0)) if total_sec > 0 else None
+    return None
 
 try:
     import gallery_dl
@@ -249,6 +287,14 @@ def extract_gallery_dl(url, options_json="{}"):
                         size_bytes = None
 
                     thumb = kwdict.get("thumbnail") or kwdict.get("thumb") or (item_url if category == "IMAGES" else None)
+                    duration_ms = _parse_duration_millis(kwdict.get("duration"))
+                    if duration_ms is None and kwdict.get("duration_ms") is not None:
+                        try:
+                            d_ms = int(kwdict.get("duration_ms"))
+                            if d_ms > 0:
+                                duration_ms = d_ms
+                        except Exception:
+                            pass
 
                     # Route Reddit DASH videos extracted by gallery-dl through yt-dlp so audio is muxed
                     item_source = "yt-dlp" if ("v.redd.it/" in lower_url and is_video) else "gallery-dl"
@@ -267,6 +313,7 @@ def extract_gallery_dl(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": size_bytes,
+                        "durationMillis": duration_ms,
                         "source": item_source
                     })
     except Exception as e:
@@ -516,6 +563,11 @@ def extract_yt_dlp(url, options_json="{}"):
                     is_audio_only = (entry.get("vcodec") == "none" and mode != "split") or v_ext in ["mp3", "m4a", "opus", "aac"]
                     is_stream = (".m3u8" in clean_url) or (".mpd" in clean_url)
                     category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
+                    duration_ms = _parse_duration_millis(
+                        entry.get("duration")
+                        if entry.get("duration") is not None
+                        else (entry.get("duration_string") or info.get("duration"))
+                    )
 
                     url_hash = hashlib.sha256(direct_url.encode('utf-8')).hexdigest()[:12]
                     items.append({
@@ -531,6 +583,7 @@ def extract_yt_dlp(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
+                        "durationMillis": duration_ms,
                         "source": "yt-dlp"
                     })
     except Exception as e:

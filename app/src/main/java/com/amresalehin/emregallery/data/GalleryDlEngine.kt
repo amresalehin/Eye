@@ -218,6 +218,12 @@ object GalleryDlEngine {
             val isStream = obj.optBoolean("isStream", false)
             val itemSource = obj.optString("source", defaultEngine).ifBlank { defaultEngine }
 
+            val durationMillis = if (obj.has("durationMillis") && !obj.isNull("durationMillis")) {
+                obj.optLong("durationMillis", 0L).takeIf { it > 0L }
+            } else {
+                null
+            }
+
             val item = ScrapedMediaItem(
                 id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
@@ -232,6 +238,7 @@ object GalleryDlEngine {
                 source = itemSource,
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
+                durationMillis = durationMillis,
                 provenance = MediaProvenance(
                     extractorEngine = itemSource,
                     pageUrl = pageUrl

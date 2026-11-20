@@ -1037,6 +1037,12 @@ object MediaClassifier {
         if (a.thumbnailUrl != null && b.thumbnailUrl == null) return 1
         if (a.thumbnailUrl == null && b.thumbnailUrl != null) return -1
 
+        // 7. Prefer candidate with known positive duration
+        val aDur = a.durationMillis?.takeIf { it > 0L }
+        val bDur = b.durationMillis?.takeIf { it > 0L }
+        if (aDur != null && bDur == null) return 1
+        if (aDur == null && bDur != null) return -1
+
         return 0
     }
 
@@ -1083,6 +1089,8 @@ object MediaClassifier {
                 val mergedResolution = group.firstOrNull {
                     !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network"
                 }?.resolutionHint ?: best.resolutionHint
+                val mergedDuration = best.durationMillis?.takeIf { it > 0L }
+                    ?: group.firstNotNullOfOrNull { it.durationMillis?.takeIf { d -> d > 0L } }
 
                 val mergedHeaders = mutableMapOf<String, String>()
                 for (cand in group) {
@@ -1094,6 +1102,7 @@ object MediaClassifier {
                     url = resolvedOriginalUrl,
                     thumbnailUrl = bestThumb,
                     resolutionHint = mergedResolution,
+                    durationMillis = mergedDuration,
                     provenance = mergedProvenance,
                     downloadHeaders = mergedHeaders
                 )

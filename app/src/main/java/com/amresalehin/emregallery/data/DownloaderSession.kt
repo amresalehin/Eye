@@ -78,8 +78,12 @@ object DownloaderSession {
                 } else if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
                     canonicalMap[key] = item.copy(
                         id = existing.id,
-                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                        durationMillis = item.durationMillis ?: existing.durationMillis
                     )
+                    updated = true
+                } else if (existing.durationMillis == null && item.durationMillis != null) {
+                    canonicalMap[key] = existing.copy(durationMillis = item.durationMillis)
                     updated = true
                 }
             }

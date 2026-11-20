@@ -46,6 +46,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.MediaInboxItem
+import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.PocketRepository
+import com.amresalehin.emregallery.data.ScrapedMediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import com.amresalehin.emregallery.data.PreferencesRepository
@@ -138,7 +142,15 @@ fun GalleryApp() {
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
-    var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var inboxInitialStack by remember { mutableStateOf<MediaInboxStack?>(null) }
+    var selectedBookmarkDetailStack by remember { mutableStateOf<MediaInboxStack?>(null) }
+    var selectedBookmarkDeckIndex by remember { mutableIntStateOf(0) }
+    var selectedBookmarkFullScreenIndex by remember { mutableStateOf<Int?>(null) }
+    var browserInitialUrl by remember { mutableStateOf("") }
+    var browserCurrentUrl by remember { mutableStateOf("") }
+    var browserPageTitle by remember { mutableStateOf("") }
+    var browserDiscoveredMedia by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
+    val pocketRepository = remember { PocketRepository.getInstance(context) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -530,7 +542,11 @@ fun GalleryApp() {
         newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
         newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
         newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
-        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
+        newInboxInitialStack: MediaInboxStack? = null,
+        newSelectedBookmarkDetailStack: MediaInboxStack? = if (dest == Destination.BOOKMARK_DETAIL) selectedBookmarkDetailStack else null,
+        newSelectedBookmarkDeckIndex: Int = if (dest == Destination.BOOKMARK_DETAIL) selectedBookmarkDeckIndex else 0,
+        newSelectedBookmarkFullScreenIndex: Int? = if (dest == Destination.BOOKMARK_DETAIL) selectedBookmarkFullScreenIndex else null,
+        newBrowserInitialUrl: String = if (dest == Destination.BROWSER) browserInitialUrl else ""
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -550,7 +566,11 @@ fun GalleryApp() {
                     albumFilter = albumFilter,
                     albumFilterReturnDestination = albumFilterReturnDestination,
                     inboxInitialViewMode = inboxInitialViewMode,
-                    inboxInitialStack = inboxInitialStack
+                    inboxInitialStack = inboxInitialStack,
+                    selectedBookmarkDetailStack = selectedBookmarkDetailStack,
+                    selectedBookmarkDeckIndex = selectedBookmarkDeckIndex,
+                    selectedBookmarkFullScreenIndex = selectedBookmarkFullScreenIndex,
+                    browserInitialUrl = browserInitialUrl
                 )
             )
             previousDestination = destination
@@ -642,6 +662,13 @@ fun GalleryApp() {
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
                 inboxInitialViewMode = entry.inboxInitialViewMode
                 inboxInitialStack = entry.inboxInitialStack
+                selectedBookmarkDetailStack = entry.selectedBookmarkDetailStack
+                selectedBookmarkDeckIndex = entry.selectedBookmarkDeckIndex
+                selectedBookmarkFullScreenIndex = entry.selectedBookmarkFullScreenIndex
+                browserInitialUrl = entry.browserInitialUrl
+                browserCurrentUrl = entry.browserInitialUrl
+                browserPageTitle = ""
+                browserDiscoveredMedia = emptyList()
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             albumFilter != null -> {
@@ -1237,6 +1264,107 @@ fun GalleryApp() {
                     )
                     Destination.ABOUT -> AboutScreen(
                         onBack = { performBackNavigation() }
+                    )
+                    Destination.POCKET -> PocketScreen(
+                        topContentPadding = topContentPadding,
+                        bottomContentPadding = bottomContentPadding,
+                        onMenuClick = { showSidePanel = true },
+                        onOpenDiscoveredMedia = { performBackNavigation() },
+                        onOpenBookmarkDetail = { stack ->
+                            navigateTo(
+                                dest = Destination.BOOKMARK_DETAIL,
+                                rememberPrevious = true,
+                                newSelectedBookmarkDetailStack = stack,
+                                newSelectedBookmarkDeckIndex = 0,
+                                newSelectedBookmarkFullScreenIndex = null
+                            )
+                        }
+                    )
+                    Destination.BOOKMARK_DETAIL -> {
+                        val stack = selectedBookmarkDetailStack
+                        if (stack == null) {
+                            Box(Modifier.fillMaxSize())
+                        } else {
+                            BookmarkDetailScreen(
+                                stack = stack,
+                                onBack = { performBackNavigation() },
+                                onOpenBrowser = { url ->
+                                    navigateTo(
+                                        dest = Destination.BROWSER,
+                                        rememberPrevious = true,
+                                        newBrowserInitialUrl = url
+                                    )
+                                },
+                                onDelete = {
+                                    pocketRepository.deleteBookmark(stack.id)
+                                    performBackNavigation()
+                                },
+                                onRefreshMetadata = {
+                                    pocketRepository.refreshMetadata(stack.id, context)
+                                },
+                                onFetchSiteMedia = {
+                                    pocketRepository.fetchSiteMedia(stack.id, context)
+                                },
+                                initialDeckIndex = selectedBookmarkDeckIndex,
+                                initialFullScreenMediaIndex = selectedBookmarkFullScreenIndex,
+                                onViewerStateChanged = { deckIndex, fullScreenIndex ->
+                                    selectedBookmarkDeckIndex = deckIndex
+                                    selectedBookmarkFullScreenIndex = fullScreenIndex
+                                }
+                            )
+                        }
+                    }
+                    Destination.BROWSER -> DirectBrowserView(
+                        initialUrl = browserInitialUrl,
+                        onClose = { performBackNavigation() },
+                        onUrlChange = {
+                            browserInitialUrl = it
+                            browserCurrentUrl = it
+                        },
+                        onPageTitleChanged = { browserPageTitle = it },
+                        discoveredCount = browserDiscoveredMedia.size,
+                        onMediaExtracted = { item ->
+                            browserDiscoveredMedia = (browserDiscoveredMedia + item).distinctBy { it.url }
+                        },
+                        onBatchExtracted = { items, title, _ ->
+                            browserDiscoveredMedia = (browserDiscoveredMedia + items).distinctBy { it.url }
+                            if (!title.isNullOrBlank()) browserPageTitle = title
+                        },
+                        onSwitchToMediaTab = {
+                            val sourceUrl = browserCurrentUrl.ifBlank { browserInitialUrl }
+                            if (sourceUrl.isNotBlank()) {
+                                val initialItems = browserDiscoveredMedia.map { item ->
+                                    MediaInboxItem(
+                                        id = item.id,
+                                        title = item.title,
+                                        localUri = "",
+                                        sourceUrl = item.url,
+                                        isVideo = item.isVideo,
+                                        isAudio = item.isAudio,
+                                        isStream = item.isStream,
+                                        format = item.format,
+                                        sizeBytes = item.sizeBytes ?: 0L,
+                                        width = item.width ?: 0,
+                                        height = item.height ?: 0
+                                    )
+                                }
+                                val saved = pocketRepository.addBookmark(
+                                    title = browserPageTitle.ifBlank { sourceUrl },
+                                    url = sourceUrl,
+                                    initialItems = initialItems,
+                                    autoFetchMetadata = false
+                                )
+                                navigateTo(
+                                    dest = Destination.BOOKMARK_DETAIL,
+                                    rememberPrevious = true,
+                                    newSelectedBookmarkDetailStack = saved,
+                                    newSelectedBookmarkDeckIndex = 0,
+                                    newSelectedBookmarkFullScreenIndex = null
+                                )
+                            } else {
+                                navigateTo(Destination.POCKET)
+                            }
+                        }
                     )
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,

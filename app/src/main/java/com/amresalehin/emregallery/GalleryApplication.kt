@@ -8,6 +8,7 @@ import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
+import com.amresalehin.emregallery.data.VaultImageFetcher
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.Dispatchers
 import java.io.File
@@ -46,6 +47,7 @@ class GalleryApplication : Application() {
                     .build()
             }
             .components {
+                add(VaultImageFetcher.Factory(this@GalleryApplication))
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
             }

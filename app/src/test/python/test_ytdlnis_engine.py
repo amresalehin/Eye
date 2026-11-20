@@ -81,6 +81,39 @@ class TestYtdlnisEngine(unittest.TestCase):
         )
         self.assertEqual(opts["format"], "bestvideo[height<=4320]+bestaudio/best[height<=4320]/best")
 
+    def test_android_format_selection_splits_combined_format_id(self):
+        opts = {"format": "137+140/best"}
+        audio_ids = ytdlnis_engine.prepare_android_format_selection(
+            opts, "137+140", [], video_only=False, max_height=0
+        )
+        self.assertEqual(opts["format"], "137/bestvideo/best")
+        self.assertEqual(audio_ids, ["140"])
+        self.assertNotIn("+", opts["format"])
+
+    def test_android_format_selection_preserves_explicit_audio_tracks(self):
+        opts = {"format": "bestvideo+bestaudio/best"}
+        audio_ids = ytdlnis_engine.prepare_android_format_selection(
+            opts, "137+140", ["251", "140"], video_only=False, max_height=4320
+        )
+        self.assertEqual(opts["format"], "137/bestvideo/best")
+        self.assertEqual(audio_ids, ["251", "140"])
+
+    def test_android_format_selection_video_only_discards_combined_audio(self):
+        opts = {"format": "bestvideo+bestaudio/best"}
+        audio_ids = ytdlnis_engine.prepare_android_format_selection(
+            opts, "137+140", [], video_only=True, max_height=4320
+        )
+        self.assertEqual(opts["format"], "137/bestvideo/best")
+        self.assertEqual(audio_ids, [])
+
+    def test_android_format_selection_uses_quality_cap_without_explicit_format(self):
+        opts = {"format": "bestvideo+bestaudio/best"}
+        audio_ids = ytdlnis_engine.prepare_android_format_selection(
+            opts, "best", [], video_only=False, max_height=4320
+        )
+        self.assertEqual(opts["format"], "bestvideo[height<=4320]/bestvideo/best")
+        self.assertEqual(audio_ids, [])
+
     def test_build_ytdlp_options_audio_mode(self):
         cfg = {
             "type": "audio",

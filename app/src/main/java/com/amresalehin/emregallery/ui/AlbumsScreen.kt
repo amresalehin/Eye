@@ -254,7 +254,7 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // Browser is a compact Album shortcut, separate from the Downloader Inbox.
+            // Browser and Archive are compact shortcuts, separate from the Downloader Inbox.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -268,7 +268,15 @@ fun AlbumsScreen(
                     onClick = { onOpenBrowser?.invoke() },
                     modifier = Modifier.weight(1f).testTag("albums_browser_tile")
                 )
-                Spacer(Modifier.weight(1f))
+                CollectionTile(
+                    title = "Archive",
+                    count = "$archiveCount items",
+                    icon = Icons.Default.Archive,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Archive") },
+                    modifier = Modifier.weight(1f).testTag("albums_archive_tile")
+                )
             }
         }
 

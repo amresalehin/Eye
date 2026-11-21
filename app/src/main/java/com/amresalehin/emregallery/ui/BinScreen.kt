@@ -14,6 +14,15 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -43,6 +52,25 @@ import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.MediaItem
 
+/**
+ * Filters Bin contents by filename, path, URI, MIME type, and media kind.
+ * An empty query preserves the original item order.
+ */
+fun filterBinItems(items: List<MediaItem>, query: String): List<MediaItem> {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isEmpty()) return items
+
+    return items.filter { item ->
+        listOf(
+            item.name,
+            item.relativePath,
+            item.uri,
+            item.mimeType.orEmpty(),
+            if (item.isVideo) "video" else "image"
+        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BinScreen(
@@ -57,15 +85,34 @@ fun BinScreen(
     onDeletePermanentlyBatch: (List<MediaItem>) -> Unit,
     onEmptyBin: (List<MediaItem>) -> Unit
 ) {
-    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchFocused by remember { mutableStateOf(false) }
     var confirmEmptyBin by remember { mutableStateOf(false) }
     var itemToPermanentlyDelete by remember { mutableStateOf<MediaItem?>(null) }
     var confirmBatchDeletePermanently by remember { mutableStateOf(false) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     val selectionMode = selectedUris.isNotEmpty()
+    val visibleItems = remember(items, searchQuery) { filterBinItems(items, searchQuery) }
+    val visibleUris = remember(visibleItems) { visibleItems.map { it.uri }.toSet() }
+    val allVisibleItemsSelected = visibleUris.isNotEmpty() && visibleUris.all { it in selectedUris }
 
-    BackHandler(enabled = selectionMode) {
-        selectedUris = emptySet()
+    fun handleBack() {
+        when {
+            selectionMode -> selectedUris = emptySet()
+            isSearchFocused || searchQuery.isNotEmpty() -> {
+                searchQuery = ""
+                isSearchFocused = false
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+            else -> onBack()
+        }
+    }
+
+    BackHandler(enabled = selectionMode || isSearchFocused || searchQuery.isNotEmpty()) {
+        handleBack()
     }
 
     Column(
@@ -73,54 +120,117 @@ fun BinScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Top App Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Row(
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 4.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .height(52.dp)
+                    .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
+                    .testTag("bin_search_bar")
             ) {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("bin_back_button")) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back to Albums")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Bin",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "${items.size} ${if (items.size == 1) "item" else "items"} · Restore or delete permanently",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                FilledTonalButton(
-                    onClick = { confirmEmptyBin = true },
-                    enabled = items.isNotEmpty(),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("bin_empty_button")
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Empty bin", style = MaterialTheme.typography.labelMedium)
+                    IconButton(
+                        onClick = ::handleBack,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("bin_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (selectionMode) "Exit selection" else "Back to Albums",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 4.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search bin",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                }
+                            ),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { focusState ->
+                                    isSearchFocused = focusState.isFocused
+                                }
+                                .testTag("bin_search_input")
+                        )
+                    }
+
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("bin_search_clear_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear search",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { confirmEmptyBin = true },
+                        enabled = items.isNotEmpty(),
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("bin_empty_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteForever,
+                            contentDescription = "Empty bin",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
         }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
         // Selection Action Bar
         AnimatedVisibility(
@@ -148,10 +258,17 @@ fun BinScreen(
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = {
-                        selectedUris = if (selectedUris.size == items.size) emptySet() else items.map { it.uri }.toSet()
-                    }) {
-                        Text(if (selectedUris.size == items.size) "Deselect all" else "Select all")
+                    TextButton(
+                        onClick = {
+                            selectedUris = if (allVisibleItemsSelected) {
+                                selectedUris - visibleUris
+                            } else {
+                                selectedUris + visibleUris
+                            }
+                        },
+                        enabled = visibleUris.isNotEmpty()
+                    ) {
+                        Text(if (allVisibleItemsSelected) "Deselect all" else "Select all")
                     }
                     FilledTonalButton(
                         onClick = {
@@ -178,6 +295,7 @@ fun BinScreen(
                 }
             }
         }
+
         val hapticFeedback = LocalHapticFeedback.current
         val pullRefreshState = rememberPullToRefreshState()
 
@@ -197,77 +315,108 @@ fun BinScreen(
                 )
             }
         ) {
-            if (items.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.size(92.dp)
+            when {
+                items.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Outlined.DeleteOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(92.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.DeleteOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(20.dp))
+                            Text(
+                                "Bin is empty",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Photos and videos you move to the Bin will appear here. You can restore them or permanently remove them from your device.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
-                    Spacer(Modifier.height(20.dp))
-                    Text(
-                        "Bin is empty",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Photos and videos you move to the Bin will appear here. You can restore them or permanently remove them from your device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
                 }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 32.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                gridItems(items, key = { it.uri }) { item ->
-                    val isSelected = item.uri in selectedUris
-                    BinItemCard(
-                        item = item,
-                        isSelected = isSelected,
-                        selectionMode = selectionMode,
-                        onOpen = {
-                            if (selectionMode) {
-                                selectedUris = if (isSelected) selectedUris - item.uri else selectedUris + item.uri
-                            } else {
-                                onOpen(item)
-                            }
-                        },
-                        onLongPress = {
-                            selectedUris = selectedUris + item.uri
-                        },
-                        onRestore = { onRestore(item) },
-                        onDeletePermanently = { itemToPermanentlyDelete = item }
-                    )
+
+                visibleItems.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                "No matching items",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Try a different name, file type, or path.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 32.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        gridItems(visibleItems, key = { it.uri }) { item ->
+                            val isSelected = item.uri in selectedUris
+                            BinItemCard(
+                                item = item,
+                                isSelected = isSelected,
+                                selectionMode = selectionMode,
+                                onOpen = {
+                                    if (selectionMode) {
+                                        selectedUris = if (isSelected) selectedUris - item.uri else selectedUris + item.uri
+                                    } else {
+                                        onOpen(item)
+                                    }
+                                },
+                                onLongPress = {
+                                    selectedUris = selectedUris + item.uri
+                                },
+                                onRestore = { onRestore(item) },
+                                onDeletePermanently = { itemToPermanentlyDelete = item }
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
     }
 
     // Confirmation dialog: Empty entire bin
@@ -350,7 +499,6 @@ fun BinScreen(
         )
     }
 }
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BinItemCard(

@@ -219,148 +219,143 @@ fun DownloaderSearchMainPage(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Keep navigation separate from the URL field so the search surface stays uncluttered.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 4.dp,
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("downloader_main_search_card")
         ) {
-            IconButton(
-                onClick = {
-                    if (isSearchFocused || urlInput.isNotEmpty()) {
-                        urlInput = ""
-                        isSearchFocused = false
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                    } else {
-                        onBack()
-                    }
-                },
+            Row(
                 modifier = Modifier
-                    .size(40.dp)
-                    .testTag("downloader_main_back_btn")
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(52.dp)
-                    .testTag("downloader_main_search_card")
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(vertical = 4.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (urlInput.isEmpty()) {
-                            Text(
-                                text = "Paste link or enter URL",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                IconButton(
+                    onClick = {
+                        if (isSearchFocused || urlInput.isNotEmpty()) {
+                            urlInput = ""
+                            isSearchFocused = false
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                        } else {
+                            onBack()
                         }
-                        BasicTextField(
-                            value = urlInput,
-                            onValueChange = { urlInput = it },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Go
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onGo = {
-                                    if (urlInput.isNotBlank()) submitSearch(urlInput)
-                                }
-                            ),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onFocusChanged { focusState ->
-                                    isSearchFocused = focusState.isFocused
-                                }
-                                .testTag("downloader_main_url_input")
+                    },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("downloader_main_back_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 4.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (urlInput.isEmpty()) {
+                        Text(
+                            text = "Paste link or enter URL",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    AnimatedContent(
-                        targetState = urlInput.isNotBlank(),
-                        transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
-                        label = "search_bar_actions"
-                    ) { hasQuery ->
-                        if (hasQuery) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                IconButton(
-                                    onClick = { urlInput = "" },
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .testTag("downloader_clear_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { submitSearch(urlInput) },
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .testTag("downloader_action_download_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDownward,
-                                        contentDescription = "Download media from URL",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                    BasicTextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Go
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onGo = {
+                                if (urlInput.isNotBlank()) submitSearch(urlInput)
                             }
-                        } else {
+                        ),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { focusState ->
+                                isSearchFocused = focusState.isFocused
+                            }
+                            .testTag("downloader_main_url_input")
+                    )
+                }
+
+                AnimatedContent(
+                    targetState = urlInput.isNotBlank(),
+                    transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
+                    label = "search_bar_actions"
+                ) { hasQuery ->
+                    if (hasQuery) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
                             IconButton(
-                                onClick = {
-                                    val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
-                                    if (clipText.isNotBlank()) {
-                                        urlInput = clipText
-                                        submitSearch(clipText)
-                                    }
-                                },
+                                onClick = { urlInput = "" },
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("downloader_paste_btn")
+                                    .size(32.dp)
+                                    .testTag("downloader_clear_btn")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ContentPaste,
-                                    contentDescription = "Paste from clipboard and fetch",
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { submitSearch(urlInput) },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("downloader_action_download_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDownward,
+                                    contentDescription = "Download media from URL",
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+                                if (clipText.isNotBlank()) {
+                                    urlInput = clipText
+                                    submitSearch(clipText)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("downloader_paste_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "Paste from clipboard and fetch",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

@@ -384,6 +384,8 @@ fun LockedFolderScreen(
                 }
             }
 
+            }
+        }
 
     // Modal Sheet for adding photos from gallery to locked folder
     if (showAddPhotosSheet) {

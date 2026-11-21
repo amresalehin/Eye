@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -133,6 +134,11 @@ fun DirectBrowserView(
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
+    val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())
+    val currentSiteDomain = remember(currentUrl) {
+        runCatching { URL(currentUrl).host.removePrefix("www.").lowercase() }.getOrDefault("")
+    }
+    val currentSiteIsSaved = savedSites.any { it.domain.equals(currentSiteDomain, ignoreCase = true) }
 
     val seenRawUrls = remember { ConcurrentHashMap.newKeySet<String>() }
     val pendingCandidateChannel = remember { Channel<PendingBrowserMediaCandidate>(capacity = 512) }
@@ -535,6 +541,31 @@ fun DirectBrowserView(
                             )
 
                             DropdownMenuItem(
+                                text = { Text(if (currentSiteIsSaved) "Remove saved shortcut" else "Save to shortcuts") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (currentSiteIsSaved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank(),
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    val targetUrl = currentUrl
+                                    val targetTitle = pageTitle
+                                    coroutineScope.launch {
+                                        if (currentSiteIsSaved) {
+                                            historyManager.removeSavedSite(targetUrl)
+                                        } else {
+                                            historyManager.saveSite(targetUrl, targetTitle)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("browser_menu_save_shortcut")
+                            )
+
+                            DropdownMenuItem(
                                 text = { Text("Home") },
                                 leadingIcon = {
                                     Icon(
@@ -548,6 +579,10 @@ fun DirectBrowserView(
                                     currentUrl = ""
                                     addressInput = ""
                                     pageTitle = ""
+                                    lastRecordedHistoryUrl = ""
+                                    pendingDomScanJob?.cancel()
+                                    lastScannedDomUrl = ""
+                                    seenRawUrls.clear()
                                     onUrlChange?.invoke("")
                                     webViewInstance?.loadUrl("about:blank")
                                 },
@@ -962,6 +997,9 @@ fun DirectBrowserView(
                         onNavigate = { target ->
                             navigateToUrl(target)
                         },
+                        onRemoveSavedSite = { site ->
+                            coroutineScope.launch { historyManager.removeSavedSite(site.url) }
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface)
@@ -974,240 +1012,310 @@ fun DirectBrowserView(
 }
 
 /**
- * Clean empty home page displayed when the browser is opened without a URL.
- * Offers a clean interface and quick shortcuts without loading 3rd-party search pages.
+ * Browser home content. The fixed toolbar above this page is the single URL/search field.
  */
 @Composable
 fun BrowserEmptyHomePage(
     onNavigate: (String) -> Unit,
+    onRemoveSavedSite: (BrowserSite) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val historyManager = remember { BrowserHistoryManager(context) }
     val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
+    val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())
 
-    val topVisitedSites = remember(allHistorySites) {
-        if (allHistorySites.isNotEmpty()) {
-            allHistorySites.sortedByDescending { it.visitCount }.take(5)
-        } else {
-            historyManager.defaultTopSites
-        }
+    val shortcutSites = remember(allHistorySites) {
+        allHistorySites.sortedWith(
+            compareByDescending<BrowserSite> { it.visitCount }
+                .thenByDescending { it.lastVisitedMillis }
+        ).take(5)
     }
-
     val recentSites = remember(allHistorySites) {
-        if (allHistorySites.isNotEmpty()) {
-            allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(5)
-        } else {
-            historyManager.defaultTopSites.take(5)
-        }
+        allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(8)
     }
 
-    var homeSearchInput by remember { mutableStateOf("") }
-
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        contentAlignment = Alignment.Center
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalAlignment = Alignment.Start
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 440.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            // 1. Prominent Search / URL Input Bar
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 4.dp,
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("home_page_search_bar")
+        if (savedSites.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        "Saved",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    Text(
+                        "${savedSites.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
-                    Spacer(Modifier.width(10.dp))
-
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (homeSearchInput.isEmpty()) {
-                            Text(
-                                text = "Search or type URL",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                fontSize = 14.sp
-                            )
-                        }
-                        BasicTextField(
-                            value = homeSearchInput,
-                            onValueChange = { homeSearchInput = it },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Go
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(savedSites, key = { it.domain }) { site ->
+                        Surface(
+                            onClick = { onNavigate(site.url) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                             ),
-                            keyboardActions = KeyboardActions(
-                                onGo = {
-                                    if (homeSearchInput.isNotBlank()) {
-                                        onNavigate(homeSearchInput)
+                            modifier = Modifier
+                                .widthIn(min = 148.dp, max = 196.dp)
+                                .testTag("browser_saved_site_${site.domain}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            site.title.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
                                 }
-                            ),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 14.sp
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        site.title.ifBlank { site.domain },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        site.domain,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onRemoveSavedSite(site) },
+                                    modifier = Modifier.size(28.dp).testTag("browser_remove_saved_${site.domain}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Remove ${site.domain} from saved shortcuts",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Shortcuts",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (shortcutSites.isEmpty()) {
+                Text(
+                    "Frequently visited sites will appear here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    items(shortcutSites, key = { it.domain }) { site ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("home_page_search_input")
-                        )
-                    }
-
-                    if (homeSearchInput.isNotEmpty()) {
-                        IconButton(
-                            onClick = { homeSearchInput = "" },
-                            modifier = Modifier.size(28.dp)
+                                .width(68.dp)
+                                .clickable { onNavigate(site.url) }
+                                .testTag("browser_shortcut_${site.domain}")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = {
-                            if (homeSearchInput.isNotBlank()) {
-                                onNavigate(homeSearchInput)
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                ),
+                                shadowElevation = 1.dp,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        site.title.ifBlank { site.domain }.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.height(34.dp).testTag("home_page_search_btn")
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "Go",
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
-
-            // 2. Top 5 Visited Sites
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                topVisitedSites.take(5).forEachIndexed { idx, site ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .width(62.dp)
-                            .clickable { onNavigate(site.url) }
-                            .testTag("top_site_$idx")
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                            shadowElevation = 2.dp,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                val initial = site.title.ifBlank { site.domain }.firstOrNull()?.uppercaseChar()?.toString() ?: "W"
-                                Text(
-                                    text = initial,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = site.title.ifBlank { site.domain },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // 3. Recent 5 Sites in Recommendation
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                recentSites.take(5).forEachIndexed { idx, site ->
-                    Surface(
-                        onClick = { onNavigate(site.url) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .height(32.dp)
-                            .testTag("recent_site_$idx")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = site.title.ifBlank { site.domain },
+                                site.title.ifBlank { site.domain },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
                 }
             }
         }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Recently visited",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (recentSites.isNotEmpty()) {
+                    Text(
+                        "${recentSites.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (recentSites.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                "No browsing history yet",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "Use the address bar above to visit your first site.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                recentSites.forEachIndexed { index, site ->
+                    Surface(
+                        onClick = { onNavigate(site.url) },
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 58.dp)
+                            .testTag("browser_recent_site_$index")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Language,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    site.title.ifBlank { site.domain },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    site.domain,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ArrowForward,
+                                contentDescription = "Open site",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
     }
 }

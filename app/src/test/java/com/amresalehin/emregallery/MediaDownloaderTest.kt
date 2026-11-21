@@ -21,6 +21,7 @@ import com.amresalehin.emregallery.ui.detectPlatform
 import com.amresalehin.emregallery.ui.NavBackStackEntry
 import com.amresalehin.emregallery.ui.passesDimensionFilter
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -1233,9 +1234,38 @@ class MediaDownloaderTest {
     fun testBrowserHistoryManagerRecordAndClear() = runBlocking {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         val historyManager = com.amresalehin.emregallery.data.BrowserHistoryManager(ctx)
-        historyManager.recordVisit("https://example.com/test", "Test Site")
+        val historyUrl = "https://history-${System.currentTimeMillis()}.example.com/test"
+        historyManager.recordVisit(historyUrl, "Test Site")
+        assertTrue(historyManager.allSites.first().any { it.url == historyUrl })
         historyManager.clearHistory()
-        assertTrue(true)
+        assertFalse(historyManager.allSites.first().any { it.url == historyUrl })
+    }
+
+    @Test
+    fun testBrowserSavedShortcutsPersistAndCanBeRemovedIndependently() = runBlocking {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val historyManager = com.amresalehin.emregallery.data.BrowserHistoryManager(ctx)
+        val savedUrl = "https://saved-${System.currentTimeMillis()}.example.com/home"
+        historyManager.saveSite(savedUrl, "Saved Site")
+
+        val saved = historyManager.savedSites.first()
+        assertTrue(saved.any { it.url == savedUrl && it.title == "Saved Site" })
+
+        historyManager.recordVisit(savedUrl, "Updated Site Title")
+        assertTrue(historyManager.savedSites.first().any { it.url == savedUrl })
+
+        historyManager.removeSavedSite(savedUrl)
+        assertFalse(historyManager.savedSites.first().any { it.url == savedUrl })
+        assertTrue(historyManager.allSites.first().any { it.url == savedUrl })
+    }
+
+    @Test
+    fun testBrowserDoesNotSaveNonWebOrBlankUrls() = runBlocking {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val historyManager = com.amresalehin.emregallery.data.BrowserHistoryManager(ctx)
+        historyManager.saveSite("about:blank", "Blank")
+        historyManager.saveSite("javascript:alert(1)", "Script")
+        assertFalse(historyManager.savedSites.first().any { it.url == "about:blank" || it.url.startsWith("javascript:") })
     }
 
     @Test

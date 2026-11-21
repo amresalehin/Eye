@@ -43,8 +43,6 @@ import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 

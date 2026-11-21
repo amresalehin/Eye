@@ -242,6 +242,8 @@ object PreparedThumbnailCache {
  */
 object ThumbnailPrewarmManager {
     private const val DISK_WORKER_COUNT = 2
+    // Bounded decoded-image window: visible rows first, followed by predictive look-ahead.
+    private const val MEMORY_WARM_WINDOW = 48
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private val memoryLock = Any()
@@ -254,9 +256,10 @@ object ThumbnailPrewarmManager {
     private val activeMemoryPrefetches = LinkedHashMap<String, Disposable>()
 
     /**
-     * Prioritizes visible thumbnails, then the complete predictive look-ahead window.
-     * Both disk preparation and Coil memory prefetch receive the full supplied range;
-     * the RAM window is intentionally not capped to an arbitrary item count.
+     * Moves the thumbnails most likely to be seen next to the front of the disk-preparation
+     * workers and warms Coil's in-memory cache for the nearest upcoming window.
+     * Stale memory prefetches outside the new window are cancelled immediately on direction
+     * changes or fast flings so decoder threads stay focused ahead of demand.
      */
     fun prioritize(
         visibleItems: List<MediaItem>,
@@ -280,6 +283,7 @@ object ThumbnailPrewarmManager {
             queuedPriorityUris.clear()
             (visible.asSequence() + lookAhead.asSequence())
                 .distinctBy { it.uri }
+                // Preserve the complete visible range plus 100 predicted rows in the disk queue.
                 .forEach { item ->
                     if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
                 }
@@ -287,9 +291,9 @@ object ThumbnailPrewarmManager {
     }
 
     /**
-     * Visible cells already own their Coil requests. Keep them in the retained window so
-     * their entries are not cancelled, but enqueue only the complete look-ahead range.
-     * Coil's configured memory cache remains responsible for its normal LRU eviction.
+     * Keep in-flight work for visible and upcoming items, but only enqueue speculative items.
+     * Visible AsyncImage composables already own their requests; duplicating them here would
+     * contend for the same URI lock and decode the same prepared file twice.
      */
     private fun warmMemoryCache(
         context: Context,
@@ -299,13 +303,16 @@ object ThumbnailPrewarmManager {
         val imageLoader = runCatching { Coil.imageLoader(context) }.getOrNull() ?: return
         val visible = visibleItems.distinctBy { it.uri }
         val visibleUris = visible.mapTo(HashSet(visible.size)) { it.uri }
-        val retainedUris = (visible + lookAheadItems)
-            .asSequence()
-            .map { it.uri }
-            .toHashSet()
+        val retainedTargets = (visible + lookAheadItems)
+            .distinctBy { it.uri }
+            .take(MEMORY_WARM_WINDOW)
+        val retainedUris = retainedTargets.mapTo(HashSet(retainedTargets.size)) { it.uri }
+        val prefetchCapacity = (MEMORY_WARM_WINDOW - visible.size).coerceAtLeast(0)
         val prefetchTargets = lookAheadItems.asSequence()
             .filterNot { it.uri in visibleUris }
             .distinctBy { it.uri }
+            .take(prefetchCapacity)
+            .toList()
 
         synchronized(memoryLock) {
             val iterator = activeMemoryPrefetches.entries.iterator()
@@ -332,8 +339,9 @@ object ThumbnailPrewarmManager {
         appContext = ctx
         val uris = media.map { it.uri }
 
-        // Wait for HomeScreen's layout so memory warming follows the actual visible rows
-        // and their matching 100-row directional look-ahead instead of warming library order.
+        if (media.isNotEmpty()) {
+            warmMemoryCache(ctx, emptyList(), media)
+        }
 
         synchronized(lock) {
             if (uris.isEmpty()) {
@@ -348,6 +356,7 @@ object ThumbnailPrewarmManager {
             if (activeUris == uris && worker?.isActive == true) return
             if (completedUris == uris) return
 
+            // Preserve any pending prioritized items that are still in the updated media list.
             val preservedPriorities = if (priorityQueue.isNotEmpty()) {
                 val uriSet = uris.toHashSet()
                 priorityQueue.filter { it.uri in uriSet }
@@ -406,6 +415,7 @@ object ThumbnailPrewarmManager {
                                     }
                                 }
                                 processedCount++
+                                // Regularly yield so visible requests and other IO work can run promptly.
                                 if (processedCount % 8 == 0) yield()
                             }
                         }

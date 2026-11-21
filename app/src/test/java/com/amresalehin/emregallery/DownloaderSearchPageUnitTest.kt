@@ -11,6 +11,7 @@ import com.amresalehin.emregallery.ui.Destination
 import com.amresalehin.emregallery.ui.DetectedPlatform
 import com.amresalehin.emregallery.ui.DownloaderViewMode
 import com.amresalehin.emregallery.ui.detectPlatform
+import com.amresalehin.emregallery.ui.filterDownloadActivityItems
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -494,6 +495,46 @@ class DownloaderSearchPageUnitTest {
         val eightPointNineSpeed = (8.90 * 1024 * 1024).toLong()
         assertEquals("8.90MB/s", DownloadActivityManager.formatSpeed(eightPointNineSpeed))
         assertEquals("0.00MB/s", DownloadActivityManager.formatSpeed(0L))
+    }
+
+    @Test
+    fun testActivitySearchMatchesTitleSourceFormatAndError() {
+        val titleMatch = DownloadActivityItem(
+            id = "title_match",
+            title = "Mountain Sunrise.mp4",
+            mediaUrl = "https://cdn.example.com/mountain-sunrise.mp4",
+            sourceDomain = "youtube.com",
+            format = "MP4",
+            status = DownloadActivityStatus.FINISHED
+        )
+        val sourceMatch = DownloadActivityItem(
+            id = "source_match",
+            title = "Saved image",
+            mediaUrl = "https://images.example.com/photo.webp",
+            sourceDomain = "pinterest.com",
+            format = "WEBP",
+            status = DownloadActivityStatus.FAILED,
+            errorMessage = "HTTP 429: Too many requests"
+        )
+        val errorMatch = DownloadActivityItem(
+            id = "error_match",
+            title = "Unknown file",
+            mediaUrl = "https://files.example.com/file.bin",
+            format = "BIN",
+            status = DownloadActivityStatus.FAILED,
+            errorMessage = "Could not decode response"
+        )
+        val activities = listOf(titleMatch, sourceMatch, errorMatch, titleMatch)
+
+        assertEquals(listOf("title_match"), filterDownloadActivityItems(activities, "mountain").map { it.id })
+        assertEquals(listOf("source_match"), filterDownloadActivityItems(activities, "PINTEREST").map { it.id })
+        assertEquals(listOf("source_match"), filterDownloadActivityItems(activities, "webp").map { it.id })
+        assertEquals(listOf("source_match"), filterDownloadActivityItems(activities, "429").map { it.id })
+        assertEquals(listOf("error_match"), filterDownloadActivityItems(activities, "could not decode").map { it.id })
+        assertEquals(
+            listOf("title_match", "source_match", "error_match"),
+            filterDownloadActivityItems(activities, "").map { it.id }
+        )
     }
 
     @Test

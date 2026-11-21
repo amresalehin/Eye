@@ -15,6 +15,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -75,6 +81,31 @@ fun getDisplayFormatBadge(item: DownloadActivityItem): String {
         item.isVideo -> "MP4"
         item.isAudio -> "MP3"
         else -> "JPG"
+    }
+}
+
+/**
+ * Filters download history by visible and diagnostic metadata.
+ * An empty query returns the deduplicated activity list unchanged.
+ */
+fun filterDownloadActivityItems(
+    items: List<DownloadActivityItem>,
+    query: String
+): List<DownloadActivityItem> {
+    val normalizedQuery = query.trim()
+    return items.distinctBy { it.id }.filter { item ->
+        normalizedQuery.isEmpty() || listOf(
+            item.title,
+            item.mediaUrl,
+            item.thumbnailUrl.orEmpty(),
+            item.localUri.orEmpty(),
+            item.sourceDomain.orEmpty(),
+            item.sourceUrl.orEmpty(),
+            item.stackTitle.orEmpty(),
+            item.format,
+            item.status.name,
+            item.errorMessage.orEmpty()
+        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
     }
 }
 
@@ -436,20 +467,13 @@ private fun ActivityThumbnailBox(
 }
 
 /**
- * Activity Page matching image_ae11436d.png with various controls:
- * - Top bar with Back arrow and Tune/controls button
- * - Filter pills: All, Downloading (X), Failed (Y), Finished (Z)
- * - Section for active downloads (progress bar, speed, pause/resume)
- * - Section for failed downloads (error reason, retry, delete)
- * - Section for past downloads (finished items with green checkmark, size, timestamp)
- * - Floating action button '+' on bottom right
- * - Modal bottom sheet with global controls (retry all, cancel all, clear history)
+ * Activity page with an integrated search/controls bar, status filters, download history,
+ * and a modal sheet for global actions (retry all, cancel all, clear history).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloaderActivityPage(
     onBack: () -> Unit,
-    onAddNewDownload: () -> Unit,
     onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
     showBackButton: Boolean = true,
     modifier: Modifier = Modifier
@@ -463,6 +487,8 @@ fun DownloaderActivityPage(
     val activities by DownloadActivityManager.activities.collectAsState()
 
     var selectedFilter by rememberSaveable { mutableStateOf("All") }
+    var activitySearchQuery by rememberSaveable { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
     var showControlsSheet by remember { mutableStateOf(false) }
 
     var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -477,22 +503,25 @@ fun DownloaderActivityPage(
 
     BackHandler { onBack() }
 
-    val downloadingItems = remember(activities) {
-        activities.filter { it.isDownloading || it.isPaused || it.isRetrying }.distinctBy { it.id }
+    val matchingActivities = remember(activities, activitySearchQuery) {
+        filterDownloadActivityItems(activities, activitySearchQuery)
     }
-    val failedItems = remember(activities) {
-        activities.filter { it.isFailed }.distinctBy { it.id }
+    val downloadingItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isDownloading || it.isPaused || it.isRetrying }
     }
-    val finishedItems = remember(activities) {
-        activities.filter { it.isFinished }.distinctBy { it.id }
+    val failedItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isFailed }
+    }
+    val finishedItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isFinished }
     }
 
-    val filteredList = remember(activities, selectedFilter, downloadingItems, failedItems, finishedItems) {
+    val filteredList = remember(matchingActivities, selectedFilter, downloadingItems, failedItems, finishedItems) {
         when (selectedFilter) {
             "Downloading" -> downloadingItems
             "Failed" -> failedItems
             "Finished" -> finishedItems
-            else -> activities.distinctBy { it.id }
+            else -> matchingActivities
         }
     }
 
@@ -509,14 +538,14 @@ fun DownloaderActivityPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (showBackButton) {
                         IconButton(
                             onClick = onBack,
-                            modifier = Modifier.size(44.dp).testTag("activity_back_btn")
+                            modifier = Modifier.size(40.dp).testTag("activity_back_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -524,48 +553,95 @@ fun DownloaderActivityPage(
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    } else {
-                        Text(
-                            text = "Activity",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 12.dp).weight(1f)
-                        )
                     }
 
-                    IconButton(
-                        onClick = { showControlsSheet = true },
-                        modifier = Modifier.size(44.dp).testTag("activity_controls_tune_btn")
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .testTag("activity_search_bar")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = "Activity Controls",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 14.dp, end = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (activitySearchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search activity...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = activitySearchQuery,
+                                    onValueChange = { activitySearchQuery = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        keyboardController?.hide()
+                                    }),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("activity_search_input")
+                                )
+                            }
+
+                            if (activitySearchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { activitySearchQuery = "" },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("activity_search_clear_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { showControlsSheet = true },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("activity_controls_tune_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Activity Controls",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
                 }
             }
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddNewDownload,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = CircleShape,
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .padding(bottom = 12.dp, end = 6.dp)
-                    .size(56.dp)
-                    .testTag("activity_fab_add")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Download",
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -712,18 +788,26 @@ fun DownloaderActivityPage(
                             modifier = Modifier.size(52.dp)
                         )
                         Text(
-                            text = when (selectedFilter) {
-                                "Downloading" -> "No active downloads"
-                                "Failed" -> "No failed downloads"
-                                "Finished" -> "No past downloads"
-                                else -> "No download activity yet"
+                            text = if (activitySearchQuery.isNotBlank()) {
+                                "No matching downloads"
+                            } else {
+                                when (selectedFilter) {
+                                    "Downloading" -> "No active downloads"
+                                    "Failed" -> "No failed downloads"
+                                    "Finished" -> "No past downloads"
+                                    else -> "No download activity yet"
+                                }
                             },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Add media links to start downloading.",
+                            text = if (activitySearchQuery.isNotBlank()) {
+                                "Try another title, site, or format."
+                            } else {
+                                "Add media links to start downloading."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

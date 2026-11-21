@@ -499,7 +499,6 @@ fun MediaInboxScreen(
                         tabStateHolder.SaveableStateProvider("downloader_activity") {
                         DownloaderActivityPage(
                             onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                            onAddNewDownload = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
                             onOpenMedia = { item ->
                                 item.localUri?.let { uriStr ->
                                     onOpenMediaItem?.invoke(uriStr)

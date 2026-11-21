@@ -44,6 +44,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -1013,6 +1017,64 @@ fun DirectBrowserView(
 }
 
 /**
+ * Builds the same host-based favicon URL used by the downloader's recent-site list.
+ * Invalid or empty hosts return an empty URL so the UI can render its text fallback.
+ */
+fun browserFaviconUrl(domain: String): String {
+    val host = domain.trim().removePrefix("www.").lowercase()
+    if (host.isBlank() || host.any { it.isWhitespace() || it in "/?#@" }) return ""
+    return "https://www.google.com/s2/favicons?domain=$host&sz=128"
+}
+
+/**
+ * Shared browser-home favicon renderer. The site's initial stays visible while the
+ * remote icon loads and remains as a fallback if the favicon request fails.
+ */
+@Composable
+private fun BrowserHomeFavicon(
+    site: BrowserSite,
+    modifier: Modifier = Modifier,
+    iconPadding: Dp = 6.dp
+) {
+    val context = LocalContext.current
+    val faviconUrl = remember(site.domain) { browserFaviconUrl(site.domain) }
+    var faviconFailed by remember(faviconUrl) {
+        mutableStateOf(faviconUrl.isBlank())
+    }
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = site.title.ifBlank { site.domain }
+                .firstOrNull()?.uppercaseChar()?.toString() ?: "W",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1
+        )
+
+        if (!faviconFailed) {
+            AsyncImage(
+                model = remember(faviconUrl, context) {
+                    ImageRequest.Builder(context)
+                        .data(faviconUrl)
+                        .crossfade(true)
+                        .listener(onError = { _, _ -> faviconFailed = true })
+                        .build()
+                },
+                contentDescription = "${site.title.ifBlank { site.domain }} favicon",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(iconPadding),
+                contentScale = ContentScale.Fit
+            )
+        }
+    }
+}
+
+/**
  * Browser home content. The fixed toolbar above this page is the single URL/search field.
  */
 @Composable
@@ -1093,14 +1155,11 @@ fun BrowserEmptyHomePage(
                                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                     modifier = Modifier.size(34.dp)
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            site.title.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                                    BrowserHomeFavicon(
+                                        site = site,
+                                        modifier = Modifier.fillMaxSize(),
+                                        iconPadding = 5.dp
+                                    )
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -1175,14 +1234,11 @@ fun BrowserEmptyHomePage(
                                 shadowElevation = 1.dp,
                                 modifier = Modifier.size(48.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        site.title.ifBlank { site.domain }.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                                BrowserHomeFavicon(
+                                    site = site,
+                                    modifier = Modifier.fillMaxSize(),
+                                    iconPadding = 8.dp
+                                )
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(
@@ -1279,14 +1335,11 @@ fun BrowserEmptyHomePage(
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 modifier = Modifier.size(38.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Language,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                }
+                                BrowserHomeFavicon(
+                                    site = site,
+                                    modifier = Modifier.fillMaxSize(),
+                                    iconPadding = 8.dp
+                                )
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(

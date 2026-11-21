@@ -295,203 +295,192 @@ fun DirectBrowserView(
             .testTag("direct_browser_view")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Browser Navigation and Address Bar
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth().statusBarsPadding()
+            // Full-width browser search pill, matching the app's standard top-bar treatment.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Row(
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .height(52.dp)
+                        .testTag("browser_search_bar")
                 ) {
-                    if (onClose != null) {
-                        IconButton(
-                            onClick = onClose,
-                            modifier = Modifier.size(36.dp).testTag("browser_close_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close browser",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    // Navigation Controls: Back & Forward
-                    IconButton(
-                        onClick = { webViewInstance?.goBack() },
-                        enabled = canGoBack,
-                        modifier = Modifier.size(34.dp).testTag("browser_back_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (canGoBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { webViewInstance?.goForward() },
-                        enabled = canGoForward,
-                        modifier = Modifier.size(34.dp).testTag("browser_forward_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Forward",
-                            tint = if (canGoForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Interactive, Editable URL and Search Bar
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(38.dp)
-                            .testTag("browser_address_bar")
+                            .fillMaxSize()
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
-                            Icon(
-                                imageVector = if (isSecure) Icons.Default.Lock else if (currentUrl.isNotBlank()) Icons.Default.Language else Icons.Default.Search,
-                                contentDescription = null,
-                                tint = if (isSecure) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
-
-                            Spacer(Modifier.width(6.dp))
-
-                            Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.CenterStart
+                        if (onClose != null) {
+                            IconButton(
+                                onClick = onClose,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("browser_close_btn")
                             ) {
-                                if (addressInput.isEmpty()) {
-                                    Text(
-                                        text = "Search or type URL",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        fontSize = 13.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                BasicTextField(
-                                    value = addressInput,
-                                    onValueChange = { addressInput = it },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Uri,
-                                        imeAction = ImeAction.Go
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onGo = {
-                                            navigateToUrl(addressInput)
-                                        }
-                                    ),
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 13.sp
-                                    ),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .onFocusChanged { focusState ->
-                                            isAddressBarFocused = focusState.isFocused
-                                            onAddressBarFocusChanged?.invoke(focusState.isFocused)
-                                        }
-                                        .testTag("browser_address_input")
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to app",
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
+                        } else {
+                            IconButton(
+                                onClick = { webViewInstance?.goBack() },
+                                enabled = canGoBack,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("browser_back_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = if (canGoBack) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                )
+                            }
+                        }
 
-                            if (addressInput.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { addressInput = "" },
-                                    modifier = Modifier.size(22.dp)
+                        // URL and search input are integrated directly into the same pill.
+                        val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
+                        Icon(
+                            imageVector = if (isSecure) Icons.Default.Lock
+                            else if (currentUrl.isNotBlank()) Icons.Default.Language
+                            else Icons.Default.Search,
+                            contentDescription = null,
+                            tint = if (isSecure) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(7.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (addressInput.isEmpty()) {
+                                Text(
+                                    text = "Search or type URL",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = addressInput,
+                                onValueChange = { addressInput = it },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Uri,
+                                    imeAction = ImeAction.Go
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onGo = { navigateToUrl(addressInput) }
+                                ),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { focusState ->
+                                        isAddressBarFocused = focusState.isFocused
+                                        onAddressBarFocusChanged?.invoke(focusState.isFocused)
+                                    }
+                                    .testTag("browser_address_input")
+                            )
+                        }
+
+                        if (addressInput.isNotEmpty()) {
+                            IconButton(
+                                onClick = { addressInput = "" },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("browser_address_clear_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear address",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { navigateToUrl(addressInput) },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("browser_go_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Go",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                if (isLoading) webViewInstance?.stopLoading()
+                                else webViewInstance?.reload()
+                            },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("browser_refresh_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
+                                contentDescription = if (isLoading) "Stop" else "Reload",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        if (discoveredCount > 0) {
+                            Surface(
+                                onClick = onSwitchToMediaTab,
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .testTag("browser_media_badge_top")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        imageVector = Icons.Default.PermMedia,
+                                        contentDescription = "Discovered media",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                         modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "$discoveredCount",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
                             }
-
-                            IconButton(
-                                onClick = { navigateToUrl(addressInput) },
-                                modifier = Modifier.size(24.dp).testTag("browser_go_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "Go",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
                         }
-                    }
-
-                    // Reload / Stop button
-                    IconButton(
-                        onClick = {
-                            if (isLoading) {
-                                webViewInstance?.stopLoading()
-                            } else {
-                                webViewInstance?.reload()
-                            }
-                        },
-                        modifier = Modifier.size(34.dp).testTag("browser_refresh_btn")
-                    ) {
-                        Icon(
-                            imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
-                            contentDescription = if (isLoading) "Stop" else "Reload",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Discovered Media count badge (shown when media is captured)
-                    if (discoveredCount > 0) {
-                        Surface(
-                            onClick = onSwitchToMediaTab,
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.height(32.dp).testTag("browser_media_badge_top")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PermMedia,
-                                    contentDescription = "Discovered media",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "$discoveredCount",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                    }
 
                     // Three-dot Overflow Menu in Browser Top Bar Right Corner
                     Box {
@@ -514,6 +503,42 @@ fun DirectBrowserView(
                             onDismissRequest = { browserMenuExpanded = false },
                             modifier = Modifier.testTag("browser_dropdown_menu")
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Back") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = canGoBack,
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    webViewInstance?.goBack()
+                                },
+                                modifier = Modifier.testTag("browser_menu_back")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Forward") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = canGoForward,
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    webViewInstance?.goForward()
+                                },
+                                modifier = Modifier.testTag("browser_menu_forward")
+                            )
+
+                            HorizontalDivider()
+
                             DropdownMenuItem(
                                 text = { Text("Scan page for media") },
                                 leadingIcon = {
@@ -708,6 +733,7 @@ fun DirectBrowserView(
                                 modifier = Modifier.testTag("browser_menu_open_external")
                             )
                         }
+                    }
                     }
                 }
             }

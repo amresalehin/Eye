@@ -138,6 +138,8 @@ fun GalleryApp() {
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
     var isAlbumBrowserVisible by remember { mutableStateOf(false) }
+    var albumBrowserInitialUrl by remember { mutableStateOf("") }
+    var albumBrowserNavigationRequestId by remember { mutableStateOf(0) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -1198,6 +1200,12 @@ fun GalleryApp() {
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
                         initialStackForDetail = inboxInitialStack,
+                        onOpenBrowser = { url ->
+                            albumBrowserInitialUrl = url
+                            albumBrowserNavigationRequestId += 1
+                            hasOpenedAlbumBrowser = true
+                            isAlbumBrowserVisible = true
+                        },
                         onBack = { performBackNavigation() },
                         onOpenMediaItem = { uri ->
                             val file = java.io.File(uri.removePrefix("file://"))
@@ -1619,7 +1627,8 @@ fun GalleryApp() {
                     }
             ) {
                 FullScreenBrowserView(
-                    initialUrl = "",
+                    initialUrl = albumBrowserInitialUrl,
+                    navigationRequestId = albumBrowserNavigationRequestId,
                     isActive = isAlbumBrowserVisible,
                     onClose = { isAlbumBrowserVisible = false },
                     onDownloadComplete = { count ->

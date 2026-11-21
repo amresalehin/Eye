@@ -1021,7 +1021,7 @@ fun DirectBrowserView(
  * Invalid or empty hosts return an empty URL so the UI can render its text fallback.
  */
 fun browserFaviconUrl(domain: String): String {
-    val host = domain.trim().removePrefix("www.").lowercase()
+    val host = domain.trim().lowercase().removePrefix("www.")
     if (host.isBlank() || host.any { it.isWhitespace() || it in "/?#@" }) return ""
     return "https://www.google.com/s2/favicons?domain=$host&sz=128"
 }

@@ -132,6 +132,7 @@ fun MediaInboxScreen(
     initialStackForDetail: MediaInboxStack? = null,
     onOpenMediaItem: ((String) -> Unit)? = null,
     onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
+    onOpenBrowser: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -210,7 +211,8 @@ fun MediaInboxScreen(
             DownloaderResultsPage(
                 targetUrl = activeFetchUrl,
                 onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                showBrowserActions = false,
+                onOpenBrowser = onOpenBrowser,
+                showBrowserActions = true,
                 onDownloadComplete = { /* Silent foreground download with no toast */ },
                 onViewSavedLibrary = {
                     currentViewMode = DownloaderViewMode.SAVED_LIBRARY
@@ -472,6 +474,7 @@ fun MediaInboxScreen(
                                 activeFetchUrl = targetUrl
                                 currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
                             },
+                            onOpenBrowser = onOpenBrowser,
                             onViewSavedLibrary = {
                                 currentViewMode = DownloaderViewMode.SAVED_LIBRARY
                             },

@@ -118,6 +118,23 @@ fun detectPlatform(url: String): DetectedPlatform {
 }
 
 /**
+ * Normalizes a downloader search-bar value into a navigable web URL.
+ * Blank input is kept blank so callers can decide whether to open the browser home.
+ */
+fun normalizeDownloaderTargetUrl(target: String): String {
+    val trimmed = target.trim()
+    if (trimmed.isBlank()) return ""
+    return if (
+        trimmed.startsWith("http://", ignoreCase = true) ||
+        trimmed.startsWith("https://", ignoreCase = true)
+    ) {
+        trimmed
+    } else {
+        "https://$trimmed"
+    }
+}
+
+/**
  * Minimal Emre-style Search & URL Fetch Page for the Media Downloader.
  * Clean monochromatic URL input with a compact list of recently visited sites.
  */
@@ -137,6 +154,7 @@ data class DownloaderPill(
 @Composable
 fun DownloaderSearchMainPage(
     onFetchUrl: (String) -> Unit,
+    onOpenBrowser: ((String) -> Unit)? = null,
     onViewSavedLibrary: () -> Unit,
     onOpenActivity: () -> Unit = {},
     onBack: () -> Unit = {},
@@ -176,11 +194,7 @@ fun DownloaderSearchMainPage(
         if (trimmed.isBlank()) return
         keyboardController?.hide()
         focusManager.clearFocus()
-        val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
-            "https://$trimmed"
-        } else {
-            trimmed
-        }
+        val normalized = normalizeDownloaderTargetUrl(trimmed)
         scope.launch {
             historyManager.recordVisit(normalized)
         }
@@ -321,6 +335,24 @@ fun DownloaderSearchMainPage(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(17.dp)
                                 )
+                            }
+
+                            if (onOpenBrowser != null) {
+                                IconButton(
+                                    onClick = {
+                                        onOpenBrowser(normalizeDownloaderTargetUrl(urlInput))
+                                    },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .testTag("downloader_home_open_browser_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentDescription = "Open in browser",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
                             }
 
                             IconButton(

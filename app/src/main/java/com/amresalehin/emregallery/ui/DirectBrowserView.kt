@@ -579,11 +579,12 @@ fun DirectBrowserView(
                                     currentUrl = ""
                                     addressInput = ""
                                     pageTitle = ""
+                                    pageTitleRef.set("")
                                     lastRecordedHistoryUrl = ""
                                     pendingDomScanJob?.cancel()
                                     lastScannedDomUrl = ""
                                     seenRawUrls.clear()
-                                    onUrlChange?.invoke("")
+                                    notifyUrlIfChanged("")
                                     webViewInstance?.loadUrl("about:blank")
                                 },
                                 modifier = Modifier.testTag("browser_menu_home")

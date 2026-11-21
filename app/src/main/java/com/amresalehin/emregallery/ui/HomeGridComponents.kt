@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.net.Uri
 import com.amresalehin.emregallery.data.StoryGroup
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background

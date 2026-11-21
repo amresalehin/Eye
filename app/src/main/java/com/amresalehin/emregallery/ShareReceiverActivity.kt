@@ -99,6 +99,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 }
             }
         }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -1547,6 +1547,10 @@ fun GalleryApp() {
                                     backStack.clear()
                                     albumFilter = null
                                     homeSelectedUris = emptySet()
+                                    if (dest == Destination.MEDIA_INBOX) {
+                                        inboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE
+                                        inboxInitialStack = null
+                                    }
                                     navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
                                 }
                             }

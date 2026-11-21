@@ -262,15 +262,6 @@ fun DownloaderSearchMainPage(
                         .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-
-                    Spacer(Modifier.width(10.dp))
-
                     Box(
                         modifier = Modifier
                             .weight(1f)

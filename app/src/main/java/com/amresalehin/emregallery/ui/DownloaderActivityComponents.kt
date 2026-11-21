@@ -556,18 +556,20 @@ fun DownloaderActivityPage(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .weight(1f)
-                            .height(54.dp)
+                            .height(52.dp)
                             .testTag("activity_search_bar")
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(start = 14.dp, end = 6.dp),
+                                .padding(start = 10.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {

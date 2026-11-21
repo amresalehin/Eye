@@ -107,7 +107,7 @@ private fun DownloaderBottomNavigationBar(
         tonalElevation = 0.dp
     ) {
         val destinations = listOf(
-            Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.ArrowDownward, "Home"),
+            Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.Home, "Home"),
             Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
             Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved")
         )
@@ -349,13 +349,6 @@ fun MediaInboxScreen(
                                                     tint = MaterialTheme.colorScheme.onSurface
                                                 )
                                             }
-
-                                            Icon(
-                                                imageVector = Icons.Default.Search,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 10.dp).size(20.dp)
-                                            )
 
                                             // Search text field (No search icon, expands to fill available space)
                                             Box(

@@ -146,6 +146,7 @@ fun FloatingNavigationBar(
             val items = listOf(
                 Destination.HOME to ("Home" to Icons.Default.Home),
                 Destination.ALBUMS to ("Albums" to Icons.Default.PhotoLibrary),
+                Destination.MEDIA_INBOX to ("Inbox" to Icons.Default.Inbox),
                 Destination.SETTINGS to ("Settings" to Icons.Default.Settings)
             )
 

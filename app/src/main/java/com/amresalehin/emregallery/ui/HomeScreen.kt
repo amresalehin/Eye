@@ -357,15 +357,7 @@ fun HomeScreen(
                 }
             }
 
-            if (loading && sortedMedia.isEmpty()) {
-                item {
-                    HomeScreenSkeleton(
-                        gridColumns = pinchGridColumns,
-                        gridStyle = gridStyle,
-                        showMemories = albumTitle == null
-                    )
-                }
-            } else if (sortedMedia.isEmpty()) {
+            if (!loading && sortedMedia.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -394,10 +386,7 @@ fun HomeScreen(
                         }
                     }
                 }
-            } else {
-                if (loading) {
-                    item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
-                }
+            } else if (sortedMedia.isNotEmpty()) {
                 if (albumTitle == null) {
                     item { MemoriesStrip(sortedMedia, onOpenMemory) }
                     item {

@@ -142,12 +142,26 @@ fun GalleryApp() {
         scope.launch {
             if (userInitiated) {
                 isRefreshing = true
-            } else {
+            } else if (media.isEmpty()) {
                 loading = true
             }
             val startTime = System.currentTimeMillis()
-            lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
+            // Refresh locked vault items concurrently so disk scanning never delays the home grid.
+            scope.launch {
+                lockedVaultItems = withContext(Dispatchers.IO) {
+                    runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
+                }
+            }
             if (hasMediaPermission(context)) {
+                if (!userInitiated && media.isEmpty()) {
+                    val initialBatch = withContext(Dispatchers.IO) {
+                        runCatching { mediaRepository.loadMediaInitial() }.getOrDefault(emptyList())
+                    }
+                    if (initialBatch.isNotEmpty()) {
+                        media = initialBatch
+                        loading = false
+                    }
+                }
                 val loadedMedia = withContext(Dispatchers.IO) {
                     runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
                 }
@@ -155,7 +169,7 @@ fun GalleryApp() {
 
                 // Start disk-backed preparation after permissions and the MediaStore list are ready.
                 // This worker is independent of composition and never holds the whole library in RAM.
-                withContext(Dispatchers.Default) {
+                scope.launch(Dispatchers.Default) {
                     // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
                     ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                 }

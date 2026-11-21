@@ -7,6 +7,15 @@ import android.provider.MediaStore
 
 class MediaRepository(private val resolver: ContentResolver) {
 
+    fun loadMediaInitial(limitPerCollection: Int = 60): List<MediaItem> {
+        val rows = ArrayList<MediaItem>(limitPerCollection * 2)
+        queryCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, rows, limitPerCollection)
+        queryCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, rows, limitPerCollection)
+        return rows.sortedWith(compareByDescending<MediaItem> {
+            if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L
+        }.thenBy { it.id })
+    }
+
     fun loadMedia(): List<MediaItem> {
         val rows = ArrayList<MediaItem>()
         queryCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, rows)
@@ -16,7 +25,12 @@ class MediaRepository(private val resolver: ContentResolver) {
         }.thenBy { it.id })
     }
 
-    private fun queryCollection(collection: Uri, video: Boolean, rows: MutableList<MediaItem>) {
+    private fun queryCollection(
+        collection: Uri,
+        video: Boolean,
+        rows: MutableList<MediaItem>,
+        limit: Int? = null
+    ) {
         val projectionList = buildList {
             add(MediaStore.MediaColumns._ID)
             add(MediaStore.MediaColumns.DISPLAY_NAME)
@@ -63,6 +77,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                 c.getColumnIndex(MediaStore.MediaColumns.IS_TRASHED)
             } else -1
 
+            var addedCount = 0
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 val itemUri = ContentUris.withAppendedId(collection, id)
@@ -98,6 +113,10 @@ class MediaRepository(private val resolver: ContentResolver) {
                         isTrashed = isTrashed
                     )
                 )
+                addedCount++
+                if (limit != null && addedCount >= limit) {
+                    break
+                }
             }
         }
     }

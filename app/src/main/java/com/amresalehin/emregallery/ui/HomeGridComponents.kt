@@ -2,7 +2,6 @@ package com.amresalehin.emregallery.ui
 
 import android.net.Uri
 import com.amresalehin.emregallery.data.StoryGroup
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -38,7 +37,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -138,121 +136,6 @@ fun HomeFastScrollbar(
                     size = androidx.compose.ui.geometry.Size(thumbWidth, height),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbWidth / 2f)
                 )
-            }
-        }
-    }
-}
-
-@Composable
-fun HomeScreenSkeleton(
-    gridColumns: Int = 3,
-    gridStyle: String = "masonry",
-    showMemories: Boolean = true
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "skeleton_shimmer")
-    val alphaAnim by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "skeleton_alpha"
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("home_screen_skeleton"),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        if (showMemories) {
-            // Memories row skeleton
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                repeat(4) {
-                    Box(
-                        modifier = Modifier
-                            .width(118.dp)
-                            .height(174.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
-                            )
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .align(Alignment.BottomCenter)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = alphaAnim * 0.7f)
-                                )
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section header skeleton
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(110.dp)
-                    .height(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
-                    )
-            )
-            Box(
-                modifier = Modifier
-                    .width(48.dp)
-                    .height(16.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = alphaAnim * 0.8f)
-                    )
-            )
-        }
-
-        // Multi-column grid skeleton
-        val masonryHeights = listOf(140.dp, 190.dp, 130.dp, 170.dp, 120.dp, 180.dp, 150.dp, 130.dp, 160.dp, 140.dp, 200.dp, 135.dp)
-        val validCols = gridColumns.coerceIn(1, 6)
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            for (col in 0 until validCols) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    repeat(4) { rowIndex ->
-                        val itemIndex = (col + rowIndex * validCols) % masonryHeights.size
-                        val height = if (gridStyle == "square") 110.dp else masonryHeights[itemIndex]
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(height)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
-                                )
-                        )
-                    }
-                }
             }
         }
     }

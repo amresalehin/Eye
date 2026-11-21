@@ -230,7 +230,7 @@ class DownloaderSearchPageUnitTest {
         fun showPasteButton(query: String) = query.isBlank()
         fun showActionButtons(query: String) = query.isNotBlank()
 
-        assertFalse(showSwitcher(isSearchFocused)) // Switcher pill is inside search bar and visible
+        assertFalse(showSwitcher(isSearchFocused)) // Tabs are available in the bottom navigation
         assertTrue(showPasteButton(urlInput))
         assertFalse(showActionButtons(urlInput))
 

@@ -96,7 +96,6 @@ enum class DownloaderViewMode {
 }
 
 @Composable
-@Composable
 private fun DownloaderBottomNavigationBar(
     currentMode: DownloaderViewMode,
     onSelect: (DownloaderViewMode) -> Unit,

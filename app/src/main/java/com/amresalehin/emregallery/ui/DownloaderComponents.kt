@@ -264,7 +264,6 @@ fun DownloaderSearchMainPage(
                 Spacer(Modifier.width(8.dp))
 
                 // Search / URL input field (Link icon removed!)
-                // Search / URL input field (Link icon removed!)
                 Box(
                     modifier = Modifier
                         .weight(1f)

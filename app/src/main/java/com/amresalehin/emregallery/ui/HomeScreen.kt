@@ -48,6 +48,8 @@ import kotlin.math.roundToInt
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
+private const val PREFETCH_LOOK_AHEAD_ROWS = 100
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -156,8 +158,7 @@ fun HomeScreen(
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
         object : NestedScrollConnection {
             override suspend fun onPreFling(available: Velocity): Velocity {
-                val velocityY = available.y
-                if (abs(velocityY) < 1200f || predictivePrefetchRows.isEmpty()) return Velocity.Zero
+                if (predictivePrefetchRows.isEmpty()) return Velocity.Zero
 
                 // Use the direction observed during the drag rather than relying on platform-specific
                 // fling-velocity sign conventions. The velocity magnitude still estimates travel distance.
@@ -171,29 +172,28 @@ fun HomeScreen(
                 if (visibleIndices.isEmpty()) return Velocity.Zero
 
                 val anchor = (if (forward) visibleIndices.maxOrNull() else visibleIndices.minOrNull()) ?: return Velocity.Zero
-                val averageRowHeight = visibleRowInfos.map { it.size.toFloat() }
-                    .average().toFloat().coerceAtLeast(1f)
-                // Estimate travel from velocity, then cap work to a bounded window. The fling itself
-                // remains native; this only moves likely destination thumbnails to the worker's front.
-                val predictedRows = (abs(velocityY) * 0.32f / averageRowHeight)
-                    .roundToInt().coerceIn(4, 36)
+                // Keep a fixed 100-row look-ahead window; prefetch distance is independent of fling speed.
+                val predictedRows = PREFETCH_LOOK_AHEAD_ROWS
                 val lastIndex = predictivePrefetchRows.lastIndex
                 val targetIndices = if (forward) {
                     (anchor + 1..(anchor + predictedRows).coerceAtMost(lastIndex)).toList()
                 } else {
                     (anchor - 1 downTo (anchor - predictedRows).coerceAtLeast(0)).toList()
                 }
-                ThumbnailPrewarmManager.prioritize(
-                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(120),
-                    context
-                )
+                val visibleItems = visibleIndices
+                    .flatMap { predictivePrefetchRows[it].second }
+                    .distinctBy { it.uri }
+                val lookAheadItems = targetIndices
+                    .flatMap { predictivePrefetchRows[it].second }
+                    .distinctBy { it.uri }
+                ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, context)
                 return Velocity.Zero
             }
         }
     }
 
     // Also predict while the finger is dragging (not just when a fling starts). Update the priority
-    // window every couple of rows to avoid repeatedly churning the worker queue on every frame.
+    // window once per newly visible row, without scheduling work on every scroll frame.
     LaunchedEffect(listState, predictivePrefetchRows, predictivePrefetchIndex) {
         var previousPosition: Pair<Int, Int>? = null
         var previousAnchor = -1
@@ -221,12 +221,12 @@ fun HomeScreen(
                 }
             } ?: 1
             observedScrollDirection = direction
-            val moving = listState.isScrollInProgress
             val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
-            val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
+            // Refresh after each row to maintain lead time during continuous scrolling.
+            val movedEnough = previousAnchor < 0 || anchor != previousAnchor
             if (movedEnough || direction != previousDirection) {
-                val forwardCount = if (moving) 16 else 8
-                val backwardCount = if (moving) 2 else 4
+                val forwardCount = PREFETCH_LOOK_AHEAD_ROWS
+                val backwardCount = 4
                 val lastIndex = predictivePrefetchRows.lastIndex
                 val targetIndices = if (direction > 0) {
                     (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
@@ -235,10 +235,13 @@ fun HomeScreen(
                     (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
                         (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
                 }
-                ThumbnailPrewarmManager.prioritize(
-                    targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120),
-                    context
-                )
+                val visibleItems = visibleRows
+                    .flatMap { predictivePrefetchRows[it].second }
+                    .distinctBy { it.uri }
+                val lookAheadItems = targetIndices
+                    .flatMap { predictivePrefetchRows[it].second }
+                    .distinctBy { it.uri }
+                ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, context)
                 previousAnchor = anchor
                 previousDirection = direction
             }

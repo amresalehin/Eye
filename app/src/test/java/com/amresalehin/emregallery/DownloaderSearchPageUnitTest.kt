@@ -691,7 +691,7 @@ class DownloaderSearchPageUnitTest {
             DownloaderViewMode.BROWSER_PAGE
         )
         assertEquals(4, primaryTabs.size)
-        assertTrue(DownloaderViewMode.values().containsAll(primaryTabs))
+        assertTrue(DownloaderViewMode.values().toSet().containsAll(primaryTabs))
         assertFalse(primaryTabs.contains(DownloaderViewMode.DOWNLOADER_PAGE))
     }
 

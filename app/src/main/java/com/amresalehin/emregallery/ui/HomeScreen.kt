@@ -79,10 +79,6 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
-
-    DisposableEffect(Unit) {
-        onDispose { ThumbnailPrewarmManager.clearMemoryPrefetches() }
-    }
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()

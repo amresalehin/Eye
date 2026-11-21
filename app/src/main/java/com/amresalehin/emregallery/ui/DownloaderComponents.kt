@@ -158,6 +158,18 @@ fun DownloaderSearchMainPage(
     val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
     val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(initial = DownloaderPreferencesManager.getSearchEngineSync(context))
     var showDownloaderSettings by remember { mutableStateOf(false) }
+    val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
+    val repoStacks by inboxRepo.stacks.collectAsState()
+    val effectiveStacks = remember(savedStacks, repoStacks) {
+        if (savedStacks.isNotEmpty()) savedStacks else repoStacks
+    }
+
+    val activities by DownloadActivityManager.activities.collectAsState()
+    LaunchedEffect(Unit) {
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.syncWithInboxRepository()
+    }
+
     var urlInput by rememberSaveable { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
@@ -261,8 +273,16 @@ fun DownloaderSearchMainPage(
                     )
                 }
 
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 10.dp).size(20.dp)
+                )
+
                 Spacer(Modifier.width(8.dp))
 
+                // Search / URL input field (Link icon removed!)
                 // Search / URL input field (Link icon removed!)
                 Box(
                     modifier = Modifier
@@ -393,46 +413,86 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // Recent websites remain lightweight shortcuts; Activity and Saved are dedicated tabs.
+        // Recent browsing history shortcuts.
         if (pills.isNotEmpty()) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("downloader_recent_pills_row"),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(pills, key = { it.domain + it.url }) { pill ->
-                    Surface(
-                        onClick = {
-                            urlInput = pill.url
-                            submitSearch(pill.url)
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("downloader_recent_pills_row"),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(pills, key = { it.domain + it.url }) { pill ->
+                        Surface(
+                            onClick = {
+                                urlInput = pill.url
+                                submitSearch(pill.url)
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .height(38.dp)
+                                .testTag("recent_pill_${pill.name}")
                         ) {
-                            Text(
-                                text = pill.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Circular site favicon avatar
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
+                                        if (!iconFailed) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(pill.faviconUrl)
+                                                    .crossfade(true)
+                                                    .listener(
+                                                        onError = { _, _ -> iconFailed = true }
+                                                    )
+                                                    .build(),
+                                                contentDescription = pill.name,
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Language,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Website name
+                                Text(
+                                    text = pill.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
     }
-}
-
-/**
- * Saved Preview Section    }
 }
 
 /**

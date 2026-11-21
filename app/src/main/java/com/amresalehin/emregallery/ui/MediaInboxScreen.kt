@@ -781,7 +781,7 @@ fun MediaInboxScreen(
     }
 
 
-    // Keep Browser composed after first visit so its WebView session survives all tab changes.
+    // Retain the WebView after first visit so switching tabs does not discard the browser session.
     if (hasOpenedBrowser) {
         val isBrowserActive = currentViewMode == DownloaderViewMode.BROWSER_PAGE
         Box(
@@ -811,7 +811,6 @@ fun MediaInboxScreen(
         }
     }
     }
-}    }
 }
 
 /**

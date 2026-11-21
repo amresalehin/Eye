@@ -492,6 +492,7 @@ fun DownloaderSearchMainPage(
                     }
                 }
             }
+        }
     }
 }
 

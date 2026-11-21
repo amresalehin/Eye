@@ -34,6 +34,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -109,6 +110,7 @@ fun DirectBrowserView(
     onBatchExtracted: (List<ScrapedMediaItem>, pageTitle: String?, domain: String?) -> Unit,
     onSwitchToMediaTab: () -> Unit,
     isActive: Boolean = true,
+    onAddressBarFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
@@ -131,6 +133,7 @@ fun DirectBrowserView(
     val loadingProgressState = remember { mutableFloatStateOf(0f) }
     var browserMenuExpanded by remember { mutableStateOf(false) }
     var isDesktopMode by remember { mutableStateOf(false) }
+    var isAddressBarFocused by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
@@ -223,7 +226,7 @@ fun DirectBrowserView(
     }
 
     // Intercept back button when browser can navigate back
-    BackHandler(enabled = isActive && canGoBack) {
+    BackHandler(enabled = isActive && canGoBack && !isAddressBarFocused) {
         webViewInstance?.goBack()
     }
 
@@ -406,6 +409,10 @@ fun DirectBrowserView(
                                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .onFocusChanged { focusState ->
+                                            isAddressBarFocused = focusState.isFocused
+                                            onAddressBarFocusChanged?.invoke(focusState.isFocused)
+                                        }
                                         .testTag("browser_address_input")
                                 )
                             }

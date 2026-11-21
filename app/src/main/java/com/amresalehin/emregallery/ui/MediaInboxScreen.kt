@@ -2216,6 +2216,7 @@ fun FullScreenBrowserView(
 
     var currentUrl by remember(initialUrl, navigationRequestId) { mutableStateOf(initialUrl) }
     var pageTitle by remember { mutableStateOf("") }
+    var isAddressBarFocused by remember { mutableStateOf(false) }
     var discoveredItems by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
     var showDiscoveredMediaSheet by remember { mutableStateOf(false) }
 
@@ -2263,7 +2264,7 @@ fun FullScreenBrowserView(
     }
 
     // Intercept back button when modal sheet is open or to close browser
-    BackHandler(enabled = isActive) {
+    BackHandler(enabled = isActive && !isAddressBarFocused) {
         if (showDiscoveredMediaSheet) {
             showDiscoveredMediaSheet = false
         } else {
@@ -2337,6 +2338,7 @@ fun FullScreenBrowserView(
                     showDiscoveredMediaSheet = true
                 },
                 isActive = isActive,
+                onAddressBarFocusChanged = { isAddressBarFocused = it },
                 modifier = Modifier.fillMaxSize()
             )
         }

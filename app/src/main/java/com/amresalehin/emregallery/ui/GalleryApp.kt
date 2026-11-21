@@ -668,7 +668,7 @@ fun GalleryApp() {
 
     val canGoBack = homeSelectedUris.isNotEmpty() || backStack.isNotEmpty() || destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
 
-    PredictiveBackHandler(enabled = canGoBack) { progress: Flow<BackEventCompat> ->
+    PredictiveBackHandler(enabled = canGoBack && !isAlbumBrowserVisible) { progress: Flow<BackEventCompat> ->
         try {
             isPredictiveBackActive = true
             progress.collect { backEvent ->

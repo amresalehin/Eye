@@ -95,6 +95,7 @@ private fun BrowserLoadingProgressBar(
 @Composable
 fun DirectBrowserView(
     initialUrl: String = "",
+    navigationRequestId: Int = 0,
     onClose: (() -> Unit)? = null,
     onUrlChange: ((String) -> Unit)? = null,
     onPageTitleChanged: ((String) -> Unit)? = null,
@@ -102,6 +103,7 @@ fun DirectBrowserView(
     onMediaExtracted: (ScrapedMediaItem) -> Unit,
     onBatchExtracted: (List<ScrapedMediaItem>, pageTitle: String?, domain: String?) -> Unit,
     onSwitchToMediaTab: () -> Unit,
+    isActive: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
@@ -211,7 +213,7 @@ fun DirectBrowserView(
     }
 
     // Intercept back button when browser can navigate back
-    BackHandler(enabled = canGoBack) {
+    BackHandler(enabled = isActive && canGoBack) {
         webViewInstance?.goBack()
     }
 
@@ -242,6 +244,15 @@ fun DirectBrowserView(
         }
         webViewInstance?.loadUrl(formatted)
         focusManager.clearFocus()
+    }
+
+    LaunchedEffect(initialUrl, navigationRequestId) {
+        val requested = initialUrl.trim()
+        if (requested.isNotBlank() &&
+            MediaClassifier.formatQueryOrUrl(requested) != currentUrl
+        ) {
+            navigateToUrl(requested)
+        }
     }
 
     fun scanCurrentPageDOM(wv: WebView?) {

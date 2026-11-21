@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -89,7 +91,39 @@ enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
     SAVED_LIBRARY,
-    ACTIVITY_PAGE
+    ACTIVITY_PAGE,
+    BROWSER_PAGE
+}
+
+@Composable
+@Composable
+private fun DownloaderBottomNavigationBar(
+    currentMode: DownloaderViewMode,
+    onSelect: (DownloaderViewMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    NavigationBar(
+        modifier = modifier.testTag("downloader_bottom_navigation"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp
+    ) {
+        val destinations = listOf(
+            Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.ArrowDownward, "Home"),
+            Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
+            Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved"),
+            Triple(DownloaderViewMode.BROWSER_PAGE, Icons.Default.Language, "Browser")
+        )
+        destinations.forEach { (destination, icon, label) ->
+            NavigationBarItem(
+                selected = currentMode == destination,
+                onClick = { onSelect(destination) },
+                icon = { Icon(imageVector = icon, contentDescription = label) },
+                label = { Text(label) },
+                alwaysShowLabel = true,
+                modifier = Modifier.testTag("downloader_nav_${label.lowercase()}")
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,9 +154,11 @@ fun MediaInboxScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember(initialStackForDetail) { mutableStateOf(initialStackForDetail) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showFullScreenBrowser by remember { mutableStateOf(false) }
+    var hasOpenedBrowser by remember { mutableStateOf(false) }
     var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
+    val savedGridState = rememberLazyGridState()
+    val tabStateHolder = rememberSaveableStateHolder()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -132,8 +168,20 @@ fun MediaInboxScreen(
 
     var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
     var activeFetchUrl by remember { mutableStateOf("") }
+    var browserLaunchId by remember { mutableIntStateOf(0) }
 
-    BackHandler(enabled = !showFullScreenBrowser) {
+    fun openBrowser(url: String? = null) {
+        if (!url.isNullOrBlank()) {
+            browserInitialUrl = url
+            browserLaunchId += 1
+        }
+        hasOpenedBrowser = true
+        selectedStackForDetail = null
+        selectedStackIds = emptySet()
+        currentViewMode = DownloaderViewMode.BROWSER_PAGE
+    }
+
+    BackHandler(enabled = currentViewMode != DownloaderViewMode.BROWSER_PAGE) {
         if (isSelectionMode) {
             selectedStackIds = emptySet()
         } else if (isSearchFocused || searchQuery.isNotEmpty()) {
@@ -188,8 +236,7 @@ fun MediaInboxScreen(
                 targetUrl = activeFetchUrl,
                 onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
                 onOpenBrowser = { url ->
-                    browserInitialUrl = url
-                    showFullScreenBrowser = true
+                    openBrowser(url)
                 },
                 onDownloadComplete = { /* Silent foreground download with no toast */ },
                 onViewSavedLibrary = {
@@ -330,70 +377,12 @@ fun MediaInboxScreen(
                                                 )
                                             }
 
-                                            // Switcher Pill: download icon only and folder icon only (Hidden when search field receives focus)
-                                            if (!isSearchFocused) {
-                                                Spacer(Modifier.width(2.dp))
-                                                Surface(
-                                                    shape = RoundedCornerShape(16.dp),
-                                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-                                                    modifier = Modifier.height(34.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.padding(2.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        // Fetch icon only
-                                                        Surface(
-                                                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                                                            shape = RoundedCornerShape(14.dp),
-                                                            color = if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                                            modifier = Modifier
-                                                                .size(width = 34.dp, height = 30.dp)
-                                                                .testTag("tab_search_fetch")
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.ArrowDownward,
-                                                                    contentDescription = "Fetch",
-                                                                    tint = if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                    modifier = Modifier.size(16.dp)
-                                                                )
-                                                            }
-                                                        }
-
-                                                        // Saved icon only
-                                                        Surface(
-                                                            onClick = { currentViewMode = DownloaderViewMode.SAVED_LIBRARY },
-                                                            shape = RoundedCornerShape(14.dp),
-                                                            color = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                                            modifier = Modifier
-                                                                .size(width = 34.dp, height = 30.dp)
-                                                                .testTag("tab_saved_library")
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Folder,
-                                                                    contentDescription = "Saved",
-                                                                    tint = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                    modifier = Modifier.size(16.dp)
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-
-                                                Spacer(Modifier.width(8.dp))
-
-                                                // Divider between switcher and search text
-                                                Box(
-                                                    modifier = Modifier
-                                                        .width(1.dp)
-                                                        .height(18.dp)
-                                                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                                )
-
-                                                Spacer(Modifier.width(8.dp))
-                                            }
+                                            Icon(
+                                                imageVector = Icons.Default.Search,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 10.dp).size(20.dp)
+                                            )
 
                                             // Search text field (No search icon, expands to fill available space)
                                             Box(
@@ -482,6 +471,32 @@ fun MediaInboxScreen(
                         }
                     }
                 },
+                bottomBar = {
+                    if (currentViewMode in listOf(
+                            DownloaderViewMode.SEARCH_PAGE,
+                            DownloaderViewMode.ACTIVITY_PAGE,
+                            DownloaderViewMode.SAVED_LIBRARY,
+                            DownloaderViewMode.BROWSER_PAGE
+                        ) && selectedStackForDetail == null
+                    ) {
+                        DownloaderBottomNavigationBar(
+                            currentMode = currentViewMode,
+                            onSelect = { mode ->
+                                if (mode != currentViewMode) {
+                                    selectedStackForDetail = null
+                                    selectedStackIds = emptySet()
+                                    isSearchFocused = false
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    if (mode == DownloaderViewMode.BROWSER_PAGE) {
+                                        hasOpenedBrowser = true
+                                    }
+                                    currentViewMode = mode
+                                }
+                            }
+                        )
+                    }
+                },
                 floatingActionButton = {
                     if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY && !isSelectionMode) {
                         FloatingActionButton(
@@ -510,14 +525,14 @@ fun MediaInboxScreen(
                         .padding(innerPadding)
                 ) {
                     if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) {
-                        DownloaderSearchMainPage(
+                        tabStateHolder.SaveableStateProvider("downloader_home") {
+                            DownloaderSearchMainPage(
                             onFetchUrl = { targetUrl ->
                                 activeFetchUrl = targetUrl
                                 currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
                             },
                             onOpenBrowser = { targetUrl ->
-                                browserInitialUrl = targetUrl
-                                showFullScreenBrowser = true
+                                openBrowser(targetUrl)
                             },
                             onViewSavedLibrary = {
                                 currentViewMode = DownloaderViewMode.SAVED_LIBRARY
@@ -533,8 +548,10 @@ fun MediaInboxScreen(
                             activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED },
                             savedStacksCount = stacks.size,
                             modifier = Modifier.fillMaxSize()
-                        )
+                            )
+                        }
                     } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+                        tabStateHolder.SaveableStateProvider("downloader_activity") {
                         DownloaderActivityPage(
                             onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
                             onAddNewDownload = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
@@ -543,12 +560,17 @@ fun MediaInboxScreen(
                                     onOpenMediaItem?.invoke(uriStr)
                                 }
                             },
+                            showBackButton = false,
                             modifier = Modifier.fillMaxSize()
-                        )
+                            )
+                        }
+                    } else if (currentViewMode == DownloaderViewMode.BROWSER_PAGE) {
+                        Box(Modifier.fillMaxSize().testTag("downloader_browser_page"))
                     } else {
                         // SAVED LIBRARY VIEW
                         if (filteredStacks.isNotEmpty() || isDownloading) {
                             LazyVerticalGrid(
+                                state = savedGridState,
                                 columns = GridCells.Fixed(2),
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -745,8 +767,7 @@ fun MediaInboxScreen(
                     }
                 },
                 onOpenBrowser = { url ->
-                    browserInitialUrl = url
-                    showFullScreenBrowser = true
+                    openBrowser(url)
                 },
                 onDeleteStack = {
                     inboxRepo.deleteStack(stack.id)
@@ -761,28 +782,37 @@ fun MediaInboxScreen(
     }
 
 
-    // Full Screen In-App Browser (opens when clicking browser button above plus FAB)
-    AnimatedVisibility(
-        visible = showFullScreenBrowser,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-        modifier = Modifier.fillMaxSize().zIndex(25f)
-    ) {
-        FullScreenBrowserView(
-            initialUrl = browserInitialUrl,
-            onClose = {
-                showFullScreenBrowser = false
-                browserInitialUrl = ""
-            },
-            onDownloadComplete = { count ->
-                scope.launch {
-                    snackbarHostState.showSnackbar("Downloaded $count media items to Inbox!")
+    // Keep Browser composed after first visit so its WebView session survives all tab changes.
+    if (hasOpenedBrowser) {
+        val isBrowserActive = currentViewMode == DownloaderViewMode.BROWSER_PAGE
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(if (isBrowserActive) 25f else -1f)
+                .graphicsLayer {
+                    alpha = if (isBrowserActive) 1f else 0f
+                    translationX = if (isBrowserActive) 0f else size.width * 2f
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                .padding(
+                    bottom = 80.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                )
+        ) {
+            FullScreenBrowserView(
+                initialUrl = browserInitialUrl,
+                navigationRequestId = browserLaunchId,
+                isActive = isBrowserActive,
+                onClose = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                onDownloadComplete = { count ->
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Downloaded $count media items to Inbox!")
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
     }
+}    }
 }
 
 /**
@@ -2295,6 +2325,8 @@ fun SkeletonCard(heightDp: Int) {
 @Composable
 fun FullScreenBrowserView(
     initialUrl: String = "",
+    navigationRequestId: Int = 0,
+    isActive: Boolean = true,
     onClose: () -> Unit,
     onDownloadComplete: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -2303,7 +2335,7 @@ fun FullScreenBrowserView(
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val scope = rememberCoroutineScope()
 
-    var currentUrl by remember(initialUrl) { mutableStateOf(initialUrl) }
+    var currentUrl by remember(initialUrl, navigationRequestId) { mutableStateOf(initialUrl) }
     var pageTitle by remember { mutableStateOf("") }
     var discoveredItems by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
     var showDiscoveredMediaSheet by remember { mutableStateOf(false) }
@@ -2352,7 +2384,7 @@ fun FullScreenBrowserView(
     }
 
     // Intercept back button when modal sheet is open or to close browser
-    BackHandler {
+    BackHandler(enabled = isActive) {
         if (showDiscoveredMediaSheet) {
             showDiscoveredMediaSheet = false
         } else {
@@ -2386,7 +2418,8 @@ fun FullScreenBrowserView(
             // DirectBrowserView taking full screen with its unified, interactive toolbar
             DirectBrowserView(
                 initialUrl = initialUrl,
-                onClose = onClose,
+                navigationRequestId = navigationRequestId,
+                onClose = null,
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
                 discoveredCount = discoveredItems.size,
@@ -2424,6 +2457,7 @@ fun FullScreenBrowserView(
                 onSwitchToMediaTab = {
                     showDiscoveredMediaSheet = true
                 },
+                isActive = isActive,
                 modifier = Modifier.fillMaxSize()
             )
         }

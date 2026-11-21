@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -450,6 +451,7 @@ fun DownloaderActivityPage(
     onBack: () -> Unit,
     onAddNewDownload: () -> Unit,
     onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
+    showBackButton: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -460,7 +462,7 @@ fun DownloaderActivityPage(
 
     val activities by DownloadActivityManager.activities.collectAsState()
 
-    var selectedFilter by remember { mutableStateOf("All") }
+    var selectedFilter by rememberSaveable { mutableStateOf("All") }
     var showControlsSheet by remember { mutableStateOf(false) }
 
     var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -511,14 +513,24 @@ fun DownloaderActivityPage(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.size(44.dp).testTag("activity_back_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
+                    if (showBackButton) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(44.dp).testTag("activity_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Activity",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 12.dp).weight(1f)
                         )
                     }
 

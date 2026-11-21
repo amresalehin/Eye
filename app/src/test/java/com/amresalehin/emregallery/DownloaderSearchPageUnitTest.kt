@@ -22,7 +22,8 @@ class DownloaderSearchPageUnitTest {
         assertTrue(modes.contains("DOWNLOADER_PAGE"))
         assertTrue(modes.contains("SAVED_LIBRARY"))
         assertTrue(modes.contains("ACTIVITY_PAGE"))
-        assertEquals(4, modes.size)
+        assertTrue(modes.contains("BROWSER_PAGE"))
+        assertEquals(5, modes.size)
     }
 
     @Test
@@ -181,11 +182,11 @@ class DownloaderSearchPageUnitTest {
         var isSearchFocused = false
         var searchQuery = ""
 
-        fun showSwitcher(isFocused: Boolean) = !isFocused
+        fun showSwitcher(isFocused: Boolean) = false
         fun showFilterButton(isFocused: Boolean, query: String) = !isFocused && query.isEmpty()
         fun showClearButton(isFocused: Boolean, query: String) = isFocused || query.isNotEmpty()
 
-        assertTrue(showSwitcher(isSearchFocused))
+        assertFalse(showSwitcher(isSearchFocused))
         assertTrue(showFilterButton(isSearchFocused, searchQuery))
         assertFalse(showClearButton(isSearchFocused, searchQuery))
 
@@ -214,7 +215,7 @@ class DownloaderSearchPageUnitTest {
         }
         assertFalse(isSearchFocused)
         assertEquals("", searchQuery)
-        assertTrue(showSwitcher(isSearchFocused)) // Restores default layout
+        assertFalse(showSwitcher(isSearchFocused)) // Restores default layout
         assertTrue(showFilterButton(isSearchFocused, searchQuery))
         assertFalse(showClearButton(isSearchFocused, searchQuery))
     }
@@ -225,11 +226,11 @@ class DownloaderSearchPageUnitTest {
         var isSearchFocused = false
         var urlInput = ""
 
-        fun showSwitcher(isFocused: Boolean) = !isFocused
+        fun showSwitcher(isFocused: Boolean) = false
         fun showPasteButton(query: String) = query.isBlank()
         fun showActionButtons(query: String) = query.isNotBlank()
 
-        assertTrue(showSwitcher(isSearchFocused)) // Switcher pill is inside search bar and visible
+        assertFalse(showSwitcher(isSearchFocused)) // Switcher pill is inside search bar and visible
         assertTrue(showPasteButton(urlInput))
         assertFalse(showActionButtons(urlInput))
 
@@ -259,7 +260,7 @@ class DownloaderSearchPageUnitTest {
         assertFalse(isSearchFocused)
         assertEquals("", urlInput)
         assertFalse(didNavigateBack)
-        assertTrue(showSwitcher(isSearchFocused)) // Switcher restored
+        assertFalse(showSwitcher(isSearchFocused)) // Switcher restored
 
         // Action: Back button clicked in default state
         handleBack()
@@ -682,24 +683,16 @@ class DownloaderSearchPageUnitTest {
     }
 
     @Test
-    fun testFiveRowGapBetweenSearchBarAndActivityCard() {
-        val rowHeight = 40 // Standard dense list/item row in dp
-        val fiveRowGap = 5 * rowHeight // 200 dp
-        assertEquals(200, fiveRowGap)
-
-        // When no search history exists, 5-row gap is always preserved
-        val pillsEmpty = emptyList<String>()
-        val gapWhenEmpty = if (pillsEmpty.isEmpty()) fiveRowGap else 0
-        assertEquals(200, gapWhenEmpty)
-
-        // When search history exists (e.g. 1 pill row of height 38dp + spacing)
-        val pillsNotEmpty = listOf("wikipedia.org")
-        val pillRowHeight = 38
-        val internalSpacing = 26
-        val remainingSpacer = (fiveRowGap - pillRowHeight - internalSpacing).coerceAtLeast(16)
-        assertTrue(remainingSpacer >= 16)
-        val totalDistance = pillRowHeight + internalSpacing + remainingSpacer
-        assertEquals(200, totalDistance)
+    fun testDownloaderPrimaryNavigationDestinations() {
+        val primaryTabs = setOf(
+            DownloaderViewMode.SEARCH_PAGE,
+            DownloaderViewMode.ACTIVITY_PAGE,
+            DownloaderViewMode.SAVED_LIBRARY,
+            DownloaderViewMode.BROWSER_PAGE
+        )
+        assertEquals(4, primaryTabs.size)
+        assertTrue(DownloaderViewMode.values().containsAll(primaryTabs))
+        assertFalse(primaryTabs.contains(DownloaderViewMode.DOWNLOADER_PAGE))
     }
 
     @Test

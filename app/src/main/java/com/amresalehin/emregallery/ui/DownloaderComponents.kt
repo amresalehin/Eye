@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -157,19 +158,7 @@ fun DownloaderSearchMainPage(
     val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
     val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(initial = DownloaderPreferencesManager.getSearchEngineSync(context))
     var showDownloaderSettings by remember { mutableStateOf(false) }
-    val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val repoStacks by inboxRepo.stacks.collectAsState()
-    val effectiveStacks = remember(savedStacks, repoStacks) {
-        if (savedStacks.isNotEmpty()) savedStacks else repoStacks
-    }
-
-    val activities by DownloadActivityManager.activities.collectAsState()
-    LaunchedEffect(Unit) {
-        DownloadActivityManager.initialize(context)
-        DownloadActivityManager.syncWithInboxRepository()
-    }
-
-    var urlInput by remember { mutableStateOf("") }
+    var urlInput by rememberSaveable { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
@@ -272,73 +261,9 @@ fun DownloaderSearchMainPage(
                     )
                 }
 
-                // Switcher Pill & Divider: hidden when search field is focused
-                if (!isSearchFocused) {
-                    Spacer(Modifier.width(2.dp))
-
-                    // Switcher Pill: download icon only and folder icon only
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Fetch Pill (Active on main search page)
-                            Surface(
-                                onClick = { /* already on search page */ },
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .size(width = 34.dp, height = 30.dp)
-                                    .testTag("tab_search_fetch")
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDownward,
-                                        contentDescription = "Fetch",
-                                        tint = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            // Saved Pill (Inactive on main search page, switches to Saved Library)
-                            Surface(
-                                onClick = onViewSavedLibrary,
-                                shape = RoundedCornerShape(14.dp),
-                                color = Color.Transparent,
-                                modifier = Modifier
-                                    .size(width = 34.dp, height = 30.dp)
-                                    .testTag("tab_saved_library")
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Folder,
-                                        contentDescription = "Saved",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.width(8.dp))
-
-                    // Divider between switcher and search field
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(18.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    )
-                }
-
                 Spacer(Modifier.width(8.dp))
 
+                // Search / URL input field (Link icon removed!)
                 // Search / URL input field (Link icon removed!)
                 Box(
                     modifier = Modifier
@@ -469,112 +394,46 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // 2. Search History / Recent links or 5-row gap
-        // There should be a 5 row gap always present between search bar and activity card in Main Downloader Inbox Screen, even when no search history is there.
-        val fiveRowGap = 200.dp
+        // Recent websites remain lightweight shortcuts; Activity and Saved are dedicated tabs.
         if (pills.isNotEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("downloader_recent_pills_row"),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("downloader_recent_pills_row"),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(pills, key = { it.domain + it.url }) { pill ->
-                        Surface(
-                            onClick = {
-                                urlInput = pill.url
-                                submitSearch(pill.url)
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                            modifier = Modifier
-                                .height(38.dp)
-                                .testTag("recent_pill_${pill.name}")
+                items(pills, key = { it.domain + it.url }) { pill ->
+                    Surface(
+                        onClick = {
+                            urlInput = pill.url
+                            submitSearch(pill.url)
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Circular site favicon avatar
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
-                                        if (!iconFailed) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(pill.faviconUrl)
-                                                    .crossfade(true)
-                                                    .listener(
-                                                        onError = { _, _ -> iconFailed = true }
-                                                    )
-                                                    .build(),
-                                                contentDescription = pill.name,
-                                                modifier = Modifier
-                                                    .size(18.dp)
-                                                    .clip(CircleShape),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Language,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Website name
-                                Text(
-                                    text = pill.name,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.sp
-                                )
-                            }
+                            Text(
+                                text = pill.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height((fiveRowGap - 38.dp - 26.dp).coerceAtLeast(16.dp)))
             }
-        } else {
-            // Generous 5-row gap always present when no search history is there
-            Spacer(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(fiveRowGap - 16.dp)
-                    .testTag("downloader_search_history_five_row_gap")
-            )
         }
-        // 3. Activity Card matching image_4fd87912.png
-        ActivityPreviewCard(
-            activities = activities,
-            onOpenActivity = onOpenActivity,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // 4. Saved Preview Section matching image_1d9653bc.png layout with real data
-        SavedPreviewSection(
-            stacks = effectiveStacks,
-            onViewSavedLibrary = onViewSavedLibrary,
-            onSelectStack = onSelectStack,
-            modifier = Modifier.fillMaxWidth()
-        )
     }
+}
+
+/**
+ * Saved Preview Section    }
 }
 
 /**

@@ -16,8 +16,12 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Lock
@@ -27,9 +31,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,6 +54,24 @@ import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Filters private Locked Folder media by filename, path, URI, MIME type, and media kind.
+ * An empty query preserves the original item order.
+ */
+fun filterLockedFolderItems(items: List<MediaItem>, query: String): List<MediaItem> {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isEmpty()) return items
+
+    return items.filter { item ->
+        listOf(
+            item.name,
+            item.relativePath,
+            item.uri,
+            item.mimeType.orEmpty(),
+            if (item.isVideo) "video" else "image"
+        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+    }
+}
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LockedFolderScreen(
@@ -65,13 +92,43 @@ fun LockedFolderScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchFocused by remember { mutableStateOf(false) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showAddPhotosSheet by remember { mutableStateOf(false) }
     var confirmBatchMoveToBin by remember { mutableStateOf(false) }
+    val visibleItems = remember(items, searchQuery) {
+        filterLockedFolderItems(items, searchQuery)
+    }
 
-    // Intercept back to exit
+    fun handleBack() {
+        when {
+            selectedUris.isNotEmpty() -> selectedUris = emptySet()
+            isSearchFocused || searchQuery.isNotEmpty() -> {
+                searchQuery = ""
+                isSearchFocused = false
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+            else -> onBack()
+        }
+    }
+
+    // Clear private search and selection state as soon as the vault is locked.
+    LaunchedEffect(isUnlocked) {
+        if (!isUnlocked) {
+            searchQuery = ""
+            isSearchFocused = false
+            selectedUris = emptySet()
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
+
     BackHandler {
-        onBack()
+        handleBack()
     }
 
     if (!isUnlocked) {
@@ -88,74 +145,118 @@ fun LockedFolderScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Header Bar
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
+            // Unified full-width search pill with vault actions.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Row(
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .height(52.dp)
+                        .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
+                        .testTag("locked_folder_search_bar")
                 ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.testTag("locked_folder_back_button")
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to Albums")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = ::handleBack,
+                            modifier = Modifier.size(40.dp).testTag("locked_folder_back_button")
+                        ) {
                             Icon(
-                                Icons.Default.Lock,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Locked folder",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Albums",
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        Text(
-                            "${items.size} ${if (items.size == 1) "item" else "items"} · Hidden from main gallery",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
 
-                    FilledTonalButton(
-                        onClick = { showAddPhotosSheet = true },
-                        modifier = Modifier.padding(end = 4.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Add photos", style = MaterialTheme.typography.labelMedium)
-                    }
+                        Box(
+                            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Search locked folder",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                    }
+                                ),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { isSearchFocused = it.isFocused }
+                                    .testTag("locked_folder_search_input")
+                            )
+                        }
 
-                    IconButton(
-                        onClick = onLockAgain,
-                        modifier = Modifier.testTag("locked_folder_lock_now_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Lock,
-                            contentDescription = "Lock folder now",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(32.dp).testTag("locked_folder_search_clear_button")
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { showAddPhotosSheet = true },
+                            modifier = Modifier.size(36.dp).testTag("locked_folder_add_photos_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Add photos to Locked folder",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                searchQuery = ""
+                                isSearchFocused = false
+                                selectedUris = emptySet()
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                onLockAgain()
+                            },
+                            modifier = Modifier.size(36.dp).testTag("locked_folder_lock_now_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = "Lock folder now",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-
             // Multi-selection bar if items are selected
             AnimatedVisibility(
                 visible = selectedUris.isNotEmpty(),
@@ -209,35 +310,21 @@ fun LockedFolderScreen(
 
             if (items.isEmpty()) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.size(88.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(44.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                         }
                         Spacer(Modifier.height(20.dp))
-                        Text(
-                            "Locked folder is empty",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("Locked folder is empty", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Photos and videos in your Locked folder stay private and will not appear in your gallery, albums, or search.",
@@ -256,6 +343,19 @@ fun LockedFolderScreen(
                         }
                     }
                 }
+            } else if (visibleItems.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No matching items", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Try a different name, file type, or path.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
@@ -264,7 +364,7 @@ fun LockedFolderScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    gridItems(items, key = { it.uri }) { item ->
+                    gridItems(visibleItems, key = { it.uri }) { item ->
                         val isSelected = item.uri in selectedUris
                         LockedMediaCard(
                             item = item,
@@ -277,17 +377,12 @@ fun LockedFolderScreen(
                                     onOpen(item)
                                 }
                             },
-                            onLongPress = {
-                                selectedUris = selectedUris + item.uri
-                            },
+                            onLongPress = { selectedUris = selectedUris + item.uri },
                             onUnlock = { onUnlockItem(item) }
                         )
                     }
                 }
             }
-        }
-    }
-
 
 
     // Modal Sheet for adding photos from gallery to locked folder

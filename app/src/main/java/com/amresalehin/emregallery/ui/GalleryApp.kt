@@ -877,23 +877,6 @@ fun GalleryApp() {
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
                         },
-                        onOpenSavedLibrary = {
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
-                            )
-                        },
-                        onOpenSavedStack = { stack ->
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY,
-                                newInboxInitialStack = stack
-                            )
-                        },
                         onOpenBrowser = {
                             hasOpenedAlbumBrowser = true
                             isAlbumBrowserVisible = true

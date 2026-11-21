@@ -78,8 +78,6 @@ fun AlbumsScreen(
     onDeleteAlbum: (String) -> Unit,
     onRenameAlbum: (String, String) -> Unit,
     onOpenPerson: ((String) -> Unit)? = null,
-    onOpenSavedLibrary: (() -> Unit)? = null,
-    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null,
     onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -711,30 +709,6 @@ fun AlbumsScreen(
                     }
                 }
             }
-        }
-
-        // Saved Container (Matching Downloader Main Page)
-        item {
-            SavedPreviewSection(
-                stacks = savedStacks,
-                onViewSavedLibrary = {
-                    if (onOpenSavedLibrary != null) {
-                        onOpenSavedLibrary()
-                    } else {
-                        onFilter("Saved")
-                    }
-                },
-                onSelectStack = { stack ->
-                    if (onOpenSavedStack != null) {
-                        onOpenSavedStack(stack)
-                    } else {
-                        onFilter("Saved")
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("albums_saved_preview_section")
-            )
         }
 
         // 3. Maps Card (strictly black-grey-white)

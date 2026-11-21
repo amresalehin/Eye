@@ -7,11 +7,13 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : FragmentActivity() {
 
@@ -25,11 +27,17 @@ class MainActivity : FragmentActivity() {
         applyHighRefreshRate()
         warmupChromiumEngine()
 
-        setContent {
-            val preferences = remember { PreferencesRepository(applicationContext) }
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
-            EmreGalleryTheme(theme) {
-                GalleryApp()
+        val preferences = PreferencesRepository(applicationContext)
+        lifecycleScope.launch {
+            // Resolve the persisted theme before the first Compose frame. Starting with
+            // "system" here can flash the wrong palette when the saved choice differs
+            // from the device theme.
+            val initialTheme = preferences.theme.first()
+            setContent {
+                val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
+                EmreGalleryTheme(theme) {
+                    GalleryApp()
+                }
             }
         }
     }

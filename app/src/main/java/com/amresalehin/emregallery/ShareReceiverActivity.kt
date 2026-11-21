@@ -41,7 +41,9 @@ import com.amresalehin.emregallery.ui.DownloaderResultsPage
 import com.amresalehin.emregallery.ui.FullScreenBrowserView
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 /**
  * Translucent share-sheet target that opens directly over the sharing app
@@ -69,12 +71,16 @@ class ShareReceiverActivity : ComponentActivity() {
         }
         sharedUrlState.value = extracted
 
-        setContent {
-            val preferences = remember { PreferencesRepository(applicationContext) }
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
-            val currentUrl by sharedUrlState
+        val preferences = PreferencesRepository(applicationContext)
+        lifecycleScope.launch {
+            // Resolve the saved palette before rendering the translucent share UI;
+            // otherwise "system" may briefly override the user's explicit theme.
+            val initialTheme = preferences.theme.first()
+            setContent {
+                val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
+                val currentUrl by sharedUrlState
 
-            EmreGalleryTheme(theme = theme, surfaceColor = Color.Transparent) {
+                EmreGalleryTheme(theme = theme, surfaceColor = Color.Transparent) {
                 if (currentUrl != null) {
                     ShareReceiverScreen(
                         url = currentUrl!!,

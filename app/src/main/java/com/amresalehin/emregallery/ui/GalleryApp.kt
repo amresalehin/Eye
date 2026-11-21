@@ -160,6 +160,9 @@ fun GalleryApp() {
                     if (initialBatch.isNotEmpty()) {
                         media = initialBatch
                         loading = false
+                        scope.launch(Dispatchers.Default) {
+                            ThumbnailPrewarmManager.start(context.applicationContext, initialBatch)
+                        }
                     }
                 }
                 val loadedMedia = withContext(Dispatchers.IO) {

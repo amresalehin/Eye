@@ -22,6 +22,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import coil.Coil
+import coil.memory.MemoryCache
+import coil.request.Disposable
+import com.amresalehin.emregallery.ui.ThumbnailUtils
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -237,21 +241,31 @@ object PreparedThumbnailCache {
  * skips files already prepared, and can safely resume from the first missing thumbnail next launch.
  */
 object ThumbnailPrewarmManager {
+    private const val DISK_WORKER_COUNT = 2
+    private const val MEMORY_WARM_WINDOW = 30
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
+    private val memoryLock = Any()
+    private var appContext: Context? = null
     private var worker: Job? = null
     private var activeUris: List<String>? = null
     private var completedUris: List<String>? = null
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
+    private val activeMemoryPrefetches = LinkedHashMap<String, Disposable>()
 
     /**
-     * Moves the thumbnails most likely to be seen next to the front of the single IO worker.
-     * Only a bounded window is retained; replacing it on direction changes drops stale predictions
-     * without creating a second competing decoder or unbounded queue.
+     * Moves the thumbnails most likely to be seen next to the front of the disk-preparation
+     * workers and warms Coil's in-memory cache for the nearest upcoming window.
+     * Stale memory prefetches outside the new window are cancelled immediately on direction
+     * changes or fast flings so decoder threads stay focused ahead of demand.
      */
-    fun prioritize(items: List<MediaItem>) {
+    fun prioritize(items: List<MediaItem>, context: Context? = null) {
         if (items.isEmpty()) return
+        val ctx = context?.applicationContext ?: appContext
+        if (ctx != null) {
+            warmMemoryCache(ctx, items)
+        }
         synchronized(lock) {
             if (worker?.isActive != true || activeUris.isNullOrEmpty()) return
             priorityQueue.clear()
@@ -262,9 +276,39 @@ object ThumbnailPrewarmManager {
         }
     }
 
+    private fun warmMemoryCache(context: Context, items: List<MediaItem>) {
+        val imageLoader = runCatching { Coil.imageLoader(context) }.getOrNull() ?: return
+        val targets = items.asSequence().distinctBy { it.uri }.take(MEMORY_WARM_WINDOW).toList()
+        val targetUris = targets.mapTo(HashSet(targets.size)) { it.uri }
+
+        synchronized(memoryLock) {
+            val iterator = activeMemoryPrefetches.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.key !in targetUris) {
+                    runCatching { entry.value.dispose() }
+                    iterator.remove()
+                }
+            }
+            for (item in targets) {
+                val existing = activeMemoryPrefetches[item.uri]
+                if (existing != null && !existing.isDisposed) continue
+                val memKey = MemoryCache.Key(ThumbnailUtils.mediaThumbnailKey(item.uri))
+                if (imageLoader.memoryCache?.get(memKey) != null) continue
+                val request = ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                activeMemoryPrefetches[item.uri] = imageLoader.enqueue(request)
+            }
+        }
+    }
+
     fun start(context: Context, media: List<MediaItem>) {
-        val appContext = context.applicationContext
+        val ctx = context.applicationContext
+        appContext = ctx
         val uris = media.map { it.uri }
+
+        if (media.isNotEmpty()) {
+            warmMemoryCache(ctx, media)
+        }
 
         synchronized(lock) {
             if (uris.isEmpty()) {
@@ -279,49 +323,71 @@ object ThumbnailPrewarmManager {
             if (activeUris == uris && worker?.isActive == true) return
             if (completedUris == uris) return
 
+            // Preserve any pending prioritized items that are still in the updated media list.
+            val preservedPriorities = if (priorityQueue.isNotEmpty()) {
+                val uriSet = uris.toHashSet()
+                priorityQueue.filter { it.uri in uriSet }
+            } else {
+                emptyList()
+            }
+
             worker?.cancel()
             priorityQueue.clear()
             queuedPriorityUris.clear()
+            for (item in preservedPriorities) {
+                if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
+            }
             activeUris = uris
             completedUris = null
-            worker = scope.launch {
-                var completedAll = true
-                var naturalIndex = 0
-                var processedCount = 0
-                try {
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val item = synchronized(lock) {
-                            when {
-                                activeUris !== uris -> null
-                                priorityQueue.isNotEmpty() -> {
-                                    val prioritized = priorityQueue.removeFirst()
-                                    queuedPriorityUris.remove(prioritized.uri)
-                                    prioritized
-                                }
-                                naturalIndex < media.size -> media[naturalIndex++]
-                                else -> null
-                            }
-                        } ?: break
 
-                        if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
-                            if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
-                                completedAll = false
-                                break
+            val cursorLock = Any()
+            var naturalIndex = 0
+            var completedAll = true
+
+            worker = scope.launch {
+                try {
+                    val workers = List(DISK_WORKER_COUNT) {
+                        launch {
+                            var processedCount = 0
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val item = synchronized(lock) {
+                                    when {
+                                        activeUris !== uris -> null
+                                        priorityQueue.isNotEmpty() -> {
+                                            val prioritized = priorityQueue.removeFirst()
+                                            queuedPriorityUris.remove(prioritized.uri)
+                                            prioritized
+                                        }
+                                        else -> synchronized(cursorLock) {
+                                            if (naturalIndex < media.size) media[naturalIndex++] else null
+                                        }
+                                    }
+                                } ?: break
+
+                                if (!PreparedThumbnailCache.hasPrepared(ctx, item.uri)) {
+                                    if (!PreparedThumbnailCache.hasStorageHeadroom(ctx)) {
+                                        synchronized(cursorLock) { completedAll = false }
+                                        break
+                                    }
+                                    val prepared = try {
+                                        PreparedThumbnailCache.prepareIfMissing(ctx, item.uri)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        false
+                                    }
+                                    if (!prepared) {
+                                        synchronized(cursorLock) { completedAll = false }
+                                    }
+                                }
+                                processedCount++
+                                // Regularly yield so visible requests and other IO work can run promptly.
+                                if (processedCount % 8 == 0) yield()
                             }
-                            val prepared = try {
-                                PreparedThumbnailCache.prepareIfMissing(appContext, item.uri)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                false
-                            }
-                            if (!prepared) completedAll = false
                         }
-                        processedCount++
-                        // Regularly yield so visible requests and other IO work can run promptly.
-                        if (processedCount % 8 == 0) yield()
                     }
+                    workers.forEach { it.join() }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } finally {

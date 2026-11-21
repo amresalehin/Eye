@@ -184,7 +184,8 @@ fun HomeScreen(
                     (anchor - 1 downTo (anchor - predictedRows).coerceAtLeast(0)).toList()
                 }
                 ThumbnailPrewarmManager.prioritize(
-                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(120)
+                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(120),
+                    context
                 )
                 return Velocity.Zero
             }
@@ -224,7 +225,7 @@ fun HomeScreen(
             val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
             val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
             if (movedEnough || direction != previousDirection) {
-                val forwardCount = if (moving) 14 else 6
+                val forwardCount = if (moving) 16 else 8
                 val backwardCount = if (moving) 2 else 4
                 val lastIndex = predictivePrefetchRows.lastIndex
                 val targetIndices = if (direction > 0) {
@@ -235,7 +236,8 @@ fun HomeScreen(
                         (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
                 }
                 ThumbnailPrewarmManager.prioritize(
-                    targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120)
+                    targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120),
+                    context
                 )
                 previousAnchor = anchor
                 previousDirection = direction

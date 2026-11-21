@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -135,6 +136,8 @@ fun GalleryApp() {
     var activePersonId by remember { mutableStateOf<String?>(null) }
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
+    var isAlbumBrowserVisible by remember { mutableStateOf(false) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -891,6 +894,10 @@ fun GalleryApp() {
                                 newInboxInitialStack = stack
                             )
                         },
+                        onOpenBrowser = {
+                            hasOpenedAlbumBrowser = true
+                            isAlbumBrowserVisible = true
+                        },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
                             showCreateAlbumDialog = true
@@ -1617,6 +1624,30 @@ fun GalleryApp() {
             },
             onClose = { showSidePanel = false }
         )
+
+        if (hasOpenedAlbumBrowser) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(if (isAlbumBrowserVisible) 100f else -1f)
+                    .graphicsLayer {
+                        alpha = if (isAlbumBrowserVisible) 1f else 0f
+                        translationX = if (isAlbumBrowserVisible) 0f else size.width * 2f
+                    }
+            ) {
+                FullScreenBrowserView(
+                    initialUrl = "",
+                    isActive = isAlbumBrowserVisible,
+                    onClose = { isAlbumBrowserVisible = false },
+                    onDownloadComplete = { count ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Downloaded $count media items to Inbox")
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
 
         SnackbarHost(
             hostState = snackbarHostState,

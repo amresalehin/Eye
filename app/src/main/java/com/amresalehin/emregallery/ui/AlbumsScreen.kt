@@ -79,7 +79,8 @@ fun AlbumsScreen(
     onRenameAlbum: (String, String) -> Unit,
     onOpenPerson: ((String) -> Unit)? = null,
     onOpenSavedLibrary: (() -> Unit)? = null,
-    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null
+    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null,
+    onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
@@ -251,6 +252,25 @@ fun AlbumsScreen(
                     onClick = { onFilter("Inbox") },
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Browser is a compact Album shortcut, separate from the Downloader Inbox.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CollectionTile(
+                    title = "Browser",
+                    count = "Web browsing",
+                    icon = Icons.Default.Language,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onOpenBrowser?.invoke() },
+                    modifier = Modifier.weight(1f).testTag("albums_browser_tile")
+                )
+                Spacer(Modifier.weight(1f))
             }
         }
 

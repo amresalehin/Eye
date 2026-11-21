@@ -91,8 +91,7 @@ enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
     SAVED_LIBRARY,
-    ACTIVITY_PAGE,
-    BROWSER_PAGE
+    ACTIVITY_PAGE
 }
 
 @Composable
@@ -109,8 +108,7 @@ private fun DownloaderBottomNavigationBar(
         val destinations = listOf(
             Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.ArrowDownward, "Home"),
             Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
-            Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved"),
-            Triple(DownloaderViewMode.BROWSER_PAGE, Icons.Default.Language, "Browser")
+            Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved")
         )
         destinations.forEach { (destination, icon, label) ->
             NavigationBarItem(
@@ -153,8 +151,6 @@ fun MediaInboxScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember(initialStackForDetail) { mutableStateOf(initialStackForDetail) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var hasOpenedBrowser by remember { mutableStateOf(false) }
-    var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
     val savedGridState = rememberLazyGridState()
     val tabStateHolder = rememberSaveableStateHolder()
@@ -167,20 +163,7 @@ fun MediaInboxScreen(
 
     var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
     var activeFetchUrl by remember { mutableStateOf("") }
-    var browserLaunchId by remember { mutableIntStateOf(0) }
-
-    fun openBrowser(url: String? = null) {
-        if (!url.isNullOrBlank()) {
-            browserInitialUrl = url
-            browserLaunchId += 1
-        }
-        hasOpenedBrowser = true
-        selectedStackForDetail = null
-        selectedStackIds = emptySet()
-        currentViewMode = DownloaderViewMode.BROWSER_PAGE
-    }
-
-    BackHandler(enabled = currentViewMode != DownloaderViewMode.BROWSER_PAGE) {
+    BackHandler {
         if (isSelectionMode) {
             selectedStackIds = emptySet()
         } else if (isSearchFocused || searchQuery.isNotEmpty()) {
@@ -234,9 +217,7 @@ fun MediaInboxScreen(
             DownloaderResultsPage(
                 targetUrl = activeFetchUrl,
                 onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                onOpenBrowser = { url ->
-                    openBrowser(url)
-                },
+                showBrowserActions = false,
                 onDownloadComplete = { /* Silent foreground download with no toast */ },
                 onViewSavedLibrary = {
                     currentViewMode = DownloaderViewMode.SAVED_LIBRARY
@@ -474,8 +455,7 @@ fun MediaInboxScreen(
                     if (currentViewMode in listOf(
                             DownloaderViewMode.SEARCH_PAGE,
                             DownloaderViewMode.ACTIVITY_PAGE,
-                            DownloaderViewMode.SAVED_LIBRARY,
-                            DownloaderViewMode.BROWSER_PAGE
+                            DownloaderViewMode.SAVED_LIBRARY
                         ) && selectedStackForDetail == null
                     ) {
                         DownloaderBottomNavigationBar(
@@ -487,9 +467,6 @@ fun MediaInboxScreen(
                                     isSearchFocused = false
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
-                                    if (mode == DownloaderViewMode.BROWSER_PAGE) {
-                                        hasOpenedBrowser = true
-                                    }
                                     currentViewMode = mode
                                 }
                             }
@@ -530,9 +507,6 @@ fun MediaInboxScreen(
                                 activeFetchUrl = targetUrl
                                 currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
                             },
-                            onOpenBrowser = { targetUrl ->
-                                openBrowser(targetUrl)
-                            },
                             onViewSavedLibrary = {
                                 currentViewMode = DownloaderViewMode.SAVED_LIBRARY
                             },
@@ -563,8 +537,6 @@ fun MediaInboxScreen(
                             modifier = Modifier.fillMaxSize()
                             )
                         }
-                    } else if (currentViewMode == DownloaderViewMode.BROWSER_PAGE) {
-                        Box(Modifier.fillMaxSize().testTag("downloader_browser_page"))
                     } else {
                         // SAVED LIBRARY VIEW
                         if (filteredStacks.isNotEmpty() || isDownloading) {
@@ -765,9 +737,6 @@ fun MediaInboxScreen(
                         onOpenMediaItem?.invoke(uri)
                     }
                 },
-                onOpenBrowser = { url ->
-                    openBrowser(url)
-                },
                 onDeleteStack = {
                     inboxRepo.deleteStack(stack.id)
                     selectedStackForDetail = null
@@ -781,35 +750,6 @@ fun MediaInboxScreen(
     }
 
 
-    // Retain the WebView after first visit so switching tabs does not discard the browser session.
-    if (hasOpenedBrowser) {
-        val isBrowserActive = currentViewMode == DownloaderViewMode.BROWSER_PAGE
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(if (isBrowserActive) 25f else -1f)
-                .graphicsLayer {
-                    alpha = if (isBrowserActive) 1f else 0f
-                    translationX = if (isBrowserActive) 0f else size.width * 2f
-                }
-                .padding(
-                    bottom = 80.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                )
-        ) {
-            FullScreenBrowserView(
-                initialUrl = browserInitialUrl,
-                navigationRequestId = browserLaunchId,
-                isActive = isBrowserActive,
-                onClose = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                onDownloadComplete = { count ->
-                    scope.launch {
-                        snackbarHostState.showSnackbar("Downloaded $count media items to Inbox!")
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-    }
     }
 }
 
@@ -1289,7 +1229,6 @@ fun MediaStackDetailTab(
     stack: MediaInboxStack,
     onClose: () -> Unit,
     onOpenMedia: (String) -> Unit,
-    onOpenBrowser: (String) -> Unit,
     onDeleteStack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1436,14 +1375,6 @@ fun MediaStackDetailTab(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Open in Browser") },
-                            leadingIcon = { Icon(Icons.Default.OpenInNew, null) },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
-                            }
-                        )
                         DropdownMenuItem(
                             text = { Text("View in Gallery") },
                             leadingIcon = { Icon(Icons.Default.Visibility, null) },
@@ -1783,25 +1714,8 @@ fun MediaStackDetailTab(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
-                                    }
+                                modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = {
-                                    onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
-                                },
-                                modifier = Modifier.size(32.dp).testTag("stack_detail_redirect_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.OpenInNew,
-                                    contentDescription = "Open in browser",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                         }
                     }
 
@@ -2316,7 +2230,7 @@ fun SkeletonCard(heightDp: Int) {
 }
 
 /**
- * Full-screen in-app Chromium browser launched from the Media Downloader page.
+ * Full-screen in-app Chromium browser launched from the Albums screen.
  * Allows web browsing and auto-detects downloadable media on any visited site.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2417,7 +2331,7 @@ fun FullScreenBrowserView(
             DirectBrowserView(
                 initialUrl = initialUrl,
                 navigationRequestId = navigationRequestId,
-                onClose = null,
+                onClose = onClose,
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
                 discoveredCount = discoveredItems.size,

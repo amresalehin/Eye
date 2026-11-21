@@ -22,8 +22,8 @@ class DownloaderSearchPageUnitTest {
         assertTrue(modes.contains("DOWNLOADER_PAGE"))
         assertTrue(modes.contains("SAVED_LIBRARY"))
         assertTrue(modes.contains("ACTIVITY_PAGE"))
-        assertTrue(modes.contains("BROWSER_PAGE"))
-        assertEquals(5, modes.size)
+        assertFalse(modes.contains("BROWSER_PAGE"))
+        assertEquals(4, modes.size)
     }
 
     @Test
@@ -687,11 +687,11 @@ class DownloaderSearchPageUnitTest {
         val primaryTabs = setOf(
             DownloaderViewMode.SEARCH_PAGE,
             DownloaderViewMode.ACTIVITY_PAGE,
-            DownloaderViewMode.SAVED_LIBRARY,
-            DownloaderViewMode.BROWSER_PAGE
+            DownloaderViewMode.SAVED_LIBRARY
         )
-        assertEquals(4, primaryTabs.size)
+        assertEquals(3, primaryTabs.size)
         assertTrue(DownloaderViewMode.values().toSet().containsAll(primaryTabs))
+        assertFalse(DownloaderViewMode.values().any { it.name == "BROWSER_PAGE" })
         assertFalse(primaryTabs.contains(DownloaderViewMode.DOWNLOADER_PAGE))
     }
 

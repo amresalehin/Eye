@@ -138,7 +138,6 @@ data class DownloaderPill(
 @Composable
 fun DownloaderSearchMainPage(
     onFetchUrl: (String) -> Unit,
-    onOpenBrowser: (String) -> Unit,
     onViewSavedLibrary: () -> Unit,
     onOpenActivity: () -> Unit = {},
     onBack: () -> Unit = {},
@@ -156,7 +155,6 @@ fun DownloaderSearchMainPage(
     val historyManager = remember { BrowserHistoryManager(context) }
     val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
     val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
-    val searchEnginePref by downloaderPrefs.searchEngine.collectAsState(initial = DownloaderPreferencesManager.getSearchEngineSync(context))
     var showDownloaderSettings by remember { mutableStateOf(false) }
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val repoStacks by inboxRepo.stacks.collectAsState()
@@ -188,18 +186,6 @@ fun DownloaderSearchMainPage(
             historyManager.recordVisit(normalized)
         }
         onFetchUrl(normalized)
-    }
-
-    fun openInBrowser(queryOrUrl: String) {
-        val trimmed = queryOrUrl.trim()
-        if (trimmed.isBlank()) return
-        keyboardController?.hide()
-        focusManager.clearFocus()
-        val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed, searchEnginePref)
-        scope.launch {
-            historyManager.recordVisit(destinationUrl)
-        }
-        onOpenBrowser(destinationUrl)
     }
 
     // Dynamic pills derived solely from user visit/saved history - no hardcoded sites
@@ -354,21 +340,6 @@ fun DownloaderSearchMainPage(
                                     contentDescription = "Clear",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
-                                )
-                            }
-
-                            // Browse button (opens in-app browser with query / url)
-                            IconButton(
-                                onClick = { openInBrowser(urlInput) },
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .testTag("downloader_action_browse_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.TravelExplore,
-                                    contentDescription = "Browse web with search query",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
@@ -863,6 +834,7 @@ fun DownloaderResultsPage(
     targetUrl: String,
     onBack: () -> Unit,
     onOpenBrowser: ((String) -> Unit)? = null,
+    showBrowserActions: Boolean = true,
     onDownloadComplete: (Int) -> Unit,
     onViewSavedLibrary: () -> Unit,
     modifier: Modifier = Modifier
@@ -1393,20 +1365,21 @@ fun DownloaderResultsPage(
                                     )
                                 }
 
-                                // 2. Launch in Live Browser Button
-                                IconButton(
-                                    onClick = {
-                                        val target = urlTextFieldValue.text.ifBlank { activeUrl }
-                                        performOpenInBrowser(target)
-                                    },
-                                    modifier = Modifier.size(34.dp).testTag("downloader_action_browse_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                        contentDescription = "Open in browser",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(19.dp)
-                                    )
+                                if (showBrowserActions) {
+                                    IconButton(
+                                        onClick = {
+                                            val target = urlTextFieldValue.text.ifBlank { activeUrl }
+                                            performOpenInBrowser(target)
+                                        },
+                                        modifier = Modifier.size(34.dp).testTag("downloader_action_browse_btn")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                            contentDescription = "Open in browser",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
                                 }
 
                                 // 3. Fetch / Scrape new site directly on this page
@@ -1487,27 +1460,29 @@ fun DownloaderResultsPage(
                                         onDismissRequest = { browserMenuExpanded = false },
                                         modifier = Modifier.testTag("downloader_browser_dropdown_menu")
                                     ) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    if (onOpenBrowser != null) "Open in browser" else "Open in external browser"
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = if (onOpenBrowser != null) Icons.Default.TravelExplore else Icons.AutoMirrored.Filled.OpenInNew,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            },
-                                            onClick = {
-                                                browserMenuExpanded = false
-                                                performOpenInBrowser(activeUrl)
-                                            },
-                                            modifier = Modifier.testTag("downloader_menu_open_browser")
-                                        )
+                                        if (showBrowserActions) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        if (onOpenBrowser != null) "Open in browser" else "Open in external browser"
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = if (onOpenBrowser != null) Icons.Default.TravelExplore else Icons.AutoMirrored.Filled.OpenInNew,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                },
+                                                onClick = {
+                                                    browserMenuExpanded = false
+                                                    performOpenInBrowser(activeUrl)
+                                                },
+                                                modifier = Modifier.testTag("downloader_menu_open_browser")
+                                            )
+                                        }
 
-                                        if (onOpenBrowser != null) {
+                                        if (showBrowserActions && onOpenBrowser != null) {
                                             DropdownMenuItem(
                                                 text = { Text("Open externally") },
                                                 leadingIcon = {

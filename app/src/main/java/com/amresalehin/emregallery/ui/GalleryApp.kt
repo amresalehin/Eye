@@ -1104,7 +1104,7 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
-                                "Media Downloader", "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
+                                "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }

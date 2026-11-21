@@ -36,7 +36,6 @@ fun SettingsScreen(
     var query by remember { mutableStateOf("") }
 
     val entries = listOf(
-        "Media Downloader" to Icons.Default.CloudDownload,
         "Theme" to Icons.Default.Palette,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
@@ -231,7 +230,6 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "Media Downloader" -> "Download videos & photos directly to gallery"
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"

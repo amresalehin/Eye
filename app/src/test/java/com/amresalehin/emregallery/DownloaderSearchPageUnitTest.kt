@@ -4,6 +4,9 @@ import com.amresalehin.emregallery.data.DownloadActivityItem
 import com.amresalehin.emregallery.data.DownloadActivityManager
 import com.amresalehin.emregallery.data.DownloadActivityStatus
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.MediaInboxItem
+import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.filterSavedMediaStacks
 import com.amresalehin.emregallery.ui.Destination
 import com.amresalehin.emregallery.ui.DetectedPlatform
 import com.amresalehin.emregallery.ui.DownloaderViewMode
@@ -110,69 +113,81 @@ class DownloaderSearchPageUnitTest {
 
     @Test
     fun testSavedLibrarySearchFilterLogic() {
-        val stack1 = com.amresalehin.emregallery.data.MediaInboxStack(
+        val stack1 = MediaInboxStack(
             id = "stack_1",
             title = "Taj Mahal - Wikipedia",
             sourceDomain = "wikipedia.org",
             sourceUrl = "https://en.wikipedia.org/wiki/Taj_Mahal",
             items = listOf(
-                com.amresalehin.emregallery.data.MediaInboxItem(
+                MediaInboxItem(
                     id = "item_1",
                     title = "Taj Mahal Front View",
-                    localUri = "content://media/1",
+                    localUri = "file:///storage/emulated/0/Download/taj-mahal-front.jpg",
                     sourceUrl = "https://upload.wikimedia.org/taj.jpg",
-                    isVideo = false
+                    isVideo = false,
+                    format = "JPG"
                 )
             )
         )
-        val stack2 = com.amresalehin.emregallery.data.MediaInboxStack(
+        val stack2 = MediaInboxStack(
             id = "stack_2",
             title = "Pexels Nature Scenery",
             sourceDomain = "pexels.com",
             sourceUrl = "https://pexels.com/nature",
             items = listOf(
-                com.amresalehin.emregallery.data.MediaInboxItem(
+                MediaInboxItem(
                     id = "item_2",
                     title = "Desert Sunset",
-                    localUri = "content://media/2",
-                    sourceUrl = "https://images.pexels.com/desert.jpg",
-                    isVideo = false
+                    localUri = "file:///storage/emulated/0/Download/desert-sunset.mp4",
+                    sourceUrl = "https://images.pexels.com/desert.mp4",
+                    isVideo = true,
+                    format = "MP4"
                 )
             )
         )
-        val allStacks = listOf(stack1, stack2)
+        val notDownloadedStack = MediaInboxStack(
+            id = "stack_pending",
+            title = "Not downloaded collection",
+            sourceDomain = "example.com",
+            sourceUrl = "https://example.com/not-downloaded",
+            items = listOf(
+                MediaInboxItem(
+                    id = "pending_item",
+                    title = "Not downloaded video",
+                    localUri = "",
+                    sourceUrl = "https://example.com/not-downloaded.mp4",
+                    isVideo = true,
+                    format = "MP4"
+                )
+            )
+        )
+        val allStacks = listOf(stack1, stack2, notDownloadedStack)
 
-        // Matching title
-        val tajMatches = allStacks.filter { stack ->
-            stack.title.contains("taj", ignoreCase = true) ||
-                    stack.sourceDomain.contains("taj", ignoreCase = true) ||
-                    stack.items.any { it.title.contains("taj", ignoreCase = true) }
-        }
+        // Search downloaded collection metadata.
+        val tajMatches = filterSavedMediaStacks(allStacks, "taj")
         assertEquals(1, tajMatches.size)
         assertEquals("stack_1", tajMatches[0].id)
 
-        // Matching domain
-        val pexelsMatches = allStacks.filter { stack ->
-            stack.title.contains("pexels", ignoreCase = true) ||
-                    stack.sourceDomain.contains("pexels", ignoreCase = true) ||
-                    stack.items.any { it.title.contains("pexels", ignoreCase = true) }
-        }
+        // Search by downloaded collection source.
+        val pexelsMatches = filterSavedMediaStacks(allStacks, "pexels")
         assertEquals(1, pexelsMatches.size)
         assertEquals("stack_2", pexelsMatches[0].id)
 
-        // Matching item title
-        val desertMatches = allStacks.filter { stack ->
-            stack.title.contains("desert", ignoreCase = true) ||
-                    stack.sourceDomain.contains("desert", ignoreCase = true) ||
-                    stack.items.any { it.title.contains("desert", ignoreCase = true) }
-        }
-        assertEquals(1, desertMatches.size)
-        assertEquals("stack_2", desertMatches[0].id)
+        // Search by downloaded media title, local file name, and format.
+        val titleMatches = filterSavedMediaStacks(allStacks, "desert sunset")
+        assertEquals(listOf("stack_2"), titleMatches.map { it.id })
 
-        // Empty query matches all
-        val emptyMatches = allStacks.filter { stack ->
-            "".isBlank() || stack.title.contains("", ignoreCase = true)
-        }
+        val fileNameMatches = filterSavedMediaStacks(allStacks, "desert-sunset.mp4")
+        assertEquals(listOf("stack_2"), fileNameMatches.map { it.id })
+
+        val formatMatches = filterSavedMediaStacks(allStacks, "mp4")
+        assertEquals(listOf("stack_2"), formatMatches.map { it.id })
+
+        // A stack without a local downloaded item must not appear in Saved Library search.
+        assertTrue(filterSavedMediaStacks(allStacks, "not downloaded").isEmpty())
+
+        // An empty query returns only stacks containing saved local media.
+        val emptyMatches = filterSavedMediaStacks(allStacks, "")
         assertEquals(2, emptyMatches.size)
     }
 
@@ -243,7 +258,7 @@ class DownloaderSearchPageUnitTest {
         urlInput = "https://instagram.com/reel/123"
         assertFalse(showSwitcher(isSearchFocused))
         assertFalse(showPasteButton(urlInput))
-        assertTrue(showActionButtons(urlInput)) // Clear, Browse, and Download visible
+        assertTrue(showActionButtons(urlInput)) // Clear and Download visible
 
         // Action: Back button clicked in active search/edit mode
         var didNavigateBack = false

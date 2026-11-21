@@ -32,6 +32,51 @@ data class MediaInboxStack(
     val description: String = ""
 )
 
+/**
+ * Searches only media that has a local URI in the saved library.
+ *
+ * Collection metadata remains searchable, while individual downloads can also be
+ * found by title, format, source URL, or the local file name.
+ */
+fun filterSavedMediaStacks(
+    stacks: List<MediaInboxStack>,
+    query: String
+): List<MediaInboxStack> {
+    val savedStacks = stacks.filter { stack ->
+        stack.items.any { item -> item.localUri.isNotBlank() }
+    }
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isEmpty()) return savedStacks
+
+    return savedStacks.filter { stack ->
+        val stackMatches = listOf(
+            stack.title,
+            stack.sourceDomain,
+            stack.sourceUrl,
+            stack.description
+        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+
+        val downloadedItemMatches = stack.items
+            .asSequence()
+            .filter { item -> item.localUri.isNotBlank() }
+            .any { item ->
+                val localFileName = item.localUri
+                    .substringBefore('?')
+                    .substringBefore('#')
+                    .substringAfterLast('/')
+                listOf(
+                    item.title,
+                    item.format,
+                    item.sourceUrl,
+                    item.localUri,
+                    localFileName
+                ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+            }
+
+        stackMatches || downloadedItemMatches
+    }
+}
+
 class MediaInboxRepository(private val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("media_inbox_prefs", Context.MODE_PRIVATE)

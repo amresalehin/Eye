@@ -74,6 +74,7 @@ import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import com.amresalehin.emregallery.data.filterSavedMediaStacks
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -190,21 +191,13 @@ fun MediaInboxScreen(
         }
     }
 
-    // Filter stacks based on search query
+    // Search the saved/downloaded items and keep the existing sort order.
     val filteredStacks = remember(stacks, searchQuery, sortOrder) {
-        val base = if (searchQuery.isBlank()) {
-            stacks
-        } else {
-            stacks.filter { stack ->
-                stack.title.contains(searchQuery, ignoreCase = true) ||
-                        stack.sourceDomain.contains(searchQuery, ignoreCase = true) ||
-                        stack.items.any { it.title.contains(searchQuery, ignoreCase = true) }
-            }
-        }
+        val matchingSavedStacks = filterSavedMediaStacks(stacks, searchQuery)
         if (sortOrder == "Newest") {
-            base.sortedByDescending { it.timestampMillis }
+            matchingSavedStacks.sortedByDescending { it.timestampMillis }
         } else {
-            base.sortedBy { it.timestampMillis }
+            matchingSavedStacks.sortedBy { it.timestampMillis }
         }
     }
 
@@ -316,7 +309,7 @@ fun MediaInboxScreen(
                                 } else {
                                     // One Unified Search Bar
                                     Surface(
-                                        shape = RoundedCornerShape(26.dp),
+                                        shape = RoundedCornerShape(20.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                                         modifier = Modifier
@@ -373,7 +366,7 @@ fun MediaInboxScreen(
                                             ) {
                                                 if (searchQuery.isEmpty()) {
                                                     Text(
-                                                        text = "Find in Saved Library...",
+                                                        text = "Search downloaded media...",
                                                         style = MaterialTheme.typography.bodyMedium,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         maxLines = 1,
@@ -473,27 +466,6 @@ fun MediaInboxScreen(
                         )
                     }
                 },
-                floatingActionButton = {
-                    if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY && !isSelectionMode) {
-                        FloatingActionButton(
-                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                            shape = RoundedCornerShape(20.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                            modifier = Modifier
-                                .padding(bottom = 16.dp, end = 8.dp)
-                                .size(56.dp)
-                                .testTag("media_inbox_fab_add")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "New Media Download",
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-                }
             ) { innerPadding ->
                 Box(
                     modifier = Modifier

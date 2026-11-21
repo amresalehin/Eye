@@ -119,8 +119,7 @@ fun detectPlatform(url: String): DetectedPlatform {
 
 /**
  * Minimal Emre-style Search & URL Fetch Page for the Media Downloader.
- * Clean monochromatic layout with dynamic capsule search input and compact
- * site favicon pills based on user history.
+ * Clean monochromatic URL input with a compact list of recently visited sites.
  */
 data class DownloaderPill(
     val domain: String,
@@ -220,246 +219,261 @@ fun DownloaderSearchMainPage(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. One Unified Search Bar on Main Page (Back button & Switcher pills inside search bar, link icon removed)
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .testTag("downloader_main_search_card")
+        // Keep navigation separate from the URL field so the search surface stays uncluttered.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
+            IconButton(
+                onClick = {
+                    if (isSearchFocused || urlInput.isNotEmpty()) {
+                        urlInput = ""
+                        isSearchFocused = false
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    } else {
+                        onBack()
+                    }
+                },
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .size(40.dp)
+                    .testTag("downloader_main_back_btn")
             ) {
-                // Back Button inside search bar (exits search edit if focused/query present, or navigates back)
-                IconButton(
-                    onClick = {
-                        if (isSearchFocused || urlInput.isNotEmpty()) {
-                            urlInput = ""
-                            isSearchFocused = false
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        } else {
-                            onBack()
-                        }
-                    },
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+                    .testTag("downloader_main_search_card")
+            ) {
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .testTag("downloader_main_back_btn")
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
-                }
 
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 10.dp).size(20.dp)
-                )
+                    Spacer(Modifier.width(10.dp))
 
-                Spacer(Modifier.width(8.dp))
-
-                // Search / URL input field (Link icon removed!)
-                // Search / URL input field (Link icon removed!)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (urlInput.isEmpty()) {
-                        Text(
-                            text = "Paste link or enter URL...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 4.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (urlInput.isEmpty()) {
+                            Text(
+                                text = "Paste link or enter URL",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        BasicTextField(
+                            value = urlInput,
+                            onValueChange = { urlInput = it },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Uri,
+                                imeAction = ImeAction.Go
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    if (urlInput.isNotBlank()) submitSearch(urlInput)
+                                }
+                            ),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { focusState ->
+                                    isSearchFocused = focusState.isFocused
+                                }
+                                .testTag("downloader_main_url_input")
                         )
                     }
-                    BasicTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Go
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onGo = {
-                                if (urlInput.isNotBlank()) {
-                                    submitSearch(urlInput)
+
+                    AnimatedContent(
+                        targetState = urlInput.isNotBlank(),
+                        transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
+                        label = "search_bar_actions"
+                    ) { hasQuery ->
+                        if (hasQuery) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { urlInput = "" },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("downloader_clear_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { submitSearch(urlInput) },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .testTag("downloader_action_download_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDownward,
+                                        contentDescription = "Download media from URL",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
-                        ),
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 15.sp
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { focusState ->
-                                isSearchFocused = focusState.isFocused
-                            }
-                            .testTag("downloader_main_url_input")
-                    )
-                }
-
-                Spacer(Modifier.width(6.dp))
-
-                // Dynamic Action Controls: Paste icon when empty; Download + Browse + Clear when query present
-                AnimatedContent(
-                    targetState = urlInput.isNotBlank(),
-                    transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
-                    label = "search_bar_actions"
-                ) { hasQuery ->
-                    if (hasQuery) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            // Clear input button
+                        } else {
                             IconButton(
-                                onClick = { urlInput = "" },
+                                onClick = {
+                                    val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
+                                    if (clipText.isNotBlank()) {
+                                        urlInput = clipText
+                                        submitSearch(clipText)
+                                    }
+                                },
                                 modifier = Modifier
-                                    .size(32.dp)
-                                    .testTag("downloader_clear_btn")
+                                    .size(36.dp)
+                                    .testTag("downloader_paste_btn")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-
-                            // Download button (opens downloader page) - clean and transparent
-                            IconButton(
-                                onClick = { submitSearch(urlInput) },
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .testTag("downloader_action_download_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowDownward,
-                                    contentDescription = "Download media from URL",
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = "Paste from clipboard and fetch",
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                        }
-                    } else {
-                        // Paste button when empty
-                        IconButton(
-                            onClick = {
-                                val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
-                                if (clipText.isNotBlank()) {
-                                    urlInput = clipText
-                                    submitSearch(clipText)
-                                }
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("downloader_paste_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "Paste from clipboard and fetch",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
                     }
                 }
             }
         }
 
-        // Recent browsing history shortcuts.
+        // Recent searches are displayed as standard full-width rows, one site per line.
         if (pills.isNotEmpty()) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("downloader_recent_searches")
             ) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("downloader_recent_pills_row"),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(pills, key = { it.domain + it.url }) { pill ->
-                        Surface(
-                            onClick = {
+                Text(
+                    text = "Recent searches",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(6.dp))
+
+                pills.forEachIndexed { index, pill ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
                                 urlInput = pill.url
                                 submitSearch(pill.url)
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            }
+                            .heightIn(min = 60.dp)
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                            .testTag("downloader_recent_row_$index"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
+                        Box(
                             modifier = Modifier
-                                .height(38.dp)
-                                .testTag("recent_pill_${pill.name}")
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Circular site favicon avatar
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
-                                        if (!iconFailed) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(pill.faviconUrl)
-                                                    .crossfade(true)
-                                                    .listener(
-                                                        onError = { _, _ -> iconFailed = true }
-                                                    )
-                                                    .build(),
-                                                contentDescription = pill.name,
-                                                modifier = Modifier
-                                                    .size(18.dp)
-                                                    .clip(CircleShape),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Language,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Website name
-                                Text(
-                                    text = pill.name,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.sp
+                            if (!iconFailed) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(pill.faviconUrl)
+                                        .crossfade(true)
+                                        .listener(onError = { _, _ -> iconFailed = true })
+                                        .build(),
+                                    contentDescription = pill.name,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Fit
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = pill.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = pill.domain,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    if (index < pills.lastIndex) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 52.dp)
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        )
                     }
                 }
             }

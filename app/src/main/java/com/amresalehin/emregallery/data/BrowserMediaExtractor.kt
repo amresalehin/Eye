@@ -285,9 +285,9 @@ class BrowserMediaExtractor(private val context: Context) {
                         },
                         blobCaptureStore = blobCaptureStore,
                         onBlobCaptured = { item ->
-                            mediaProcessingExecutor.execute {
-                                if (!isCancelled) dispatchCapturedBlobItem(item)
-                            }
+                            // finishBlobCapture is invoked only after every byte is written;
+                            // merge immediately so provider cleanup cannot race a queued callback.
+                            if (!isCancelled) dispatchCapturedBlobItem(item)
                         }
                     ),
                     "EmreBridge"

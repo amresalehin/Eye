@@ -2542,13 +2542,7 @@ fun BrowserEmptyHomePage(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            if (shortcutSites.isEmpty()) {
-                Text(
-                    "Frequently visited sites will appear here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
+            if (shortcutSites.isNotEmpty()) {
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
@@ -2617,38 +2611,7 @@ fun BrowserEmptyHomePage(
                 }
             }
 
-            if (recentSites.isEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column {
-                            Text(
-                                "No browsing history yet",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                "Use the address bar above to visit your first site.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            } else {
+            if (recentSites.isNotEmpty()) {
                 recentSites.forEachIndexed { index, site ->
                     Surface(
                         onClick = { onNavigate(site.url) },

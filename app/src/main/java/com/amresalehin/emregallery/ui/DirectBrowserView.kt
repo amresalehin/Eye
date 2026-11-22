@@ -1155,10 +1155,12 @@ fun DirectBrowserView(
                         clearCache(true)
                         clearFormData()
                     }
-                    CookieManager.getInstance().removeAllCookies(null)
-                    CookieManager.getInstance().flush()
+                    CookieManager.getInstance().removeAllCookies {
+                        CookieManager.getInstance().flush()
+                    }
                     WebStorage.getInstance().deleteAllData()
                     lastRecordedHistoryUrl = ""
+                    Toast.makeText(context, "Browsing data cleared", Toast.LENGTH_SHORT).show()
                 },
                 onDismiss = { showBrowserSettings = false }
             )
@@ -1320,18 +1322,18 @@ private fun BrowserSettingsBottomSheet(
                     )
                 }
                 Slider(
-                    value = textZoom.toFloat().coerceIn(75f, 150f),
-                    onValueChange = { onTextZoomChange(it.toInt().coerceIn(75, 150)) },
-                    valueRange = 75f..150f,
-                    steps = 14,
+                    value = textZoom.toFloat().coerceIn(50f, 200f),
+                    onValueChange = { onTextZoomChange(it.toInt().coerceIn(50, 200)) },
+                    valueRange = 50f..200f,
+                    steps = 29,
                     modifier = Modifier.testTag("browser_text_zoom_slider")
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("75%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("150%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("50%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("200%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.height(12.dp))

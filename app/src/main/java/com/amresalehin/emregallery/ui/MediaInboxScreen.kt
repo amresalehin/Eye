@@ -99,7 +99,7 @@ enum class DownloaderViewMode {
 @Composable
 fun MediaInboxScreen(
     onBack: () -> Unit,
-    onHomeBack: () -> Unit = onBack,
+    onOpenMenu: () -> Unit = {},
     onGlobalNavigationVisibilityChanged: (Boolean) -> Unit = {},
     initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
@@ -438,7 +438,7 @@ fun MediaInboxScreen(
                             onOpenActivity = {
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
-                            onBack = onHomeBack,
+                            onOpenMenu = onOpenMenu,
                             savedStacks = stacks,
                             onSelectStack = { stack ->
                                 selectedStackForDetail = stack

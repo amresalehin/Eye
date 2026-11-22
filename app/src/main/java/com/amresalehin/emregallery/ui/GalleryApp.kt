@@ -671,7 +671,9 @@ fun GalleryApp(
                 viewerStoryTitle = null
             }
             destination == Destination.MEDIA_INBOX -> {
-                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
+                destination = Destination.HOME
+                mapFocusItem = null
+                selectedMedia = null
                 viewerStoryTitle = null
             }
             destination == Destination.VIEWER -> {
@@ -1307,6 +1309,7 @@ fun GalleryApp(
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
                         initialStackForDetail = inboxInitialStack,
+                        onOpenMenu = { showSidePanel = true },
                         onGlobalNavigationVisibilityChanged = { visible ->
                             showInboxGlobalNavigation = visible
                         },
@@ -1317,18 +1320,6 @@ fun GalleryApp(
                             isAlbumBrowserVisible = true
                         },
                         onBack = { performBackNavigation() },
-                        onHomeBack = {
-                            // The Inbox home search-bar arrow is a shortcut back to Settings,
-                            // not a request to pop whichever page happened to open the Inbox.
-                            backStack.clear()
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.SETTINGS,
-                                rememberPrevious = false,
-                                newSelectedMedia = null,
-                                newMapFocusItem = null
-                            )
-                        },
                         onOpenMediaItem = { uri ->
                             val file = java.io.File(uri.removePrefix("file://"))
                             val fallbackName = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }

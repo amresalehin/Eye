@@ -157,7 +157,7 @@ fun DownloaderSearchMainPage(
     onOpenBrowser: ((String) -> Unit)? = null,
     onViewSavedLibrary: () -> Unit,
     onOpenActivity: () -> Unit = {},
-    onBack: () -> Unit = {},
+    onOpenMenu: () -> Unit = {},
     savedStacks: List<MediaInboxStack> = emptyList(),
     onSelectStack: (MediaInboxStack) -> Unit = {},
     activeDownloadsCount: Int = 0,
@@ -251,23 +251,14 @@ fun DownloaderSearchMainPage(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = {
-                        if (isSearchFocused || urlInput.isNotEmpty()) {
-                            urlInput = ""
-                            isSearchFocused = false
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        } else {
-                            onBack()
-                        }
-                    },
+                    onClick = onOpenMenu,
                     modifier = Modifier
                         .size(40.dp)
-                        .testTag("downloader_main_back_btn")
+                        .testTag("downloader_main_menu_btn")
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "Open navigation menu",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }

@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.webkit.*
 import android.widget.Toast
@@ -138,16 +139,20 @@ fun DirectBrowserView(
     val browserBlockMixedContent by downloaderPreferences.browserBlockMixedContent.collectAsState(initial = true)
     val browserAllowAutoplay by downloaderPreferences.browserAllowAutoplay.collectAsState(initial = true)
     val browserPinchZoomEnabled by downloaderPreferences.browserPinchZoomEnabled.collectAsState(initial = true)
+    val browserHomepageUrl by downloaderPreferences.browserHomepageUrl.collectAsState(initial = "")
+    val browserShowShortcuts by downloaderPreferences.browserShowShortcuts.collectAsState(initial = true)
+    val browserShowRecentlyVisited by downloaderPreferences.browserShowRecentlyVisited.collectAsState(initial = true)
+    val browserDarkenWebsites by downloaderPreferences.browserDarkenWebsites.collectAsState(initial = false)
     val latestAdBlockingEnabled by rememberUpdatedState(browserAdBlockingEnabled)
     val latestSaveHistoryEnabled by rememberUpdatedState(browserSaveHistory)
     val coroutineScope = rememberCoroutineScope()
 
-    val startUrl = remember(initialUrl, defaultSearchEngine) {
+    val startUrl = remember(initialUrl, defaultSearchEngine, browserHomepageUrl) {
         val trimmed = initialUrl.trim()
-        if (trimmed.isNotBlank()) {
-            MediaClassifier.formatQueryOrUrl(trimmed, defaultSearchEngine)
-        } else {
-            "" // Empty home page by default
+        when {
+            trimmed.isNotBlank() -> MediaClassifier.formatQueryOrUrl(trimmed, defaultSearchEngine)
+            browserHomepageUrl.isNotBlank() -> browserHomepageUrl
+            else -> "" // Internal browser home page
         }
     }
 
@@ -320,6 +325,7 @@ fun DirectBrowserView(
         browserBlockMixedContent,
         browserAllowAutoplay,
         browserPinchZoomEnabled,
+        browserDarkenWebsites,
         isDesktopMode
     ).joinToString("|")
 
@@ -760,16 +766,20 @@ fun DirectBrowserView(
                                 },
                                 onClick = {
                                     browserMenuExpanded = false
-                                    currentUrl = ""
-                                    addressInput = ""
-                                    pageTitle = ""
-                                    pageTitleRef.set("")
-                                    lastRecordedHistoryUrl = ""
-                                    pendingDomScanJob?.cancel()
-                                    lastScannedDomUrl = ""
-                                    seenRawUrls.clear()
-                                    notifyUrlIfChanged("")
-                                    webViewInstance?.loadUrl("about:blank")
+                                    if (browserHomepageUrl.isNotBlank()) {
+                                        navigateToUrl(browserHomepageUrl)
+                                    } else {
+                                        currentUrl = ""
+                                        addressInput = ""
+                                        pageTitle = ""
+                                        pageTitleRef.set("")
+                                        lastRecordedHistoryUrl = ""
+                                        pendingDomScanJob?.cancel()
+                                        lastScannedDomUrl = ""
+                                        seenRawUrls.clear()
+                                        notifyUrlIfChanged("")
+                                        webViewInstance?.loadUrl("about:blank")
+                                    }
                                 },
                                 modifier = Modifier.testTag("browser_menu_home")
                             )
@@ -929,6 +939,9 @@ fun DirectBrowserView(
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    setAlgorithmicDarkeningAllowed(browserDarkenWebsites)
+                                }
                                 safeBrowsingEnabled = browserSafeBrowsingEnabled
                                 javaScriptCanOpenWindowsAutomatically = !browserBlockPopups
                                 mixedContentMode = if (browserBlockMixedContent) {
@@ -1231,6 +1244,9 @@ fun DirectBrowserView(
                             WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         }
                         wv.settings.mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            wv.settings.setAlgorithmicDarkeningAllowed(browserDarkenWebsites)
+                        }
                         wv.settings.setSupportZoom(browserPinchZoomEnabled)
                         wv.settings.builtInZoomControls = browserPinchZoomEnabled
                         wv.settings.userAgentString = if (isDesktopMode) {
@@ -1262,7 +1278,8 @@ fun DirectBrowserView(
                         onRemoveSavedSite = { site ->
                             coroutineScope.launch { historyManager.removeSavedSite(site.url) }
                         },
-                        showHistory = browserSaveHistory,
+                        showShortcuts = browserShowShortcuts,
+                        showRecentlyVisited = browserShowRecentlyVisited,
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface)
@@ -1287,6 +1304,22 @@ fun DirectBrowserView(
                 blockMixedContent = browserBlockMixedContent,
                 allowAutoplay = browserAllowAutoplay,
                 pinchZoomEnabled = browserPinchZoomEnabled,
+                homepageUrl = browserHomepageUrl,
+                showShortcuts = browserShowShortcuts,
+                showRecentlyVisited = browserShowRecentlyVisited,
+                darkenWebsites = browserDarkenWebsites,
+                onHomepageSave = { url ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserHomepageUrl(url) }
+                },
+                onShowShortcutsChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserShowShortcuts(enabled) }
+                },
+                onShowRecentlyVisitedChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserShowRecentlyVisited(enabled) }
+                },
+                onDarkenWebsitesChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserDarkenWebsites(enabled) }
+                },
                 onSearchEngineChange = { engine ->
                     coroutineScope.launch { downloaderPreferences.setSearchEngine(engine) }
                 },
@@ -1367,6 +1400,14 @@ private fun BrowserSettingsScreen(
     blockMixedContent: Boolean,
     allowAutoplay: Boolean,
     pinchZoomEnabled: Boolean,
+    homepageUrl: String,
+    showShortcuts: Boolean,
+    showRecentlyVisited: Boolean,
+    darkenWebsites: Boolean,
+    onHomepageSave: (String) -> Unit,
+    onShowShortcutsChange: (Boolean) -> Unit,
+    onShowRecentlyVisitedChange: (Boolean) -> Unit,
+    onDarkenWebsitesChange: (Boolean) -> Unit,
     onSearchEngineChange: (BrowserSearchEngine) -> Unit,
     onJavaScriptChange: (Boolean) -> Unit,
     onAdBlockingChange: (Boolean) -> Unit,
@@ -1385,6 +1426,8 @@ private fun BrowserSettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var showClearDataConfirmation by remember { mutableStateOf(false) }
+    var homepageDraft by remember(homepageUrl) { mutableStateOf(homepageUrl) }
+    var homepageError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         modifier = modifier
@@ -1459,6 +1502,86 @@ private fun BrowserSettingsScreen(
                     }
                 }
             }
+
+            Text(
+                "Homepage",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Used when the browser starts without an incoming link and when you choose Home.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = homepageDraft,
+                onValueChange = {
+                    homepageDraft = it
+                    homepageError = null
+                },
+                modifier = Modifier.fillMaxWidth().testTag("browser_homepage_field"),
+                singleLine = true,
+                label = { Text("Website address") },
+                placeholder = { Text("Leave empty for the browser home page") },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction = ImeAction.Done
+                ),
+                isError = homepageError != null,
+                supportingText = homepageError?.let { error -> ({ Text(error) }) }
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val entered = homepageDraft.trim()
+                        val candidate = when {
+                            entered.isBlank() -> ""
+                            entered.startsWith("https://", ignoreCase = true) ||
+                                entered.startsWith("http://", ignoreCase = true) -> entered
+                            else -> "https://$entered"
+                        }
+                        val parsed = Uri.parse(candidate)
+                        if (candidate.isNotBlank() &&
+                            (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrBlank())
+                        ) {
+                            homepageError = "Enter a valid website address."
+                        } else {
+                            homepageError = null
+                            homepageDraft = candidate
+                            onHomepageSave(candidate)
+                        }
+                    },
+                    modifier = Modifier.testTag("browser_save_homepage")
+                ) {
+                    Text("Save homepage")
+                }
+                TextButton(
+                    onClick = {
+                        homepageDraft = ""
+                        homepageError = null
+                        onHomepageSave("")
+                    },
+                    modifier = Modifier.testTag("browser_reset_homepage")
+                ) {
+                    Text("Reset")
+                }
+            }
+
+            BrowserSettingsSwitchRow(
+                title = "Show shortcuts",
+                description = "Show frequently visited sites on the browser home page",
+                checked = showShortcuts,
+                onCheckedChange = onShowShortcutsChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Show recently visited",
+                description = "Show recent browsing entries on the browser home page",
+                checked = showRecentlyVisited,
+                onCheckedChange = onShowRecentlyVisitedChange
+            )
 
             HorizontalDivider()
             BrowserSettingsSectionTitle("Privacy")
@@ -1543,6 +1666,13 @@ private fun BrowserSettingsScreen(
                 checked = pinchZoomEnabled,
                 onCheckedChange = onPinchZoomChange
             )
+            BrowserSettingsSwitchRow(
+                title = "Allow website darkening",
+                description = "Let WebView darken pages without a dark theme when the app is in dark mode (Android 13+)",
+                checked = darkenWebsites,
+                onCheckedChange = onDarkenWebsitesChange,
+                enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1622,7 +1752,8 @@ private fun BrowserSettingsSwitchRow(
     title: String,
     description: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -1645,7 +1776,8 @@ private fun BrowserSettingsSwitchRow(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
         )
     }
 }
@@ -1715,7 +1847,8 @@ private fun BrowserHomeFavicon(
 fun BrowserEmptyHomePage(
     onNavigate: (String) -> Unit,
     onRemoveSavedSite: (BrowserSite) -> Unit = {},
-    showHistory: Boolean = true,
+    showShortcuts: Boolean = true,
+    showRecentlyVisited: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1723,8 +1856,8 @@ fun BrowserEmptyHomePage(
     val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
     val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())
 
-    val shortcutSites = remember(allHistorySites, showHistory) {
-        if (showHistory) {
+    val shortcutSites = remember(allHistorySites, showShortcuts) {
+        if (showShortcuts) {
             allHistorySites.sortedWith(
                 compareByDescending<BrowserSite> { it.visitCount }
                     .thenByDescending { it.lastVisitedMillis }
@@ -1733,8 +1866,8 @@ fun BrowserEmptyHomePage(
             emptyList()
         }
     }
-    val recentSites = remember(allHistorySites, showHistory) {
-        if (showHistory) allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(8) else emptyList()
+    val recentSites = remember(allHistorySites, showRecentlyVisited) {
+        if (showRecentlyVisited) allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(8) else emptyList()
     }
 
     Column(
@@ -1834,7 +1967,7 @@ fun BrowserEmptyHomePage(
             }
         }
 
-        if (showHistory) {
+        if (showShortcuts) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1895,6 +2028,8 @@ fun BrowserEmptyHomePage(
             }
         }
 
+        }
+        if (showRecentlyVisited) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)

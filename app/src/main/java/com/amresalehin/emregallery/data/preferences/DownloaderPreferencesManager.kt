@@ -152,6 +152,22 @@ class DownloaderPreferencesManager(private val context: Context) {
         prefs[KEY_BROWSER_PINCH_ZOOM] ?: syncPrefs.getBoolean(PREF_BROWSER_PINCH_ZOOM, true)
     }.distinctUntilChanged()
 
+    val browserHomepageUrl: Flow<String> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_HOMEPAGE_URL] ?: syncPrefs.getString(PREF_BROWSER_HOMEPAGE_URL, "").orEmpty()
+    }.distinctUntilChanged()
+
+    val browserShowShortcuts: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_SHOW_SHORTCUTS] ?: syncPrefs.getBoolean(PREF_BROWSER_SHOW_SHORTCUTS, true)
+    }.distinctUntilChanged()
+
+    val browserShowRecentlyVisited: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_SHOW_RECENTLY_VISITED] ?: syncPrefs.getBoolean(PREF_BROWSER_SHOW_RECENTLY_VISITED, true)
+    }.distinctUntilChanged()
+
+    val browserDarkenWebsites: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_DARKEN_WEBSITES] ?: syncPrefs.getBoolean(PREF_BROWSER_DARKEN_WEBSITES, false)
+    }.distinctUntilChanged()
+
     suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) {
         syncPrefs.edit().putString(PREF_VIDEO_QUALITY, quality.id).apply()
         appContext.galleryDataStore.edit { it[KEY_VIDEO_QUALITY] = quality.id }
@@ -284,6 +300,27 @@ class DownloaderPreferencesManager(private val context: Context) {
         appContext.galleryDataStore.edit { it[KEY_BROWSER_PINCH_ZOOM] = enabled }
     }
 
+    suspend fun setBrowserHomepageUrl(url: String) {
+        val clean = url.trim().take(2048)
+        syncPrefs.edit().putString(PREF_BROWSER_HOMEPAGE_URL, clean).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_HOMEPAGE_URL] = clean }
+    }
+
+    suspend fun setBrowserShowShortcuts(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_SHOW_SHORTCUTS, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_SHOW_SHORTCUTS] = enabled }
+    }
+
+    suspend fun setBrowserShowRecentlyVisited(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_SHOW_RECENTLY_VISITED, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_SHOW_RECENTLY_VISITED] = enabled }
+    }
+
+    suspend fun setBrowserDarkenWebsites(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_DARKEN_WEBSITES, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_DARKEN_WEBSITES] = enabled }
+    }
+
     companion object {
         const val SYNC_PREFS_NAME = "emre_downloader_prefs"
         const val DEFAULT_FILENAME_TEMPLATE = "{title}_{hash}"
@@ -313,6 +350,10 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_BROWSER_BLOCK_MIXED_CONTENT = "browser_block_mixed_content"
         private const val PREF_BROWSER_ALLOW_AUTOPLAY = "browser_allow_autoplay"
         private const val PREF_BROWSER_PINCH_ZOOM = "browser_pinch_zoom"
+        private const val PREF_BROWSER_HOMEPAGE_URL = "browser_homepage_url"
+        private const val PREF_BROWSER_SHOW_SHORTCUTS = "browser_show_shortcuts"
+        private const val PREF_BROWSER_SHOW_RECENTLY_VISITED = "browser_show_recently_visited"
+        private const val PREF_BROWSER_DARKEN_WEBSITES = "browser_darken_websites"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -339,6 +380,10 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_BROWSER_BLOCK_MIXED_CONTENT = booleanPreferencesKey(PREF_BROWSER_BLOCK_MIXED_CONTENT)
         private val KEY_BROWSER_ALLOW_AUTOPLAY = booleanPreferencesKey(PREF_BROWSER_ALLOW_AUTOPLAY)
         private val KEY_BROWSER_PINCH_ZOOM = booleanPreferencesKey(PREF_BROWSER_PINCH_ZOOM)
+        private val KEY_BROWSER_HOMEPAGE_URL = stringPreferencesKey(PREF_BROWSER_HOMEPAGE_URL)
+        private val KEY_BROWSER_SHOW_SHORTCUTS = booleanPreferencesKey(PREF_BROWSER_SHOW_SHORTCUTS)
+        private val KEY_BROWSER_SHOW_RECENTLY_VISITED = booleanPreferencesKey(PREF_BROWSER_SHOW_RECENTLY_VISITED)
+        private val KEY_BROWSER_DARKEN_WEBSITES = booleanPreferencesKey(PREF_BROWSER_DARKEN_WEBSITES)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext

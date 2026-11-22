@@ -188,7 +188,7 @@ fun DirectBrowserView(
     var rendererRecoveryMessage by remember { mutableStateOf<String?>(null) }
     var rendererCrashUrl by remember { mutableStateOf("") }
     var rendererCrashAttempts by remember { mutableIntStateOf(0) }
-    var browserRecoverySnapshot by remember { mutableStateOf<BrowserRendererRecoverySnapshot?>(null) }
+    val browserRecoverySnapshotRef = remember { AtomicReference<BrowserRendererRecoverySnapshot?>(null) }
     val destroyedWebViews = remember {
         java.util.Collections.newSetFromMap(java.util.WeakHashMap<WebView, Boolean>())
     }
@@ -389,7 +389,7 @@ fun DirectBrowserView(
         }
     }
 
-    fun captureBrowserRecoverySnapshot(view: WebView?) {
+    fun captureBrowserRecoverySnapshot(view: WebView?, saveNavigationHistory: Boolean = true) {
         val activeView = view ?: return
         if (destroyedWebViews.contains(activeView)) return
         val url = activeView.url?.takeIf {
@@ -397,16 +397,19 @@ fun DirectBrowserView(
         } ?: activeBaseUrlRef.get().takeIf {
             it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
         } ?: return
+        val previousSnapshot = browserRecoverySnapshotRef.get()?.takeIf { it.url == url }
         val state = Bundle()
-        val stateSaved = runCatching {
+        val stateSaved = saveNavigationHistory && runCatching {
             activeView.saveState(state)
             !state.isEmpty
         }.getOrDefault(false)
-        browserRecoverySnapshot = BrowserRendererRecoverySnapshot(
-            url = url,
-            webViewState = if (stateSaved) Bundle(state) else null,
-            scrollX = activeView.scrollX,
-            scrollY = activeView.scrollY
+        browserRecoverySnapshotRef.set(
+            BrowserRendererRecoverySnapshot(
+                url = url,
+                webViewState = if (stateSaved) Bundle(state) else previousSnapshot?.webViewState,
+                scrollX = activeView.scrollX,
+                scrollY = activeView.scrollY
+            )
         )
     }
 
@@ -971,7 +974,7 @@ fun DirectBrowserView(
                         val recoveryUrl = activeBaseUrlRef.get().ifBlank {
                             currentUrl.ifBlank { startUrl }
                         }
-                        val recoverySnapshot = browserRecoverySnapshot?.takeIf { it.url == recoveryUrl }
+                        val recoverySnapshot = browserRecoverySnapshotRef.get()?.takeIf { it.url == recoveryUrl }
                         WebView(ctx).apply {
                             setBackgroundColor(browserSurfaceColor)
                             webViewInstance = this
@@ -1007,6 +1010,28 @@ fun DirectBrowserView(
                                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                                 } else {
                                     OkHttpDownloader.DEFAULT_USER_AGENT
+                                }
+                            }
+                            setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
+                                val pageUrl = url?.takeIf {
+                                    it.startsWith("http://", ignoreCase = true) ||
+                                        it.startsWith("https://", ignoreCase = true)
+                                } ?: activeBaseUrlRef.get().takeIf {
+                                    it.startsWith("http://", ignoreCase = true) ||
+                                        it.startsWith("https://", ignoreCase = true)
+                                }
+                                if (pageUrl != null) {
+                                    val previousSnapshot = browserRecoverySnapshotRef.get()?.takeIf {
+                                        it.url == pageUrl
+                                    }
+                                    browserRecoverySnapshotRef.set(
+                                        BrowserRendererRecoverySnapshot(
+                                            url = pageUrl,
+                                            webViewState = previousSnapshot?.webViewState,
+                                            scrollX = scrollX,
+                                            scrollY = scrollY
+                                        )
+                                    )
                                 }
                             }
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, browserThirdPartyCookies)
@@ -1271,6 +1296,9 @@ fun DirectBrowserView(
                                         "DirectBrowserView",
                                         "WebView renderer exited (didCrash=${detail?.didCrash()}, url=$crashedUrl)"
                                     )
+                                    // Preserve the most recent scroll position even when the
+                                    // renderer dies between successful page-finish snapshots.
+                                    captureBrowserRecoverySnapshot(crashedView, saveNavigationHistory = false)
 
                                     if (webViewInstance === crashedView) {
                                         webViewInstance = null

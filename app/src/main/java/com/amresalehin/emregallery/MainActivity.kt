@@ -77,8 +77,8 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
-     * Requests continuous 120Hz / 120 FPS for the app window across all supported Android display APIs.
-     * Ensures Emre Gallery renders at maximum fluidity without artificial frame rate capping.
+     * Requests the highest refresh rate reported by the active display, while allowing Android
+     * to select its normal mode when no suitable display mode is available.
      */
     private fun applyHighRefreshRate() {
         val currentWindow = window ?: return

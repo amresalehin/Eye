@@ -17,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -91,6 +92,15 @@ private data class BrowserRendererRecoverySnapshot(
     val webViewState: Bundle?,
     val scrollX: Int,
     val scrollY: Int
+)
+
+private data class BrowserTabSession(
+    val id: Int,
+    val url: String,
+    val title: String,
+    val savedWebViewState: Bundle? = null,
+    val scrollX: Int = 0,
+    val scrollY: Int = 0
 )
 
 @Composable
@@ -170,6 +180,12 @@ fun DirectBrowserView(
     var currentUrl by remember { mutableStateOf(startUrl) }
     var addressInput by remember { mutableStateOf(startUrl) }
     var pageTitle by remember { mutableStateOf("") }
+    var browserTabs by remember {
+        mutableStateOf(listOf(BrowserTabSession(id = 1, url = startUrl, title = "")))
+    }
+    var activeBrowserTabId by remember { mutableIntStateOf(1) }
+    var nextBrowserTabId by remember { mutableIntStateOf(2) }
+    var showTabSwitcher by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
@@ -312,6 +328,157 @@ fun DirectBrowserView(
         }
     }
 
+    fun updateActiveBrowserTab(
+        url: String = currentUrl,
+        title: String = pageTitle,
+        clearSavedState: Boolean = false
+    ) {
+        browserTabs = browserTabs.map { tab ->
+            if (tab.id == activeBrowserTabId) {
+                tab.copy(
+                    url = url,
+                    title = title,
+                    savedWebViewState = if (clearSavedState) null else tab.savedWebViewState,
+                    scrollX = if (clearSavedState) 0 else tab.scrollX,
+                    scrollY = if (clearSavedState) 0 else tab.scrollY
+                )
+            } else tab
+        }
+    }
+
+    fun saveActiveBrowserTabState() {
+        val activeTab = browserTabs.firstOrNull { it.id == activeBrowserTabId } ?: return
+        val activeView = webViewInstance
+        val state = Bundle()
+        val stateSaved = activeView != null && runCatching {
+            activeView.saveState(state)
+            !state.isEmpty
+        }.getOrDefault(false)
+        val savedUrl = activeView?.url?.takeIf { it.isNotBlank() && it != "about:blank" } ?: currentUrl
+        val savedTitle = activeView?.title?.takeIf { it.isNotBlank() } ?: pageTitle
+        browserTabs = browserTabs.map { tab ->
+            if (tab.id == activeBrowserTabId) {
+                tab.copy(
+                    url = savedUrl,
+                    title = savedTitle,
+                    savedWebViewState = if (stateSaved) Bundle(state) else activeTab.savedWebViewState,
+                    scrollX = activeView?.scrollX ?: tab.scrollX,
+                    scrollY = activeView?.scrollY ?: tab.scrollY
+                )
+            } else tab
+        }
+    }
+
+    fun activateBrowserTab(tabId: Int) {
+        if (tabId == activeBrowserTabId) {
+            showTabSwitcher = false
+            return
+        }
+        val requestedTab = browserTabs.firstOrNull { it.id == tabId } ?: return
+        saveActiveBrowserTabState()
+        val targetTab = browserTabs.firstOrNull { it.id == tabId } ?: requestedTab
+
+        pendingDomScanJob?.cancel()
+        webViewInstance?.let { oldView ->
+            runCatching { oldView.onPause() }
+            releaseBrowserWebView(oldView)
+        }
+        webViewInstance = null
+
+        activeBrowserTabId = targetTab.id
+        currentUrl = targetTab.url
+        addressInput = targetTab.url
+        pageTitle = targetTab.title
+        pageTitleRef.set(targetTab.title)
+        activeBaseUrlRef.set(targetTab.url)
+        lastNotifiedUrl = targetTab.url
+        lastRecordedHistoryUrl = targetTab.url
+        lastScannedDomUrl = ""
+        seenRawUrls.clear()
+        canGoBack = false
+        canGoForward = false
+        isLoading = targetTab.url.isNotBlank()
+        loadingProgressState.floatValue = 0f
+        rendererRecoveryMessage = null
+        rendererCrashUrl = ""
+        rendererCrashAttempts = 0
+        browserRecoverySnapshotRef.set(
+            if (targetTab.url.isNotBlank()) {
+                BrowserRendererRecoverySnapshot(
+                    url = targetTab.url,
+                    webViewState = targetTab.savedWebViewState?.let { Bundle(it) },
+                    scrollX = targetTab.scrollX,
+                    scrollY = targetTab.scrollY
+                )
+            } else null
+        )
+        showTabSwitcher = false
+        webViewGeneration += 1
+        onUrlChange?.invoke(targetTab.url)
+        onPageTitleChanged?.invoke(targetTab.title)
+        focusManager.clearFocus()
+    }
+
+    fun createBrowserTab() {
+        saveActiveBrowserTabState()
+        val newTabId = nextBrowserTabId++
+        val homeUrl = browserHomepageUrl.trim().takeIf { it.isNotBlank() }?.let {
+            MediaClassifier.formatQueryOrUrl(it, defaultSearchEngine)
+        }.orEmpty()
+        browserTabs = browserTabs + BrowserTabSession(id = newTabId, url = homeUrl, title = "")
+        activateBrowserTab(newTabId)
+    }
+
+    fun closeBrowserTab(tabId: Int) {
+        val closingIndex = browserTabs.indexOfFirst { it.id == tabId }
+        if (closingIndex < 0) return
+
+        if (browserTabs.size == 1) {
+            val homeUrl = browserHomepageUrl.trim().takeIf { it.isNotBlank() }?.let {
+                MediaClassifier.formatQueryOrUrl(it, defaultSearchEngine)
+            }.orEmpty()
+            webViewInstance?.let { oldView ->
+                runCatching { oldView.onPause() }
+                releaseBrowserWebView(oldView)
+            }
+            webViewInstance = null
+            pendingDomScanJob?.cancel()
+            browserTabs = listOf(BrowserTabSession(id = tabId, url = homeUrl, title = ""))
+            activeBrowserTabId = tabId
+            currentUrl = homeUrl
+            addressInput = homeUrl
+            pageTitle = ""
+            pageTitleRef.set("")
+            activeBaseUrlRef.set(homeUrl)
+            lastNotifiedUrl = homeUrl
+            lastRecordedHistoryUrl = homeUrl
+            lastScannedDomUrl = ""
+            seenRawUrls.clear()
+            canGoBack = false
+            canGoForward = false
+            isLoading = homeUrl.isNotBlank()
+            loadingProgressState.floatValue = 0f
+            browserRecoverySnapshotRef.set(null)
+            rendererRecoveryMessage = null
+            rendererCrashUrl = ""
+            rendererCrashAttempts = 0
+            webViewGeneration += 1
+            showTabSwitcher = false
+            onUrlChange?.invoke(homeUrl)
+            onPageTitleChanged?.invoke("")
+            return
+        }
+
+        val wasActive = tabId == activeBrowserTabId
+        val nextTab = if (wasActive) {
+            browserTabs.getOrNull(closingIndex + 1) ?: browserTabs.getOrNull(closingIndex - 1)
+        } else null
+        browserTabs = browserTabs.filterNot { it.id == tabId }
+        if (wasActive && nextTab != null) {
+            activateBrowserTab(nextTab.id)
+        }
+    }
+
     fun notifyUrlIfChanged(newUrl: String) {
         activeBaseUrlRef.set(newUrl)
         if (newUrl != rendererCrashUrl) {
@@ -323,6 +490,7 @@ fun DirectBrowserView(
             lastNotifiedUrl = newUrl
             pageTitle = ""
             pageTitleRef.set("")
+            updateActiveBrowserTab(url = newUrl, title = "", clearSavedState = true)
             onPageTitleChanged?.invoke("")
             onUrlChange?.invoke(newUrl)
         }
@@ -592,6 +760,27 @@ fun DirectBrowserView(
                                 )
                             }
                         }
+
+                    // Browser tabs: open the tab overview and show the number of open pages.
+                    BadgedBox(
+                        badge = {
+                            Badge { Text(browserTabs.size.toString()) }
+                        }
+                    ) {
+                        IconButton(
+                            onClick = { showTabSwitcher = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("browser_tabs_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tab,
+                                contentDescription = "Open tabs",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
 
                     // Three-dot Overflow Menu in Browser Top Bar Right Corner
                     Box {
@@ -978,9 +1167,7 @@ fun DirectBrowserView(
                 key(webViewGeneration) {
                 AndroidView(
                     factory = { ctx ->
-                        val recoveryUrl = activeBaseUrlRef.get().ifBlank {
-                            currentUrl.ifBlank { startUrl }
-                        }
+                        val recoveryUrl = activeBaseUrlRef.get().ifBlank { currentUrl }
                         val recoverySnapshot = browserRecoverySnapshotRef.get()?.takeIf { it.url == recoveryUrl }
                         WebView(ctx).apply {
                             setBackgroundColor(browserSurfaceColor)
@@ -1075,6 +1262,7 @@ fun DirectBrowserView(
                                     if (resolvedTitle != pageTitle) {
                                         pageTitle = resolvedTitle
                                         pageTitleRef.set(resolvedTitle)
+                                        updateActiveBrowserTab(title = resolvedTitle)
                                         onPageTitleChanged?.invoke(resolvedTitle)
                                     }
                                 }
@@ -1229,6 +1417,7 @@ fun DirectBrowserView(
                                     val title = view?.title.orEmpty()
                                     pageTitle = title
                                     pageTitleRef.set(title)
+                                    updateActiveBrowserTab(title = title)
                                     onPageTitleChanged?.invoke(title)
                                     pendingDomScanJob = coroutineScope.launch {
                                         delay(320L)
@@ -1530,6 +1719,127 @@ fun DirectBrowserView(
                     )
                 }
             }
+            }
+        }
+
+        if (showTabSwitcher) {
+            ModalBottomSheet(
+                onDismissRequest = { showTabSwitcher = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .padding(bottom = 18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Tabs",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "${browserTabs.size} open",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { showTabSwitcher = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close tabs overview")
+                        }
+                    }
+
+                    FilledTonalButton(
+                        onClick = { createBrowserTab() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .testTag("browser_new_tab_button")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("New tab")
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(browserTabs, key = { it.id }) { tab ->
+                            val displayTitle = tab.title.ifBlank {
+                                if (tab.url.isBlank()) "New tab"
+                                else runCatching { URL(tab.url).host }.getOrDefault(tab.url)
+                            }
+                            val displayAddress = tab.url.ifBlank { "Start page" }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { activateBrowserTab(tab.id) }
+                                    .testTag("browser_tab_${tab.id}"),
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (tab.id == activeBrowserTabId) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                },
+                                tonalElevation = if (tab.id == activeBrowserTabId) 2.dp else 0.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Language,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            displayTitle,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (tab.id == activeBrowserTabId) FontWeight.SemiBold else FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            displayAddress,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { closeBrowserTab(tab.id) },
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .testTag("browser_close_tab_${tab.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Close ${displayTitle} tab",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

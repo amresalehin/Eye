@@ -518,7 +518,7 @@ class BrowserMediaExtractor(private val context: Context) {
                         }
 
                         // First attempt
-                        performScanAndScroll {
+                        performScanAndScroll(onComplete = {
                             // If 0 items were discovered, probe page DOM for WAF challenge or client-side SPA hydration
                             wv.evaluateJavascript("""
                                 (function() {

@@ -1,9 +1,12 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -12,46 +15,63 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
 
 /**
- * Tracks on-screen bounding boxes of thumbnails across the gallery screens (Home, Albums, Search, Favourites, Bin).
- * Used to coordinate smooth shared-element return animations when opening or closing the media viewer.
+ * Tracks thumbnail bounds for shared-element viewer transitions.
  *
- * Optimization: Coordinates are stored onPlaced (only upon item placement) rather than onGloballyPositioned.
- * Bounding boxes are computed strictly on-demand when the media viewer opens or closes, completely eliminating
- * coordinate matrix calculations and Rect allocations during active scrolling.
+ * Registrations belong to individual composed modifiers and are removed when their lazy item
+ * leaves composition. Multiple screens may show the same URI, so registrations use owner tokens
+ * rather than retaining one coordinate reference per URI indefinitely.
  */
 object ThumbnailBoundsTracker {
-    private val coordinatesMap = mutableMapOf<String, LayoutCoordinates>()
+    private val coordinatesMap = mutableMapOf<String, LinkedHashMap<Any, LayoutCoordinates>>()
     private val cachedBounds = mutableMapOf<String, Rect>()
 
-    /**
-     * Currently active viewer media item URI.
-     * When non-null, the corresponding source thumbnail in the grid can suppress its foreground image
-     * to prevent visual duplication during the opening or return animation.
-     */
+    /** URI whose source thumbnail is hidden behind the fullscreen viewer. */
     var activeViewerUri by mutableStateOf<String?>(null)
 
-    fun registerCoordinates(uri: String, coordinates: LayoutCoordinates) {
-        coordinatesMap[uri] = coordinates
+    fun registerCoordinates(uri: String, owner: Any, coordinates: LayoutCoordinates) {
+        if (!coordinates.isAttached) return
+        coordinatesMap.getOrPut(uri) { LinkedHashMap() }[owner] = coordinates
     }
 
-    fun updateBounds(uri: String, bounds: Rect) {
-        if (bounds.width > 5f && bounds.height > 5f) {
-            cachedBounds[uri] = bounds
+    fun unregisterCoordinates(uri: String, owner: Any) {
+        val owners = coordinatesMap[uri] ?: return
+        owners.remove(owner)
+        if (owners.isEmpty()) {
+            coordinatesMap.remove(uri)
+            cachedBounds.remove(uri)
         }
     }
 
+    fun updateBounds(uri: String, bounds: Rect) {
+        if (bounds.width > 5f && bounds.height > 5f) cachedBounds[uri] = bounds
+    }
+
     fun getBounds(uri: String): Rect? {
-        val coords = coordinatesMap[uri]
-        if (coords != null && coords.isAttached) {
-            val rootBounds = coords.boundsInRoot()
-            if (rootBounds.width > 5f && rootBounds.height > 5f) {
-                cachedBounds[uri] = rootBounds
-                return rootBounds
+        val owners = coordinatesMap[uri]
+        if (owners != null) {
+            val entries = owners.entries.toList()
+            for (index in entries.indices.reversed()) {
+                val entry = entries[index]
+                val coordinates = entry.value
+                if (!coordinates.isAttached) {
+                    owners.remove(entry.key)
+                    continue
+                }
+                val rootBounds = runCatching { coordinates.boundsInRoot() }.getOrNull()
+                if (rootBounds != null && rootBounds.width > 5f && rootBounds.height > 5f) {
+                    cachedBounds[uri] = rootBounds
+                    return rootBounds
+                }
+            }
+            if (owners.isEmpty()) {
+                coordinatesMap.remove(uri)
+                cachedBounds.remove(uri)
             }
         }
         return cachedBounds[uri]
     }
 
+    /** Remove all registrations for a URI after explicit media deletion. */
     fun removeBounds(uri: String) {
         coordinatesMap.remove(uri)
         cachedBounds.remove(uri)
@@ -65,12 +85,18 @@ object ThumbnailBoundsTracker {
 }
 
 /**
- * Modifier extension to track the window/root coordinates of a media thumbnail.
- * Stores lightweight layout coordinates on placement without calculating root bounds until queried.
+ * The registration is tied to this particular composed thumbnail instance. Disposing one screen
+ * cannot unregister a second screen that is displaying the same media URI.
  */
-fun Modifier.trackThumbnailBounds(uri: String): Modifier = this.onPlaced { coordinates ->
-    if (coordinates.isAttached) {
-        ThumbnailBoundsTracker.registerCoordinates(uri, coordinates)
+fun Modifier.trackThumbnailBounds(uri: String): Modifier = composed {
+    val owner = remember(uri) { Any() }
+    DisposableEffect(uri, owner) {
+        onDispose { ThumbnailBoundsTracker.unregisterCoordinates(uri, owner) }
+    }
+    this.onPlaced { coordinates ->
+        if (coordinates.isAttached) {
+            ThumbnailBoundsTracker.registerCoordinates(uri, owner, coordinates)
+        }
     }
 }
 

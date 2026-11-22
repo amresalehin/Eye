@@ -9,7 +9,10 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
 import com.amresalehin.emregallery.data.OkHttpDownloader
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 
 class GalleryApplication : Application() {
@@ -63,10 +66,10 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
 
-        // Chaquopy is initialized lazily on the downloader's IO path. Starting the Python
-        // runtime here blocks Application.onCreate and delays the first gallery frame.
-        // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
-        com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
+        // Restore download history and reconcile saved Inbox records off the startup thread.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
+        }
 
     }
 

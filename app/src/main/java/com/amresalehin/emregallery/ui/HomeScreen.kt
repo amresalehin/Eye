@@ -45,11 +45,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.debounce
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
 private const val PREFETCH_LOOK_AHEAD_ROWS = 24
 private const val SYNC_COMPUTE_THRESHOLD = 150
+
+@Immutable
+private data class HomeGroupedData(
+    val sortedMedia: List<MediaItem> = emptyList(),
+    val groups: List<DayGroup> = emptyList()
+)
 
 @Immutable
 private data class HomeGridData(
@@ -59,12 +66,11 @@ private data class HomeGridData(
     val predictivePrefetchIndex: Map<String, Int> = emptyMap()
 )
 
-private fun buildHomeGridData(
+private fun buildHomeGroupedData(
     media: List<MediaItem>,
     sortOrder: String,
-    groupBy: String,
-    columns: Int
-): HomeGridData {
+    groupBy: String
+): HomeGroupedData {
     val sortedMedia = when (sortOrder) {
         "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
         "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
@@ -84,8 +90,13 @@ private fun buildHomeGridData(
         "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
         else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
     }
+    return HomeGroupedData(sortedMedia = sortedMedia, groups = groups)
+}
+
+/** Re-chunk already sorted groups when the column count changes; never sort the library again. */
+private fun buildHomeGridData(grouped: HomeGroupedData, columns: Int): HomeGridData {
     val clampedCols = columns.coerceIn(1, 6)
-    val groupedRows = groups.map { group -> group to group.items.chunked(clampedCols) }
+    val groupedRows = grouped.groups.map { group -> group to group.items.chunked(clampedCols) }
     val predictivePrefetchRows = groupedRows.flatMap { (group, rowChunks) ->
         rowChunks.map { row ->
             "day_${group.dayKey}_row_${row.first().id}" to row
@@ -96,13 +107,12 @@ private fun buildHomeGridData(
         predictivePrefetchIndex[row.first] = index
     }
     return HomeGridData(
-        sortedMedia = sortedMedia,
+        sortedMedia = grouped.sortedMedia,
         groupedRows = groupedRows,
         predictivePrefetchRows = predictivePrefetchRows,
         predictivePrefetchIndex = predictivePrefetchIndex
     )
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -129,7 +139,8 @@ fun HomeScreen(
     onSelectionChange: (Set<String>) -> Unit = {},
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit,
-    isVisible: Boolean = true
+    isVisible: Boolean = true,
+    isPrewarmActive: Boolean = isVisible
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
@@ -167,28 +178,48 @@ fun HomeScreen(
         return
     }
 
-    var gridData by remember {
+    var groupedData by remember {
         mutableStateOf(
             if (media.size <= SYNC_COMPUTE_THRESHOLD) {
-                buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
+                buildHomeGroupedData(media, sortOrder, groupBy)
             } else {
-                HomeGridData()
+                HomeGroupedData()
             }
         )
     }
-    LaunchedEffect(media, sortOrder, groupBy, pinchGridColumns) {
-        gridData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
-            buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
+    LaunchedEffect(media, sortOrder, groupBy) {
+        groupedData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
+            buildHomeGroupedData(media, sortOrder, groupBy)
         } else {
             withContext(Dispatchers.Default) {
-                buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
+                buildHomeGroupedData(media, sortOrder, groupBy)
             }
+        }
+    }
+    var gridData by remember {
+        mutableStateOf(buildHomeGridData(groupedData, pinchGridColumns))
+    }
+    LaunchedEffect(groupedData, pinchGridColumns) {
+        gridData = withContext(Dispatchers.Default) {
+            buildHomeGridData(groupedData, pinchGridColumns)
         }
     }
     val sortedMedia = gridData.sortedMedia
     val groupedRows = gridData.groupedRows
     val predictivePrefetchRows = gridData.predictivePrefetchRows
     val predictivePrefetchIndex = gridData.predictivePrefetchIndex
+    LaunchedEffect(isPrewarmActive, listState) {
+        if (!isPrewarmActive) {
+            ThumbnailPrewarmManager.updateHomeActivity(isVisible = false, isScrolling = false)
+            return@LaunchedEffect
+        }
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                ThumbnailPrewarmManager.updateHomeActivity(isVisible = true, isScrolling = scrolling)
+            }
+    }
+
     var observedScrollDirection by remember(listState) { mutableIntStateOf(1) }
 
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
@@ -231,7 +262,7 @@ fun HomeScreen(
         snapshotFlow {
             val info = listState.layoutInfo.visibleItemsInfo
             if (info.isEmpty()) -1 to -1 else info.first().index to info.last().index
-        }.distinctUntilChanged().collect { (firstItemIdx, lastItemIdx) ->
+        }.distinctUntilChanged().debounce(75).collect { (firstItemIdx, lastItemIdx) ->
             if (firstItemIdx < 0 || predictivePrefetchRows.isEmpty()) {
                 previousFirstItem = firstItemIdx
                 return@collect

@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -241,9 +242,9 @@ object PreparedThumbnailCache {
  * skips files already prepared, and can safely resume from the first missing thumbnail next launch.
  */
 object ThumbnailPrewarmManager {
-    private const val DISK_WORKER_COUNT = 2
+    private const val DISK_WORKER_COUNT = 1
     // Bounded decoded-image window: visible rows first, followed by predictive look-ahead.
-    private const val MEMORY_WARM_WINDOW = 48
+    private const val MEMORY_WARM_WINDOW = 24
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private val memoryLock = Any()
@@ -255,6 +256,32 @@ object ThumbnailPrewarmManager {
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
     private val activeMemoryPrefetches = LinkedHashMap<String, Disposable>()
+
+    @Volatile
+    private var homeIsVisible = false
+
+    @Volatile
+    private var homeIsScrolling = false
+
+    /** Background thumbnail preparation yields to visible user interaction. */
+    fun updateHomeActivity(isVisible: Boolean, isScrolling: Boolean) {
+        homeIsVisible = isVisible
+        homeIsScrolling = isVisible && isScrolling
+        if (!isVisible) {
+            prioritizeJob?.cancel()
+            synchronized(memoryLock) {
+                activeMemoryPrefetches.values.forEach { request -> runCatching { request.dispose() } }
+                activeMemoryPrefetches.clear()
+            }
+        }
+    }
+
+    private suspend fun awaitIdleHome() {
+        while (!homeIsVisible || homeIsScrolling) {
+            currentCoroutineContext().ensureActive()
+            delay(120L)
+        }
+    }
 
     /**
      * Moves the thumbnails most likely to be seen next to the front of the disk-preparation
@@ -387,6 +414,7 @@ object ThumbnailPrewarmManager {
                             var processedCount = 0
                             while (true) {
                                 currentCoroutineContext().ensureActive()
+                                awaitIdleHome()
                                 val item = synchronized(lock) {
                                     when {
                                         activeUris !== uris -> null
@@ -419,7 +447,7 @@ object ThumbnailPrewarmManager {
                                 }
                                 processedCount++
                                 // Regularly yield so visible requests and other IO work can run promptly.
-                                if (processedCount % 8 == 0) yield()
+                                if (processedCount % 4 == 0) yield()
                             }
                         }
                     }

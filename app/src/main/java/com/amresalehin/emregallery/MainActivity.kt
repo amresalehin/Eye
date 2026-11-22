@@ -11,9 +11,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import androidx.lifecycle.lifecycleScope
 
 class MainActivity : FragmentActivity() {
 
@@ -27,16 +24,11 @@ class MainActivity : FragmentActivity() {
         applyHighRefreshRate()
 
         val preferences = PreferencesRepository(applicationContext)
-        lifecycleScope.launch {
-            // Resolve the persisted theme before the first Compose frame. Starting with
-            // "system" here can flash the wrong palette when the saved choice differs
-            // from the device theme.
-            val initialTheme = preferences.theme.first()
-            setContent {
-                val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
-                EmreGalleryTheme(theme) {
-                    GalleryApp()
-                }
+        // Install Compose immediately; the persisted theme is collected asynchronously.
+        setContent {
+            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
+            EmreGalleryTheme(theme) {
+                GalleryApp()
             }
         }
     }

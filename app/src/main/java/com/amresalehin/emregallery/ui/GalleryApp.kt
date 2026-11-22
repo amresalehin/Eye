@@ -165,11 +165,10 @@ fun GalleryApp() {
                         runCatching { mediaRepository.loadMediaInitial() }.getOrDefault(emptyList())
                     }
                     if (initialBatch.isNotEmpty()) {
+                        // Render the first batch immediately. Visible cells load their own images;
+                        // start library prewarming only once the complete media list is available.
                         media = initialBatch
                         loading = false
-                        scope.launch(Dispatchers.Default) {
-                            ThumbnailPrewarmManager.start(context.applicationContext, initialBatch)
-                        }
                     }
                 }
                 val loadedMedia = withContext(Dispatchers.IO) {
@@ -758,7 +757,11 @@ fun GalleryApp() {
             } else emptyList()
         )
     }
-    LaunchedEffect(media, hidden, inBin, archive) {
+    LaunchedEffect(hasOpenedPeopleScreen, media, hidden, inBin, archive) {
+        if (!hasOpenedPeopleScreen) {
+            peopleMedia = emptyList()
+            return@LaunchedEffect
+        }
         peopleMedia = if (media.size <= 150) {
             media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
         } else {
@@ -947,6 +950,7 @@ fun GalleryApp() {
                     ) {
                         HomeScreen(
                             isVisible = homeVisible,
+                            isPrewarmActive = destination == Destination.HOME,
                         listState = homeListState,
                         media = visibleMedia,
                         loading = loading,
@@ -1023,6 +1027,7 @@ fun GalleryApp() {
                             media.filter { it.isVideo && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
                         }
                         HomeScreen(
+                            isPrewarmActive = destination == Destination.VIDEOS,
                             media = videoItems,
                             loading = loading,
                             isRefreshing = isRefreshing,
@@ -1052,6 +1057,7 @@ fun GalleryApp() {
                             }
                         }
                         HomeScreen(
+                            isPrewarmActive = destination == Destination.RECENTLY_ADDED,
                             media = recentItems,
                             loading = loading,
                             isRefreshing = isRefreshing,

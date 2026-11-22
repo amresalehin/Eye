@@ -128,9 +128,15 @@ fun GalleryApp(
     val lockedFolderPinHash by prefs.lockedFolderPinHash.collectAsStateWithLifecycle(initialValue = null)
     var isLockedFolderUnlocked by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
-    val isWelcomeCompletedInit = remember { prefs.isWelcomeCompletedSync() }
-    val hasCompletedWelcomeFlow by prefs.hasCompletedWelcome.collectAsStateWithLifecycle(initialValue = isWelcomeCompletedInit)
-    val hasCompletedWelcome = hasCompletedWelcomeFlow || isWelcomeCompletedInit
+    // SharedPreferences may still be loading its XML file on a cold process start.
+    // Never perform this synchronous read during composition on the UI thread.
+    val isWelcomeCompletedInit by produceState<Boolean?>(initialValue = null, prefs) {
+        value = withContext(Dispatchers.IO) {
+            prefs.isWelcomeCompletedSync()
+        }
+    }
+    val hasCompletedWelcomeFlow by prefs.hasCompletedWelcome.collectAsStateWithLifecycle(initialValue = false)
+    val hasCompletedWelcome = hasCompletedWelcomeFlow || isWelcomeCompletedInit == true
     var homeSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
@@ -793,6 +799,23 @@ fun GalleryApp(
 
     LaunchedEffect(Unit) {
         prefs.clearHomeScrollPosition()
+    }
+
+    // Avoid briefly showing the welcome flow for returning users while the legacy
+    // onboarding preference is loaded on IO. The activity remains responsive meanwhile.
+    if (isWelcomeCompletedInit == null && !hasCompletedWelcomeFlow) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        return
     }
 
     val hasMediaPerm = hasMediaPermission(context)

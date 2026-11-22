@@ -1406,32 +1406,36 @@ fun DirectBrowserView(
                         }
                     },
                     update = { wv ->
-                        if (webViewInstance !== wv) {
-                            webViewInstance = wv
+                        // AndroidView can briefly issue an update for its previous child after a
+                        // renderer crash. Never re-register a destroyed WebView as active.
+                        if (!destroyedWebViews.contains(wv)) {
+                            if (webViewInstance !== wv) {
+                                webViewInstance = wv
+                            }
+                            wv.setBackgroundColor(browserSurfaceColor)
+                            wv.settings.javaScriptEnabled = browserJavaScriptEnabled
+                            wv.settings.blockNetworkImage = !browserLoadImages
+                            wv.settings.textZoom = browserTextZoom.coerceIn(50, 200)
+                            wv.settings.safeBrowsingEnabled = browserSafeBrowsingEnabled
+                            wv.settings.javaScriptCanOpenWindowsAutomatically = !browserBlockPopups
+                            wv.settings.mixedContentMode = if (browserBlockMixedContent) {
+                                WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            } else {
+                                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            }
+                            wv.settings.mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                wv.settings.setAlgorithmicDarkeningAllowed(browserDarkenWebsites)
+                            }
+                            wv.settings.setSupportZoom(browserPinchZoomEnabled)
+                            wv.settings.builtInZoomControls = browserPinchZoomEnabled
+                            wv.settings.userAgentString = if (isDesktopMode) {
+                                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                            } else {
+                                OkHttpDownloader.DEFAULT_USER_AGENT
+                            }
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(wv, browserThirdPartyCookies)
                         }
-                        wv.setBackgroundColor(browserSurfaceColor)
-                        wv.settings.javaScriptEnabled = browserJavaScriptEnabled
-                        wv.settings.blockNetworkImage = !browserLoadImages
-                        wv.settings.textZoom = browserTextZoom.coerceIn(50, 200)
-                        wv.settings.safeBrowsingEnabled = browserSafeBrowsingEnabled
-                        wv.settings.javaScriptCanOpenWindowsAutomatically = !browserBlockPopups
-                        wv.settings.mixedContentMode = if (browserBlockMixedContent) {
-                            WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        } else {
-                            WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        }
-                        wv.settings.mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            wv.settings.setAlgorithmicDarkeningAllowed(browserDarkenWebsites)
-                        }
-                        wv.settings.setSupportZoom(browserPinchZoomEnabled)
-                        wv.settings.builtInZoomControls = browserPinchZoomEnabled
-                        wv.settings.userAgentString = if (isDesktopMode) {
-                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                        } else {
-                            OkHttpDownloader.DEFAULT_USER_AGENT
-                        }
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(wv, browserThirdPartyCookies)
                     },
                     onRelease = { wv ->
                         releaseBrowserWebView(wv)

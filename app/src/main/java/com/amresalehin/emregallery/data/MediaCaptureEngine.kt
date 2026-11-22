@@ -315,8 +315,8 @@ object MediaCaptureEngine {
                         var nameLower = name.toLowerCase();
                         var mime = tag === 'VIDEO' ? 'video/mp4' :
                             tag === 'AUDIO' ? 'audio/mpeg' :
-                            /\\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(nameLower) ? 'video/mp4' :
-                            /\\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(nameLower) ? 'audio/mpeg' : 'image/jpeg';
+                            /\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(nameLower) ? 'video/mp4' :
+                            /\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(nameLower) ? 'audio/mpeg' : 'image/jpeg';
                         captureBlobUrl(node.src || node.href, mime, name);
                     }
                 };
@@ -657,9 +657,9 @@ object MediaCaptureEngine {
                         if (blobHref.indexOf('blob:') === 0 && window.__emreCaptureBlobUrl) {
                             var anchorName = node.getAttribute('download') || node.getAttribute('title') || '';
                             var anchorNameLower = anchorName.toLowerCase();
-                            var anchorMime = /\\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(anchorNameLower)
+                            var anchorMime = /\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(anchorNameLower)
                                 ? 'video/mp4'
-                                : /\\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(anchorNameLower)
+                                : /\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(anchorNameLower)
                                     ? 'audio/mpeg'
                                     : 'image/jpeg';
                             window.__emreCaptureBlobUrl(blobHref, anchorMime, anchorName);

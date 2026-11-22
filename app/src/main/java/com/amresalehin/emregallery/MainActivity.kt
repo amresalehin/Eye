@@ -69,10 +69,6 @@ class MainActivity : FragmentActivity() {
         applyHighRefreshRate()
     }
 
-    override fun onPause() {
-        super.onPause()
-    }
-
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {

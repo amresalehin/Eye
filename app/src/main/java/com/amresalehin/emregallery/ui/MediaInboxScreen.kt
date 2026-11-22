@@ -95,101 +95,12 @@ enum class DownloaderViewMode {
     ACTIVITY_PAGE
 }
 
-@Composable
-private fun DownloaderBottomNavigationBar(
-    currentMode: DownloaderViewMode,
-    onSelect: (DownloaderViewMode) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 6.dp,
-        shadowElevation = 10.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-        modifier = modifier
-            .fillMaxWidth()
-            .height(64.dp)
-            .testTag("downloader_bottom_navigation")
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val destinations = listOf(
-                Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.Home, "Home"),
-                Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
-                Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved")
-            )
-            destinations.forEach { (destination, icon, label) ->
-                val selected = currentMode == destination
-                val pillWidth by animateDpAsState(
-                    targetValue = if (selected) 58.dp else 40.dp,
-                    animationSpec = snap(),
-                    label = "downloader_nav_pill_width"
-                )
-                val pillColor by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                    animationSpec = snap(),
-                    label = "downloader_nav_pill_color"
-                )
-                val iconTint by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = snap(),
-                    label = "downloader_nav_icon_tint"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable { onSelect(destination) }
-                        .padding(vertical = 4.dp)
-                        .testTag("downloader_nav_${label.lowercase()}"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = pillColor,
-                            modifier = Modifier
-                                .height(30.dp)
-                                .width(pillWidth)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = label,
-                                    tint = iconTint,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaInboxScreen(
     onBack: () -> Unit,
     onHomeBack: () -> Unit = onBack,
+    onGlobalNavigationVisibilityChanged: (Boolean) -> Unit = {},
     initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
     onOpenMediaItem: ((String) -> Unit)? = null,
@@ -226,6 +137,12 @@ fun MediaInboxScreen(
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
     var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
+    LaunchedEffect(currentViewMode) {
+        onGlobalNavigationVisibilityChanged(currentViewMode != DownloaderViewMode.DOWNLOADER_PAGE)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onGlobalNavigationVisibilityChanged(true) }
+    }
     var activeFetchUrl by remember { mutableStateOf("") }
     BackHandler {
         if (isSelectionMode) {
@@ -540,7 +457,7 @@ fun MediaInboxScreen(
                                     onOpenMediaItem?.invoke(uriStr)
                                 }
                             },
-                            showBackButton = false,
+                            showBackButton = true,
                             modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -554,7 +471,7 @@ fun MediaInboxScreen(
                                     .fillMaxSize()
                                     .padding(start = 12.dp, end = 20.dp)
                                     .testTag("inbox_media_grid"),
-                                contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp),
+                                contentPadding = PaddingValues(top = 10.dp, bottom = 112.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
@@ -613,36 +530,7 @@ fun MediaInboxScreen(
                 }
             }
 
-            // Overlay navigation so it floats above content without reducing the page viewport.
-            if (currentViewMode in listOf(
-                    DownloaderViewMode.SEARCH_PAGE,
-                    DownloaderViewMode.ACTIVITY_PAGE,
-                    DownloaderViewMode.SAVED_LIBRARY
-                ) && selectedStackForDetail == null
-            ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 12.dp)
-                        .zIndex(10f)
-                ) {
-                    DownloaderBottomNavigationBar(
-                        currentMode = currentViewMode,
-                        onSelect = { mode ->
-                            if (mode != currentViewMode) {
-                                selectedStackForDetail = null
-                                selectedStackIds = emptySet()
-                                isSearchFocused = false
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                                currentViewMode = mode
-                            }
-                        }
-                    )
-                }
-            }
+
         }
 
     // Delete Confirmation Dialog for selected stacks

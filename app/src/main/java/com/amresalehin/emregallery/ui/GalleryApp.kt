@@ -142,6 +142,7 @@ fun GalleryApp(
     var hasOpenedAlbumsScreen by remember { mutableStateOf(false) }
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var showInboxGlobalNavigation by remember { mutableStateOf(true) }
     var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
     var isAlbumBrowserVisible by remember { mutableStateOf(false) }
     var albumBrowserInitialUrl by remember { mutableStateOf("") }
@@ -523,6 +524,9 @@ fun GalleryApp(
         }
         if (dest == Destination.ALBUMS) {
             hasOpenedAlbumsScreen = true
+        }
+        if (dest == Destination.MEDIA_INBOX) {
+            showInboxGlobalNavigation = true
         }
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -1303,6 +1307,9 @@ fun GalleryApp(
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
                         initialStackForDetail = inboxInitialStack,
+                        onGlobalNavigationVisibilityChanged = { visible ->
+                            showInboxGlobalNavigation = visible
+                        },
                         onOpenBrowser = { url ->
                             albumBrowserInitialUrl = url
                             albumBrowserNavigationRequestId += 1
@@ -1627,7 +1634,12 @@ fun GalleryApp(
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
+        val supportsMainNavigation = returnDestination in listOf(
+            Destination.HOME, Destination.ALBUMS, Destination.SETTINGS, Destination.MEDIA_INBOX
+        )
+        val shouldShowMainNavigation = supportsMainNavigation &&
+            (returnDestination != Destination.MEDIA_INBOX || showInboxGlobalNavigation)
+        val showBottomBarContainer = ((shouldShowMainNavigation && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
@@ -1646,7 +1658,7 @@ fun GalleryApp(
                             alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
-                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                    if (albumFilter == null && shouldShowMainNavigation) {
                         FloatingNavigationBar(
                             current = returnDestination,
                             onSelect = { dest ->

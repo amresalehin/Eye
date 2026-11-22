@@ -707,7 +707,7 @@ fun DownloaderActivityPage(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp),
+                    contentPadding = PaddingValues(bottom = 112.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Active Downloads Section

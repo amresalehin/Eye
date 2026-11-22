@@ -142,11 +142,25 @@ fun ViewerScreen(
         onPlayIntentChange = { sessionPlayIntent = it }
     )
 
-    // Fullscreen playback uses the device's landscape sensors and hides all system bars.
-    // MainActivity handles orientation configuration changes so the active player/state survives rotation.
+    // Fullscreen starts in landscape, with an explicit control to switch to portrait.
+    // MainActivity handles orientation config changes so playback state survives either rotation.
     val activity = remember(context) { context.findActivity() }
     val originalRequestedOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    var isFullscreenPortrait by remember(activity) { mutableStateOf(false) }
+    val toggleFullscreenOrientation: () -> Unit = {
+        val switchToPortrait = !isFullscreenPortrait
+        isFullscreenPortrait = switchToPortrait
+        activity?.requestedOrientation = if (switchToPortrait) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+    }
+    LaunchedEffect(videoState.isFullscreen) {
+        // Start every fullscreen session in landscape and reset the toggle on exit.
+        isFullscreenPortrait = false
     }
     DisposableEffect(videoState.isFullscreen, activity) {
         val window = activity?.window
@@ -650,6 +664,8 @@ fun ViewerScreen(
                     if (isPlayableMedia) {
                         VideoPlayerControlsBar(
                             videoState = videoState,
+                            isFullscreenPortrait = isFullscreenPortrait,
+                            onToggleFullscreenOrientation = toggleFullscreenOrientation,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = if (videoState.isFullscreen) 20.dp else 4.dp)

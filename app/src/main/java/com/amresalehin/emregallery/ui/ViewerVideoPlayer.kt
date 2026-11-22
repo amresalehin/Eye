@@ -232,11 +232,8 @@ fun VideoPlayerSurface(
         label = "video_frame_handoff"
     )
     val isFullscreen = videoState.isFullscreen
-    val resizeMode = if (isFullscreen) {
-        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-    } else {
-        AspectRatioFrameLayout.RESIZE_MODE_FIT
-    }
+    // Fit the complete source frame in both fullscreen orientations; never crop video edges.
+    val resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     val playerBackground = if (isFullscreen) {
         android.graphics.Color.BLACK
     } else {
@@ -280,6 +277,8 @@ fun VideoPlayerSurface(
 @Composable
 fun VideoPlayerControlsBar(
     videoState: ViewerVideoState,
+    isFullscreenPortrait: Boolean,
+    onToggleFullscreenOrientation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (!videoState.isVideo || videoState.player == null) return
@@ -314,7 +313,7 @@ fun VideoPlayerControlsBar(
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (isPlaying) "Pause video" else "Play video",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = if (isFullscreen) Color.White else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -362,6 +361,21 @@ fun VideoPlayerControlsBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Switch between portrait and landscape without leaving fullscreen.
+                if (isFullscreen) {
+                    IconButton(
+                        onClick = onToggleFullscreenOrientation,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFullscreenPortrait) Icons.Default.Landscape else Icons.Default.Portrait,
+                            contentDescription = if (isFullscreenPortrait) "Switch to landscape" else "Switch to portrait",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
                 // Mute toggle
                 IconButton(
                     onClick = { videoState.toggleMute() },
@@ -370,7 +384,7 @@ fun VideoPlayerControlsBar(
                     Icon(
                         imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = if (isMuted) "Unmute video" else "Mute video",
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = if (isFullscreen) Color.White else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -383,7 +397,7 @@ fun VideoPlayerControlsBar(
                     Icon(
                         imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                         contentDescription = if (isFullscreen) "Exit fullscreen" else "Enter fullscreen",
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = if (isFullscreen) Color.White else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }

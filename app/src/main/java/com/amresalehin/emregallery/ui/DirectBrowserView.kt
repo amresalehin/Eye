@@ -2597,13 +2597,6 @@ fun BrowserEmptyHomePage(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                "Shortcuts",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
             if (shortcutSites.isNotEmpty()) {
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(18.dp)
@@ -2658,12 +2651,6 @@ fun BrowserEmptyHomePage(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Recently visited",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
                 if (recentSites.isNotEmpty()) {
                     Text(
                         "${recentSites.size}",

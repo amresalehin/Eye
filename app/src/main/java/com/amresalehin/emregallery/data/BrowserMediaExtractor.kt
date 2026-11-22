@@ -153,6 +153,7 @@ class BrowserMediaExtractor(private val context: Context) {
                 var pageFinishedCount = 0
                 var detectedProtectionReason: String? = null
                 var pendingGracePeriodRunnable: Runnable? = null
+                var blobWaitFallbackRunnable: Runnable? = null
                 var isWaitingForBlobCaptures = false
 
                 fun syncCookies() {
@@ -175,6 +176,17 @@ class BrowserMediaExtractor(private val context: Context) {
                     } catch (_: Throwable) {}
                 }
 
+                fun deliverCompletion(reason: String?) {
+                    if (isCancelled || isExtractionCompleted) return
+                    isWaitingForBlobCaptures = false
+                    blobWaitFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+                    blobWaitFallbackRunnable = null
+                    isExtractionCompleted = true
+                    pendingGracePeriodRunnable?.let { mainHandler.removeCallbacks(it) }
+                    syncCookies()
+                    onFinished(reason)
+                }
+
                 fun safeComplete(reason: String? = null) {
                     if (isExtractionCompleted || isCancelled || isWaitingForBlobCaptures) return
                     isWaitingForBlobCaptures = true
@@ -191,13 +203,13 @@ class BrowserMediaExtractor(private val context: Context) {
                             return true;
                         })();
                     """.trimIndent()
+
+                    val fallback = Runnable { deliverCompletion(reason) }
+                    blobWaitFallbackRunnable = fallback
+                    mainHandler.postDelayed(fallback, 15000L)
+
                     wv.evaluateJavascript(waitForBlobsScript) {
-                        if (isCancelled || isExtractionCompleted) return@evaluateJavascript
-                        isWaitingForBlobCaptures = false
-                        isExtractionCompleted = true
-                        pendingGracePeriodRunnable?.let { mainHandler.removeCallbacks(it) }
-                        syncCookies()
-                        onFinished(reason)
+                        deliverCompletion(reason)
                     }
                 }
 

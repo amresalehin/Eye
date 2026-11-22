@@ -201,27 +201,71 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
         continuation.invokeOnCancellation {
             browserExtractor.cleanup()
         }
-        val discoveredList = mutableListOf<ScrapedMediaItem>()
-        browserExtractor.startLiveExtraction(
-            targetUrl = context.url,
-            onStatusUpdate = onStatusUpdate,
-            onMediaDiscovered = { item ->
-                discoveredList.add(item)
-                onItemDiscovered(item)
-            },
-            onFinished = { failureReason ->
-                if (continuation.isActive) {
-                    continuation.resume(
-                        MediaExtractionResult(
-                            items = discoveredList,
-                            errorMessage = if (discoveredList.isEmpty()) failureReason else null
-                        ),
-                        onCancellation = { browserExtractor.cleanup() }
-                    )
-                }
+
+        val discoveredByUrl = LinkedHashMap<String, ScrapedMediaItem>()
+        fun startBrowserAttempt(attempt: Int) {
+            if (!continuation.isActive) {
                 browserExtractor.cleanup()
+                return
             }
-        )
+
+            browserExtractor.startLiveExtraction(
+                targetUrl = context.url,
+                onStatusUpdate = onStatusUpdate,
+                onMediaDiscovered = { item ->
+                    val key = MediaClassifier.canonicalKey(item.url)
+                    val accepted = synchronized(discoveredByUrl) {
+                        val existing = discoveredByUrl[key]
+                        when {
+                            existing == null -> {
+                                discoveredByUrl[key] = item
+                                item
+                            }
+                            MediaClassifier.compareMediaQuality(item, existing) > 0 -> {
+                                val improved = item.copy(
+                                    id = existing.id,
+                                    thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
+                                    durationMillis = item.durationMillis ?: existing.durationMillis
+                                )
+                                discoveredByUrl[key] = improved
+                                improved
+                            }
+                            else -> null
+                        }
+                    }
+                    accepted?.let(onItemDiscovered)
+                },
+                onFinished = { failureReason ->
+                    val rendererCrashed = failureReason?.contains(
+                        "Browser renderer process crashed",
+                        ignoreCase = true
+                    ) == true
+
+                    if (rendererCrashed && attempt == 0 && continuation.isActive) {
+                        onStatusUpdate("The page renderer stopped. Retrying live media extraction once…")
+                        // startLiveExtraction cleans up the dead WebView before constructing a new
+                        // one. The shared result map keeps media found before the crash.
+                        startBrowserAttempt(attempt = 1)
+                    } else {
+                        val results = synchronized(discoveredByUrl) {
+                            discoveredByUrl.values.toList()
+                        }
+                        if (continuation.isActive) {
+                            continuation.resume(
+                                MediaExtractionResult(
+                                    items = results,
+                                    errorMessage = if (results.isEmpty()) failureReason else null
+                                ),
+                                onCancellation = { browserExtractor.cleanup() }
+                            )
+                        }
+                        browserExtractor.cleanup()
+                    }
+                }
+            )
+        }
+
+        startBrowserAttempt(attempt = 0)
     }
 
     fun cleanup() {

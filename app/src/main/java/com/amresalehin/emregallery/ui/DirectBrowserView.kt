@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import android.webkit.*
 import android.widget.Toast
@@ -83,6 +84,13 @@ private data class PendingBrowserMediaCandidate(
     val rawUrl: String,
     val baseUrl: String,
     val source: ExtractionSource
+)
+
+private data class BrowserRendererRecoverySnapshot(
+    val url: String,
+    val webViewState: Bundle?,
+    val scrollX: Int,
+    val scrollY: Int
 )
 
 @Composable
@@ -176,6 +184,24 @@ fun DirectBrowserView(
     var browserToolbarFirstFrameReady by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webViewGeneration by remember { mutableIntStateOf(0) }
+    var rendererRecoveryMessage by remember { mutableStateOf<String?>(null) }
+    var rendererCrashUrl by remember { mutableStateOf("") }
+    var rendererCrashAttempts by remember { mutableIntStateOf(0) }
+    var browserRecoverySnapshot by remember { mutableStateOf<BrowserRendererRecoverySnapshot?>(null) }
+    val destroyedWebViews = remember {
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap<WebView, Boolean>())
+    }
+
+    fun releaseBrowserWebView(view: WebView) {
+        if (!destroyedWebViews.add(view)) return
+        runCatching { (view.parent as? android.view.ViewGroup)?.removeView(view) }
+        runCatching { view.stopLoading() }
+        runCatching { view.removeJavascriptInterface("EmreBridge") }
+        runCatching { view.webViewClient = WebViewClient() }
+        runCatching { view.webChromeClient = WebChromeClient() }
+        runCatching { view.destroy() }
+    }
 
     LaunchedEffect(Unit) {
         withFrameNanos { }
@@ -264,10 +290,7 @@ fun DirectBrowserView(
             pendingDomScanJob?.cancel()
             pendingCandidateChannel.close()
             webViewInstance?.let { wv ->
-                wv.stopLoading()
-                wv.webViewClient = WebViewClient()
-                wv.webChromeClient = WebChromeClient()
-                wv.destroy()
+                releaseBrowserWebView(wv)
                 webViewInstance = null
             }
         }
@@ -284,6 +307,11 @@ fun DirectBrowserView(
 
     fun notifyUrlIfChanged(newUrl: String) {
         activeBaseUrlRef.set(newUrl)
+        if (newUrl != rendererCrashUrl) {
+            rendererCrashUrl = ""
+            rendererCrashAttempts = 0
+            rendererRecoveryMessage = null
+        }
         if (newUrl != lastNotifiedUrl) {
             lastNotifiedUrl = newUrl
             pageTitle = ""
@@ -310,7 +338,18 @@ fun DirectBrowserView(
                 historyManager.recordVisit(formatted)
             }
         }
-        webViewInstance?.loadUrl(formatted)
+        val activeWebView = webViewInstance
+        if (activeWebView != null) {
+            activeWebView.loadUrl(formatted)
+        } else {
+            // A renderer can die while the browser surface is still open. Recreate
+            // the WebView when the user navigates instead of leaving the address bar inert.
+            rendererCrashAttempts = 0
+            rendererCrashUrl = ""
+            rendererRecoveryMessage = "Opening page…"
+            isLoading = true
+            webViewGeneration += 1
+        }
         focusManager.clearFocus()
     }
 
@@ -348,6 +387,27 @@ fun DirectBrowserView(
         ) {
             activeWebView.reload()
         }
+    }
+
+    fun captureBrowserRecoverySnapshot(view: WebView?) {
+        val activeView = view ?: return
+        if (destroyedWebViews.contains(activeView)) return
+        val url = activeView.url?.takeIf {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        } ?: activeBaseUrlRef.get().takeIf {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        } ?: return
+        val state = Bundle()
+        val stateSaved = runCatching {
+            activeView.saveState(state)
+            !state.isEmpty
+        }.getOrDefault(false)
+        browserRecoverySnapshot = BrowserRendererRecoverySnapshot(
+            url = url,
+            webViewState = state.takeIf { stateSaved }?.let(::Bundle),
+            scrollX = activeView.scrollX,
+            scrollY = activeView.scrollY
+        )
     }
 
     fun scanCurrentPageDOM(wv: WebView?) {
@@ -905,8 +965,13 @@ fun DirectBrowserView(
                     .weight(1f)
                     .background(MaterialTheme.colorScheme.surface)
             ) {
+                key(webViewGeneration) {
                 AndroidView(
                     factory = { ctx ->
+                        val recoveryUrl = activeBaseUrlRef.get().ifBlank {
+                            currentUrl.ifBlank { startUrl }
+                        }
+                        val recoverySnapshot = browserRecoverySnapshot?.takeIf { it.url == recoveryUrl }
                         WebView(ctx).apply {
                             setBackgroundColor(browserSurfaceColor)
                             webViewInstance = this
@@ -1147,6 +1212,7 @@ fun DirectBrowserView(
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     isLoading = false
+                                    rendererRecoveryMessage = null
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
                                             currentUrl = ""
@@ -1179,6 +1245,69 @@ fun DirectBrowserView(
                                     }
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
+                                    view?.post {
+                                        if (webViewInstance === view && view.url == url) {
+                                            captureBrowserRecoverySnapshot(view)
+                                        }
+                                    }
+                                }
+
+                                override fun onRenderProcessGone(
+                                    view: WebView?,
+                                    detail: RenderProcessGoneDetail?
+                                ): Boolean {
+                                    val crashedView = view ?: return true
+                                    val crashedUrl = crashedView.url?.takeIf {
+                                        it.startsWith("http://", ignoreCase = true) ||
+                                            it.startsWith("https://", ignoreCase = true)
+                                    } ?: activeBaseUrlRef.get().takeIf {
+                                        it.startsWith("http://", ignoreCase = true) ||
+                                            it.startsWith("https://", ignoreCase = true)
+                                    }.orEmpty()
+
+                                    Log.e(
+                                        "DirectBrowserView",
+                                        "WebView renderer exited (didCrash=${detail?.didCrash()}, url=$crashedUrl)"
+                                    )
+
+                                    if (webViewInstance === crashedView) {
+                                        webViewInstance = null
+                                    }
+                                    pendingDomScanJob?.cancel()
+                                    lastScannedDomUrl = ""
+                                    seenRawUrls.clear()
+                                    if (crashedUrl.isNotBlank()) {
+                                        currentUrl = crashedUrl
+                                        addressInput = crashedUrl
+                                        activeBaseUrlRef.set(crashedUrl)
+                                    }
+                                    canGoBack = false
+                                    canGoForward = false
+                                    isLoading = false
+                                    loadingProgressState.floatValue = 0f
+                                    releaseBrowserWebView(crashedView)
+
+                                    val attempts = if (rendererCrashUrl == crashedUrl) {
+                                        rendererCrashAttempts + 1
+                                    } else {
+                                        1
+                                    }
+                                    rendererCrashUrl = crashedUrl
+                                    rendererCrashAttempts = attempts
+
+                                    if (attempts <= 1) {
+                                        rendererRecoveryMessage = "The page renderer stopped. Restoring this page…"
+                                        isLoading = true
+                                        coroutineScope.launch {
+                                            delay(450L)
+                                            if (webViewInstance == null && rendererCrashUrl == crashedUrl) {
+                                                webViewGeneration += 1
+                                            }
+                                        }
+                                    } else {
+                                        rendererRecoveryMessage = "The page renderer stopped repeatedly. Retry this page to continue."
+                                    }
+                                    return true
                                 }
 
                                 override fun shouldInterceptRequest(
@@ -1210,8 +1339,34 @@ fun DirectBrowserView(
                                 }
                             }
 
-                            if (startUrl.isNotBlank()) {
-                                loadUrl(startUrl)
+                            val restoredHistory = if (
+                                webViewGeneration > 0 &&
+                                recoverySnapshot?.webViewState != null
+                            ) {
+                                runCatching {
+                                    restoreState(Bundle(recoverySnapshot.webViewState))
+                                }.onFailure {
+                                    Log.w("DirectBrowserView", "Failed to restore WebView navigation state", it)
+                                }.getOrNull()
+                            } else null
+
+                            if (restoredHistory != null) {
+                                val restoredUrl = url?.takeIf {
+                                    it.startsWith("http://", ignoreCase = true) ||
+                                        it.startsWith("https://", ignoreCase = true)
+                                } ?: recoveryUrl
+                                if (restoredUrl.isNotBlank()) {
+                                    currentUrl = restoredUrl
+                                    addressInput = restoredUrl
+                                    activeBaseUrlRef.set(restoredUrl)
+                                }
+                                postDelayed({
+                                    if (webViewInstance === this) {
+                                        scrollTo(recoverySnapshot.scrollX, recoverySnapshot.scrollY)
+                                    }
+                                }, 350L)
+                            } else if (recoveryUrl.isNotBlank()) {
+                                loadUrl(recoveryUrl)
                             } else {
                                 loadUrl("about:blank")
                             }
@@ -1246,10 +1401,7 @@ fun DirectBrowserView(
                         CookieManager.getInstance().setAcceptThirdPartyCookies(wv, browserThirdPartyCookies)
                     },
                     onRelease = { wv ->
-                        wv.stopLoading()
-                        wv.webViewClient = WebViewClient()
-                        wv.webChromeClient = WebChromeClient()
-                        wv.destroy()
+                        releaseBrowserWebView(wv)
                         if (webViewInstance === wv) {
                             webViewInstance = null
                         }
@@ -1258,6 +1410,60 @@ fun DirectBrowserView(
                         .fillMaxSize()
                         .testTag("browser_webview_canvas")
                 )
+                }
+
+                if (rendererCrashAttempts > 1 && rendererRecoveryMessage != null) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                            .zIndex(4f),
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 12.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Text(
+                                rendererRecoveryMessage.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                "Your browser settings and discovered media are preserved.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Button(
+                                onClick = {
+                                    rendererCrashAttempts = 0
+                                    rendererCrashUrl = currentUrl
+                                    rendererRecoveryMessage = "Restoring this page…"
+                                    isLoading = true
+                                    webViewGeneration += 1
+                                },
+                                modifier = Modifier.testTag("browser_renderer_retry")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Retry page")
+                            }
+                        }
+                    }
+                }
 
                 if (currentUrl.isBlank()) {
                     BrowserEmptyHomePage(

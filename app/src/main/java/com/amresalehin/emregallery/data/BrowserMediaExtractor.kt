@@ -353,10 +353,21 @@ class BrowserMediaExtractor(private val context: Context) {
                         view: WebView?,
                         detail: RenderProcessGoneDetail?
                     ): Boolean {
-                        Log.w("BrowserMediaExtractor", "Render process gone (didCrash=${detail?.didCrash()})")
+                        Log.e(
+                            "BrowserMediaExtractor",
+                            "Renderer process exited (didCrash=${detail?.didCrash()}); ending this attempt so the provider can retry"
+                        )
                         mainHandler.post {
-                            onStatusUpdate("Browser renderer process recovered")
-                            safeComplete("Browser renderer process crashed or recovered")
+                            if (isCancelled || isExtractionCompleted) return@post
+                            val hasPartialResults = synchronized(seenMap) { seenMap.isNotEmpty() }
+                            onStatusUpdate(
+                                if (hasPartialResults) {
+                                    "Browser renderer stopped. Preserving discovered media before retrying…"
+                                } else {
+                                    "Browser renderer stopped. Retrying live extraction…"
+                                }
+                            )
+                            safeComplete("Browser renderer process crashed")
                         }
                         return true
                     }

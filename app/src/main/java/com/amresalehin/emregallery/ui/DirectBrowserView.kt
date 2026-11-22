@@ -486,7 +486,7 @@ fun DirectBrowserView(
                                     .testTag("browser_close_btn")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Close,
+                                    imageVector = Icons.Default.PowerSettingsNew,
                                     contentDescription = "Close browser",
                                     tint = MaterialTheme.colorScheme.onSurface
                                 )

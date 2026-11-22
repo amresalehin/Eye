@@ -252,8 +252,12 @@ fun DirectBrowserView(
     }
 
     // Intercept back button when browser can navigate back
-    BackHandler(enabled = isActive && canGoBack && !isAddressBarFocused) {
-        webViewInstance?.goBack()
+    BackHandler(enabled = isActive && (showBrowserSettings || (canGoBack && !isAddressBarFocused))) {
+        if (showBrowserSettings) {
+            showBrowserSettings = false
+        } else {
+            webViewInstance?.goBack()
+        }
     }
 
     fun notifyUrlIfChanged(newUrl: String) {
@@ -1235,7 +1239,7 @@ fun DirectBrowserView(
         }
 
         if (showBrowserSettings) {
-            BrowserSettingsBottomSheet(
+            BrowserSettingsScreen(
                 searchEngine = defaultSearchEngine,
                 javaScriptEnabled = browserJavaScriptEnabled,
                 adBlockingEnabled = browserAdBlockingEnabled,
@@ -1283,7 +1287,8 @@ fun DirectBrowserView(
                     lastRecordedHistoryUrl = ""
                     Toast.makeText(context, "Browsing data cleared", Toast.LENGTH_SHORT).show()
                 },
-                onDismiss = { showBrowserSettings = false }
+                onBack = { showBrowserSettings = false },
+                modifier = Modifier.fillMaxSize()
             )
         }
     }
@@ -1294,7 +1299,7 @@ fun DirectBrowserView(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BrowserSettingsBottomSheet(
+private fun BrowserSettingsScreen(
     searchEngine: BrowserSearchEngine,
     javaScriptEnabled: Boolean,
     adBlockingEnabled: Boolean,
@@ -1312,29 +1317,48 @@ private fun BrowserSettingsBottomSheet(
     onDesktopSiteByDefaultChange: (Boolean) -> Unit,
     onTextZoomChange: (Int) -> Unit,
     onClearBrowsingData: () -> Unit,
-    onDismiss: () -> Unit
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var showClearDataConfirmation by remember { mutableStateOf(false) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
+    Scaffold(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("browser_settings_screen"),
         containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "Browser settings",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { innerPadding ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .verticalScroll(rememberScrollState()),
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                text = "Browser settings",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-
             BrowserSettingsSectionTitle("General")
             Text(
                 text = "Default search engine",

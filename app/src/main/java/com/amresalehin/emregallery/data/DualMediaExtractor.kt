@@ -530,20 +530,18 @@ class DualMediaExtractor(private val context: Context) {
                 val galleryDlProvider = GalleryDlProvider()
                 val ytDlpProvider = YtDlpProvider()
                 val staticHtmlProvider = StaticHtmlProvider()
-                // Python is only needed for the downloader. Start it off the UI thread when this
-                // URL is actually extracted, then run its provider checks on IO as well.
-                val (galleryDlApplicable, ytDlpApplicable) = withContext(Dispatchers.IO) {
+                // Initialize Python-backed extractors off the main thread. These are independent
+                // discovery passes: none may suppress another merely because it found media.
+                withContext(Dispatchers.IO) {
                     GalleryDlEngine.init(context.applicationContext)
-                    galleryDlProvider.isApplicable(requestContext) to ytDlpProvider.isApplicable(requestContext)
                 }
-                val isStructuredApplicable = galleryDlApplicable || ytDlpApplicable
 
                 var gdlResult: MediaExtractionResult? = null
                 var ytdlpResult: MediaExtractionResult? = null
                 var staticResult: MediaExtractionResult? = null
                 var browserResult: MediaExtractionResult? = null
 
-                updateStatus("Searching media with concurrent engines...", ExtractionPhase.GALLERY_DL)
+                updateStatus("Searching with all available extraction engines...", ExtractionPhase.GALLERY_DL)
 
                 try {
                     coroutineScope {
@@ -556,10 +554,12 @@ class DualMediaExtractor(private val context: Context) {
                                             launch { updateItems(listOf(item)) }
                                         },
                                         onStatusUpdate = { status ->
-                                            launch { updateStatus(status) }
+                                            launch { updateStatus(status, ExtractionPhase.GALLERY_DL) }
                                         }
                                     )
                                 } else null
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "gallery-dl extraction error", e)
                                 null
@@ -575,10 +575,12 @@ class DualMediaExtractor(private val context: Context) {
                                             launch { updateItems(listOf(item)) }
                                         },
                                         onStatusUpdate = { status ->
-                                            launch { updateStatus(status) }
+                                            launch { updateStatus(status, ExtractionPhase.GALLERY_DL) }
                                         }
                                     )
                                 } else null
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "yt-dlp extraction error", e)
                                 null
@@ -593,104 +595,64 @@ class DualMediaExtractor(private val context: Context) {
                                         launch { updateItems(listOf(item)) }
                                     },
                                     onStatusUpdate = { status ->
-                                        launch { updateStatus(status) }
+                                        launch { updateStatus(status, ExtractionPhase.STATIC_SCRAPING) }
                                     }
                                 )
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
                                 null
                             }
                         }
 
-                        // If structured extractors (yt-dlp / gallery-dl) are applicable, await them first so we can gate headless WebView
-                        if (isStructuredApplicable) {
-                            gdlResult = gdlDeferred.await()
-                            ytdlpResult = ytdlpDeferred.await()
-                            staticResult = staticDeferred.await()
-
-                            if (gdlResult != null && gdlResult.items.isNotEmpty()) {
-                                updateItems(gdlResult.items, title = gdlResult.pageTitle)
-                            }
-                            if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
-                                updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
-                            }
-                            if (staticResult != null && staticResult.items.isNotEmpty()) {
-                                updateItems(staticResult.items, title = staticResult.pageTitle)
-                            }
-
-                            if (!shouldSkipHeadlessBrowser(requestContext.url, isStructuredApplicable, gdlResult, ytdlpResult)) {
-                                val browserProvider = BrowserProvider(context)
-                                activeBrowserProvider = browserProvider
-                                browserResult = try {
-                                    browserProvider.extract(
-                                        context = requestContext,
-                                        onItemDiscovered = { item ->
-                                            launch { updateItems(listOf(item)) }
-                                        },
-                                        onStatusUpdate = { status ->
-                                            val phase = if (status.contains("scrolling", ignoreCase = true)) {
-                                                ExtractionPhase.AUTO_SCROLLING
-                                            } else {
-                                                ExtractionPhase.BROWSER_INTERCEPTING
-                                            }
-                                            launch { updateStatus(status, phase) }
+                        // Start the live WebView extraction at the same time as the other engines,
+                        // including on sites supported by gallery-dl / yt-dlp. It may discover
+                        // JavaScript-created URLs, lazy-loaded media, and network-only candidates.
+                        val browserProvider = BrowserProvider(context)
+                        activeBrowserProvider = browserProvider
+                        val browserDeferred = async {
+                            try {
+                                browserProvider.extract(
+                                    context = requestContext,
+                                    onItemDiscovered = { item ->
+                                        launch { updateItems(listOf(item)) }
+                                    },
+                                    onStatusUpdate = { status ->
+                                        val phase = if (status.contains("scrolling", ignoreCase = true)) {
+                                            ExtractionPhase.AUTO_SCROLLING
+                                        } else {
+                                            ExtractionPhase.BROWSER_INTERCEPTING
                                         }
-                                    )
-                                } catch (ce: CancellationException) {
-                                    throw ce
-                                } catch (e: Exception) {
-                                    Log.w("DualMediaExtractor", "Browser extraction error", e)
-                                    null
-                                }
-                                if (browserResult != null && browserResult.items.isNotEmpty()) {
-                                    updateItems(browserResult.items, title = browserResult.pageTitle)
-                                }
+                                        launch { updateStatus(status, phase) }
+                                    }
+                                )
+                            } catch (ce: CancellationException) {
+                                throw ce
+                            } catch (e: Exception) {
+                                Log.w("DualMediaExtractor", "Browser extraction error", e)
+                                null
                             }
-                        } else {
-                            // Generic webpage: run BrowserProvider in parallel with StaticHtmlProvider
-                            val browserProvider = BrowserProvider(context)
-                            activeBrowserProvider = browserProvider
-                            val browserDeferred = async {
-                                try {
-                                    browserProvider.extract(
-                                        context = requestContext,
-                                        onItemDiscovered = { item ->
-                                            launch { updateItems(listOf(item)) }
-                                        },
-                                        onStatusUpdate = { status ->
-                                            val phase = if (status.contains("scrolling", ignoreCase = true)) {
-                                                ExtractionPhase.AUTO_SCROLLING
-                                            } else {
-                                                ExtractionPhase.BROWSER_INTERCEPTING
-                                            }
-                                            launch { updateStatus(status, phase) }
-                                        }
-                                    )
-                                } catch (ce: CancellationException) {
-                                    throw ce
-                                } catch (e: Exception) {
-                                    Log.w("DualMediaExtractor", "Browser extraction error", e)
-                                    null
-                                }
-                            }
+                        }
 
-                            gdlResult = gdlDeferred.await()
-                            ytdlpResult = ytdlpDeferred.await()
-                            staticResult = staticDeferred.await()
-                            browserResult = browserDeferred.await()
+                        // Await every provider independently. All discoveries have already been
+                        // streamed into updateItems; these awaits ensure no engine is abandoned.
+                        gdlResult = gdlDeferred.await()
+                        ytdlpResult = ytdlpDeferred.await()
+                        staticResult = staticDeferred.await()
+                        browserResult = browserDeferred.await()
 
-                            if (gdlResult != null && gdlResult.items.isNotEmpty()) {
-                                updateItems(gdlResult.items, title = gdlResult.pageTitle)
-                            }
-                            if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
-                                updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
-                            }
-                            if (staticResult != null && staticResult.items.isNotEmpty()) {
-                                updateItems(staticResult.items, title = staticResult.pageTitle)
-                            }
-                            if (browserResult != null && browserResult.items.isNotEmpty()) {
-                                updateItems(browserResult.items, title = browserResult.pageTitle)
-                            }
+                        if (gdlResult != null && gdlResult.items.isNotEmpty()) {
+                            updateItems(gdlResult.items, title = gdlResult.pageTitle)
+                        }
+                        if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
+                            updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
+                        }
+                        if (staticResult != null && staticResult.items.isNotEmpty()) {
+                            updateItems(staticResult.items, title = staticResult.pageTitle)
+                        }
+                        if (browserResult != null && browserResult.items.isNotEmpty()) {
+                            updateItems(browserResult.items, title = browserResult.pageTitle)
                         }
                     }
                 } finally {

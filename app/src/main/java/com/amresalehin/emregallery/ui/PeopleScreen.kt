@@ -61,7 +61,8 @@ fun PeopleScreen(
     onBack: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
     onOpenIndexStatus: () -> Unit,
-    initialPersonId: String? = null
+    initialPersonId: String? = null,
+    isVisible: Boolean = true
 ) {
     val context = LocalContext.current
     val store = remember { FaceClusterStore(context.applicationContext) }
@@ -204,7 +205,7 @@ fun PeopleScreen(
 
     val collapsedDayKeys = remember(selectedPersonId) { mutableStateListOf<Long>() }
 
-    BackHandler(enabled = selectedPersonId != null) {
+    BackHandler(enabled = isVisible && selectedPersonId != null) {
         if (initialPersonId != null && selectedPersonId == initialPersonId) {
             onBack()
         } else {

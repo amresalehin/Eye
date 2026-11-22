@@ -134,6 +134,7 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
+    var hasOpenedPeopleScreen by remember { mutableStateOf(false) }
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
@@ -504,6 +505,9 @@ fun GalleryApp() {
         newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
         newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
     ) {
+        if (dest == Destination.PEOPLE) {
+            hasOpenedPeopleScreen = true
+        }
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
         }
@@ -730,6 +734,9 @@ fun GalleryApp() {
             inScope && matchesCategory
         }
     }
+    val peopleMedia = remember(media, hidden, inBin, archive) {
+        media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+    }
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val topContentPadding = statusBarTop + 68.dp
@@ -865,6 +872,33 @@ fun GalleryApp() {
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
+                    }
+
+                    // Retain face-index and People UI state after the first visit.
+                    // The BackHandler inside PeopleScreen is gated by isVisible below.
+                    if (hasOpenedPeopleScreen) {
+                        val peopleVisible = baseDestination == Destination.PEOPLE
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = if (peopleVisible) 1f else 0f
+                                    translationX = if (peopleVisible) 0f else size.width * 2f
+                                }
+                                .zIndex(if (peopleVisible) 1f else -1f)
+                        ) {
+                            PeopleScreen(
+                                media = peopleMedia,
+                                initialPersonId = activePersonId,
+                                isVisible = peopleVisible,
+                                onBack = {
+                                    activePersonId = null
+                                    performBackNavigation()
+                                },
+                                onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
+                                onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
+                            )
+                        }
                     }
 
                     when (baseDestination) {
@@ -1059,21 +1093,7 @@ fun GalleryApp() {
                             onUnarchive = { item -> scope.launch { prefs.setArchived(item.uri, false) } }
                         )
                     }
-                    Destination.PEOPLE -> {
-                        val peopleMedia = remember(media, hidden, inBin, archive) {
-                            media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
-                        }
-                        PeopleScreen(
-                            media = peopleMedia,
-                            initialPersonId = activePersonId,
-                            onBack = {
-                                activePersonId = null
-                                performBackNavigation()
-                            },
-                            onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
-                            onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
-                        )
-                    }
+                    Destination.PEOPLE -> Unit
                     Destination.MAP -> {
                         val mapMedia = remember(media, hidden, inBin, archive) {
                             media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }

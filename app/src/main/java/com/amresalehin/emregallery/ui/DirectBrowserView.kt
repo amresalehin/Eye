@@ -260,6 +260,9 @@ fun DirectBrowserView(
         activeBaseUrlRef.set(newUrl)
         if (newUrl != lastNotifiedUrl) {
             lastNotifiedUrl = newUrl
+            pageTitle = ""
+            pageTitleRef.set("")
+            onPageTitleChanged?.invoke("")
             onUrlChange?.invoke(newUrl)
         }
     }
@@ -1100,6 +1103,7 @@ fun DirectBrowserView(
                                     val title = view?.title.orEmpty()
                                     pageTitle = title
                                     pageTitleRef.set(title)
+                                    onPageTitleChanged?.invoke(title)
                                     pendingDomScanJob = coroutineScope.launch {
                                         delay(320L)
                                         if (view?.url == navigatedUrl &&

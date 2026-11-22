@@ -34,6 +34,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -117,6 +118,8 @@ fun DirectBrowserView(
 ) {
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    // Give WebView's initial about:blank frame the active theme color before first draw.
+    val browserSurfaceColor = MaterialTheme.colorScheme.surface.toArgb()
     val downloaderPreferences = remember(context) { DownloaderPreferencesManager(context) }
     val defaultSearchEngine by downloaderPreferences.searchEngine.collectAsState(
         initial = DownloaderPreferencesManager.getSearchEngineSync(context)
@@ -349,6 +352,7 @@ fun DirectBrowserView(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
             .testTag("direct_browser_view")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -890,10 +894,12 @@ fun DirectBrowserView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
                 AndroidView(
                     factory = { ctx ->
                         WebView(ctx).apply {
+                            setBackgroundColor(browserSurfaceColor)
                             webViewInstance = this
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1196,6 +1202,7 @@ fun DirectBrowserView(
                         if (webViewInstance !== wv) {
                             webViewInstance = wv
                         }
+                        wv.setBackgroundColor(browserSurfaceColor)
                         wv.settings.javaScriptEnabled = browserJavaScriptEnabled
                         wv.settings.blockNetworkImage = !browserLoadImages
                         wv.settings.textZoom = browserTextZoom.coerceIn(50, 200)

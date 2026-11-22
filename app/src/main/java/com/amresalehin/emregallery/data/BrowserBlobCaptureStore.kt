@@ -47,7 +47,9 @@ class BrowserBlobCaptureStore(context: Context) {
             else -> return false
         }
         val isMediaMime = safeMime.startsWith("image/") || safeMime.startsWith("video/") || safeMime.startsWith("audio/")
-        if (!isMediaMime && suppliedExtension !in MEDIA_EXTENSIONS && mimeExtension !in MEDIA_EXTENSIONS) return false
+        if (!isMediaMime && suppliedExtension !in MEDIA_EXTENSIONS &&
+            (mimeExtension == null || mimeExtension !in MEDIA_EXTENSIONS)
+        ) return false
         if (expectedBytes < 0L || expectedBytes > MAX_CAPTURE_BYTES) return false
 
         val normalizedMime = if (isMediaMime) safeMime else {

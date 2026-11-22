@@ -168,9 +168,13 @@ object MediaCaptureEngine {
                     }
                 }
 
-                function inspectApiResponse(response) {
+                    function inspectApiResponse(response) {
                     try {
                         var contentType = (response.headers && response.headers.get('content-type') || '').toLowerCase();
+                        if (isMediaMime(contentType)) {
+                            if (response.url) reportApiUrl(response.url, contentType);
+                            return;
+                        }
                         if (contentType.indexOf('json') === -1 && contentType.indexOf('text/') !== 0) return;
                         var length = Number(response.headers.get('content-length') || 0);
                         if (length > MAX_API_BYTES || !response.clone) return;
@@ -322,6 +326,10 @@ object MediaCaptureEngine {
                             this.addEventListener('load', function() {
                                 try {
                                     var contentType = (this.getResponseHeader('content-type') || '').toLowerCase();
+                                    if (isMediaMime(contentType)) {
+                                        if (this.responseURL) reportApiUrl(this.responseURL, contentType);
+                                        return;
+                                    }
                                     if (contentType.indexOf('json') === -1 && contentType.indexOf('text/') !== 0) return;
                                     if (this.responseType === 'json' && this.response) {
                                         walkApiValue(this.response, '', 0, { count: 0 });
@@ -796,7 +804,9 @@ object MediaCaptureEngine {
         val normalizedMimeHint = mimeHint?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val hasMediaMimeHint = normalizedMimeHint.startsWith("image/") ||
             normalizedMimeHint.startsWith("video/") ||
-            normalizedMimeHint.startsWith("audio/")
+            normalizedMimeHint.startsWith("audio/") ||
+            normalizedMimeHint.contains("mpegurl") ||
+            normalizedMimeHint.contains("dash+xml")
         if (!MediaClassifier.isValidMedia(resolved) && !hasMediaMimeHint) return null
         if (MediaClassifier.isMediaFragment(resolved)) return null
 

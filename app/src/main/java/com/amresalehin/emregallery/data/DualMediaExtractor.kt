@@ -310,19 +310,8 @@ class DualMediaExtractor(private val context: Context) {
     private val _state = MutableStateFlow(ExtractionState())
     val state: StateFlow<ExtractionState> = _state.asStateFlow()
 
-    companion object {
-        fun shouldSkipHeadlessBrowser(
-            targetUrl: String,
-            isStructuredApplicable: Boolean,
-            gdlResult: MediaExtractionResult?,
-            ytdlpResult: MediaExtractionResult?
-        ): Boolean {
-            if (!isStructuredApplicable && !YtDlpProvider.matchesSupportedHost(targetUrl)) return false
-            val gdlSucceeded = gdlResult != null && gdlResult.items.isNotEmpty()
-            val ytdlpSucceeded = ytdlpResult != null && ytdlpResult.items.isNotEmpty()
-            return gdlSucceeded || ytdlpSucceeded
-        }
-    }
+    // Every applicable discovery engine is allowed to contribute results.
+    // A successful structured extractor must never suppress browser discovery.
 
     fun extract(targetUrl: String, scope: CoroutineScope, directOnly: Boolean = false) {
         cancel()

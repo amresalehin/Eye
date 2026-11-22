@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amresalehin.emregallery.data.AdBlockEngine
 import com.amresalehin.emregallery.data.BrowserHistoryManager
+import com.amresalehin.emregallery.data.BrowserSearchEngine
+import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.BrowserMediaExtractor
 import com.amresalehin.emregallery.data.BrowserSite
 import com.amresalehin.emregallery.data.DownloaderSession
@@ -114,11 +116,17 @@ fun DirectBrowserView(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    val downloaderPreferences = remember(context) { DownloaderPreferencesManager(context) }
+    val defaultSearchEngine by downloaderPreferences.searchEngine.collectAsState(
+        initial = DownloaderPreferencesManager.getSearchEngineSync(context)
+    )
+    val coroutineScope = rememberCoroutineScope()
 
-    val startUrl = remember {
+    val startUrl = remember(initialUrl, defaultSearchEngine) {
         val trimmed = initialUrl.trim()
         if (trimmed.isNotBlank()) {
-            MediaClassifier.formatQueryOrUrl(trimmed)
+            MediaClassifier.formatQueryOrUrl(trimmed, defaultSearchEngine)
         } else {
             "" // Empty home page by default
         }
@@ -132,14 +140,13 @@ fun DirectBrowserView(
     var isLoading by remember { mutableStateOf(false) }
     val loadingProgressState = remember { mutableFloatStateOf(0f) }
     var browserMenuExpanded by remember { mutableStateOf(false) }
+    var showBrowserSettings by remember { mutableStateOf(false) }
     var isDesktopMode by remember { mutableStateOf(false) }
     var isAddressBarFocused by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
-    val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val coroutineScope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
     val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())
     val currentSiteDomain = remember(currentUrl) {
@@ -241,7 +248,7 @@ fun DirectBrowserView(
     fun navigateToUrl(target: String) {
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
-        val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
+        val formatted = MediaClassifier.formatQueryOrUrl(trimmed, defaultSearchEngine)
         if (formatted != currentUrl) {
             seenRawUrls.clear()
             lastScannedDomUrl = ""
@@ -259,10 +266,10 @@ fun DirectBrowserView(
         focusManager.clearFocus()
     }
 
-    LaunchedEffect(initialUrl, navigationRequestId) {
+    LaunchedEffect(initialUrl, navigationRequestId, defaultSearchEngine) {
         val requested = initialUrl.trim()
         if (requested.isNotBlank() &&
-            MediaClassifier.formatQueryOrUrl(requested) != currentUrl
+            MediaClassifier.formatQueryOrUrl(requested, defaultSearchEngine) != currentUrl
         ) {
             navigateToUrl(requested)
         }
@@ -733,6 +740,24 @@ fun DirectBrowserView(
                                 },
                                 modifier = Modifier.testTag("browser_menu_open_external")
                             )
+
+                            HorizontalDivider()
+
+                            DropdownMenuItem(
+                                text = { Text("Browser settings") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    showBrowserSettings = true
+                                },
+                                modifier = Modifier.testTag("browser_menu_settings")
+                            )
                         }
                     }
                     }
@@ -1046,6 +1071,92 @@ fun DirectBrowserView(
                     )
                 }
             }
+        }
+
+        if (showBrowserSettings) {
+            BrowserSettingsBottomSheet(
+                searchEngine = defaultSearchEngine,
+                onSearchEngineChange = { engine ->
+                    coroutineScope.launch {
+                        downloaderPreferences.setSearchEngine(engine)
+                    }
+                },
+                onDismiss = { showBrowserSettings = false }
+            )
+        }
+    }
+}
+
+/**
+ * Browser-level preferences opened from the browser overflow menu.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BrowserSettingsBottomSheet(
+    searchEngine: BrowserSearchEngine,
+    onSearchEngineChange: (BrowserSearchEngine) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Browser settings",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Choose the search engine used when you enter search terms in the address bar.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                text = "Default search engine",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            BrowserSearchEngine.entries.forEach { engine ->
+                Surface(
+                    onClick = { onSearchEngineChange(engine) },
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (searchEngine == engine) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = searchEngine == engine,
+                            onClick = { onSearchEngineChange(engine) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = engine.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (searchEngine == engine) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

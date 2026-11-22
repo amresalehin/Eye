@@ -2296,6 +2296,17 @@ fun FullScreenBrowserView(
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     val dynamicDurations = remember { mutableStateMapOf<String, Long>() }
 
+    // A new browser request can reuse this composable with a new initial URL.
+    // Reset page-local discoveries even when currentUrl is initialized to that same URL.
+    LaunchedEffect(initialUrl, navigationRequestId) {
+        pageTitle = ""
+        discoveredItems = emptyList()
+        selectedItemIds = emptySet()
+        selectedFilter = null
+        showDiscoveredMediaSheet = false
+        dynamicDurations.clear()
+    }
+
     LaunchedEffect(currentUrl) {
         dynamicDurations.clear()
     }

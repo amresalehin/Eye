@@ -1284,6 +1284,10 @@ fun DirectBrowserView(
                                     detail: RenderProcessGoneDetail?
                                 ): Boolean {
                                     val crashedView = view ?: return true
+                                    if (webViewInstance !== crashedView) {
+                                        releaseBrowserWebView(crashedView)
+                                        return true
+                                    }
                                     val crashedUrl = crashedView.url?.takeIf {
                                         it.startsWith("http://", ignoreCase = true) ||
                                             it.startsWith("https://", ignoreCase = true)

@@ -198,7 +198,18 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
         context: MediaRequestContext,
         onItemDiscovered: (ScrapedMediaItem) -> Unit,
         onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult = suspendCancellableCoroutine { continuation ->
+    ): MediaExtractionResult {
+        // Prefer the user's already-open browser tab when it is displaying this exact page.
+        // The live path only observes its media pipeline; it never replaces browser clients,
+        // navigates the tab, changes its settings, or assumes ownership of its WebView.
+        val liveResult = LiveBrowserWebViewRegistry.captureIfAvailable(
+            targetUrl = context.url,
+            onItemDiscovered = onItemDiscovered,
+            onStatusUpdate = onStatusUpdate
+        )
+        if (liveResult != null) return liveResult
+
+        return suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation {
             browserExtractor.cleanup()
         }
@@ -267,6 +278,7 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
         }
 
         startBrowserAttempt(attempt = 0)
+        }
     }
 
     fun cleanup() {

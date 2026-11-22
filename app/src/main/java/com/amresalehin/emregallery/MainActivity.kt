@@ -1,18 +1,24 @@
 package com.amresalehin.emregallery
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 class MainActivity : FragmentActivity() {
+
+    private val incomingBrowserRequest = mutableStateOf<BrowserTabOpenRequest?>(null)
+    private var nextBrowserRequestId = 0L
 
     private val prefs by lazy {
         getSharedPreferences("window_refresh_rate_state", Context.MODE_PRIVATE)
@@ -22,15 +28,44 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyHighRefreshRate()
+        handleBrowserOpenIntent(intent)
 
         val preferences = PreferencesRepository(applicationContext)
         // Install Compose immediately; the persisted theme is collected asynchronously.
         setContent {
             val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
             EmreGalleryTheme(theme) {
-                GalleryApp()
+                GalleryApp(
+                    externalBrowserOpenRequest = incomingBrowserRequest.value,
+                    onExternalBrowserOpenRequestConsumed = { requestId ->
+                        if (incomingBrowserRequest.value?.requestId == requestId) {
+                            incomingBrowserRequest.value = null
+                        }
+                    }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleBrowserOpenIntent(intent)
+    }
+
+    private fun handleBrowserOpenIntent(intent: Intent?) {
+        if (intent?.action != BrowserTabIntent.ACTION_OPEN_TAB) return
+        val rawUrl = intent.getStringExtra(BrowserTabIntent.EXTRA_URL)?.trim().orEmpty()
+        if (rawUrl.isBlank()) return
+
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return
+        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return
+
+        incomingBrowserRequest.value = BrowserTabOpenRequest(
+            requestId = ++nextBrowserRequestId,
+            url = rawUrl
+        )
+        intent.removeExtra(BrowserTabIntent.EXTRA_URL)
     }
 
     override fun onResume() {

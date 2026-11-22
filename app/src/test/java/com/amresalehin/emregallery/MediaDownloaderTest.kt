@@ -3,6 +3,8 @@ package com.amresalehin.emregallery
 import android.content.Context
 import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
+import com.amresalehin.emregallery.BrowserTabIntent
+import com.amresalehin.emregallery.MainActivity
 import com.amresalehin.emregallery.data.ContentAwareMediaFilter
 import com.amresalehin.emregallery.data.DualMediaExtractor
 import com.amresalehin.emregallery.data.MediaCategory
@@ -37,6 +39,20 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaDownloaderTest {
+
+    @Test
+    fun shareBrowserHandoffTargetsMainActivityWithIncomingUrl() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val url = "https://example.com/article"
+
+        val intent = BrowserTabIntent.create(context, url)
+
+        assertEquals(MainActivity::class.java.name, intent.component?.className)
+        assertEquals(BrowserTabIntent.ACTION_OPEN_TAB, intent.action)
+        assertEquals(url, intent.getStringExtra(BrowserTabIntent.EXTRA_URL))
+        assertTrue(intent.flags and android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP != 0)
+        assertTrue(intent.flags and android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP != 0)
+    }
 
     @Test
     fun destinationEnumContainsMediaInbox() {

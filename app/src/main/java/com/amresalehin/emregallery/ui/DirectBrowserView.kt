@@ -188,6 +188,11 @@ fun DirectBrowserView(
     var browserTabs by remember {
         mutableStateOf(listOf(BrowserTabSession(id = 1, url = startUrl, title = "")))
     }
+    // The first request is represented by the initial tab. Later request IDs are external
+    // opens (paste URL, downloader action or share handoff) and must create separate tabs.
+    var lastHandledNavigationRequestId by remember {
+        mutableIntStateOf(navigationRequestId)
+    }
     var activeBrowserTabId by remember { mutableIntStateOf(1) }
     var nextBrowserTabId by remember { mutableIntStateOf(2) }
     var showTabSwitcher by remember { mutableStateOf(false) }
@@ -431,13 +436,18 @@ fun DirectBrowserView(
         focusManager.clearFocus()
     }
 
-    fun createBrowserTab() {
+    fun createBrowserTab(targetUrl: String? = null) {
         saveActiveBrowserTabState()
         val newTabId = nextBrowserTabId++
-        val homeUrl = browserHomepageUrl.trim().takeIf { it.isNotBlank() }?.let {
-            MediaClassifier.formatQueryOrUrl(it, defaultSearchEngine)
-        }.orEmpty()
-        browserTabs = browserTabs + BrowserTabSession(id = newTabId, url = homeUrl, title = "")
+        val requestedUrl = targetUrl?.trim().orEmpty()
+        val tabUrl = if (requestedUrl.isNotBlank()) {
+            MediaClassifier.formatQueryOrUrl(requestedUrl, defaultSearchEngine)
+        } else {
+            browserHomepageUrl.trim().takeIf { it.isNotBlank() }?.let {
+                MediaClassifier.formatQueryOrUrl(it, defaultSearchEngine)
+            }.orEmpty()
+        }
+        browserTabs = browserTabs + BrowserTabSession(id = newTabId, url = tabUrl, title = "")
         activateBrowserTab(newTabId)
     }
 
@@ -542,9 +552,15 @@ fun DirectBrowserView(
 
     LaunchedEffect(initialUrl, navigationRequestId, defaultSearchEngine) {
         val requested = initialUrl.trim()
-        if (requested.isNotBlank() &&
-            MediaClassifier.formatQueryOrUrl(requested, defaultSearchEngine) != currentUrl
-        ) {
+        if (requested.isBlank()) return@LaunchedEffect
+
+        val formatted = MediaClassifier.formatQueryOrUrl(requested, defaultSearchEngine)
+        if (navigationRequestId != lastHandledNavigationRequestId) {
+            lastHandledNavigationRequestId = navigationRequestId
+            // An incoming URL is a distinct browsing session, not a replacement for the
+            // page the user already has open.
+            createBrowserTab(formatted)
+        } else if (formatted != currentUrl) {
             navigateToUrl(requested)
         }
     }

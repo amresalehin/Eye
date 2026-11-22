@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.BrowserTabOpenRequest
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
@@ -76,7 +77,10 @@ val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GalleryApp() {
+fun GalleryApp(
+    externalBrowserOpenRequest: BrowserTabOpenRequest? = null,
+    onExternalBrowserOpenRequestConsumed: ((Long) -> Unit)? = null
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context.applicationContext) }
@@ -142,6 +146,15 @@ fun GalleryApp() {
     var isAlbumBrowserVisible by remember { mutableStateOf(false) }
     var albumBrowserInitialUrl by remember { mutableStateOf("") }
     var albumBrowserNavigationRequestId by remember { mutableStateOf(0) }
+
+    LaunchedEffect(externalBrowserOpenRequest?.requestId) {
+        val request = externalBrowserOpenRequest ?: return@LaunchedEffect
+        albumBrowserInitialUrl = request.url
+        albumBrowserNavigationRequestId += 1
+        hasOpenedAlbumBrowser = true
+        isAlbumBrowserVisible = true
+        onExternalBrowserOpenRequestConsumed?.invoke(request.requestId)
+    }
 
     var isRefreshing by remember { mutableStateOf(false) }
 

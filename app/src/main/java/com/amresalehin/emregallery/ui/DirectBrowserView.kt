@@ -514,36 +514,6 @@ fun DirectBrowserView(
                             )
                         }
 
-                        if (discoveredCount > 0) {
-                            Surface(
-                                onClick = onSwitchToMediaTab,
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier
-                                    .height(32.dp)
-                                    .testTag("browser_media_badge_top")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PermMedia,
-                                        contentDescription = "Discovered media",
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "$discoveredCount",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                        }
-
                     // Three-dot Overflow Menu in Browser Top Bar Right Corner
                     Box {
                         IconButton(

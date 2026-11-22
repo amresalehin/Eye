@@ -311,8 +311,12 @@ object MediaCaptureEngine {
                     for (var i = 0; i < nodes.length; i++) {
                         var node = nodes[i];
                         var tag = (node.tagName || '').toUpperCase();
-                        var mime = tag === 'VIDEO' ? 'video/mp4' : tag === 'AUDIO' ? 'audio/mpeg' : 'image/jpeg';
                         var name = node.getAttribute('download') || node.getAttribute('title') || node.getAttribute('alt') || '';
+                        var nameLower = name.toLowerCase();
+                        var mime = tag === 'VIDEO' ? 'video/mp4' :
+                            tag === 'AUDIO' ? 'audio/mpeg' :
+                            /\\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(nameLower) ? 'video/mp4' :
+                            /\\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(nameLower) ? 'audio/mpeg' : 'image/jpeg';
                         captureBlobUrl(node.src || node.href, mime, name);
                     }
                 };
@@ -648,6 +652,19 @@ object MediaCaptureEngine {
                             }
                         }
                         return true;
+                    } else if (tag === 'A') {
+                        var blobHref = node.href || node.getAttribute('href') || '';
+                        if (blobHref.indexOf('blob:') === 0 && window.__emreCaptureBlobUrl) {
+                            var anchorName = node.getAttribute('download') || node.getAttribute('title') || '';
+                            var anchorNameLower = anchorName.toLowerCase();
+                            var anchorMime = /\\.(?:mp4|m4v|mov|webm|mkv|3gp)$/.test(anchorNameLower)
+                                ? 'video/mp4'
+                                : /\\.(?:mp3|m4a|aac|wav|ogg|opus|flac)$/.test(anchorNameLower)
+                                    ? 'audio/mpeg'
+                                    : 'image/jpeg';
+                            window.__emreCaptureBlobUrl(blobHref, anchorMime, anchorName);
+                        }
+                        return true;
                     } else if (tag === 'SOURCE') {
                         var parentTag = node.parentNode ? (node.parentNode.tagName || '').toUpperCase() : '';
                         if (parentTag !== 'VIDEO' && parentTag !== 'AUDIO') {
@@ -725,7 +742,7 @@ object MediaCaptureEngine {
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['src', 'data-src', 'data-original', 'data-lazy-src', 'srcset', 'data-srcset', 'poster', 'style']
+                    attributeFilter: ['src', 'href', 'data-src', 'data-original', 'data-lazy-src', 'srcset', 'data-srcset', 'poster', 'style']
                 });
             })();
         """.trimIndent()

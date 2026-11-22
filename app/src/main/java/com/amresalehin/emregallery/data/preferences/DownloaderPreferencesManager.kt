@@ -103,6 +103,35 @@ class DownloaderPreferencesManager(private val context: Context) {
         BrowserSearchEngine.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: BrowserSearchEngine.DUCKDUCKGO
     }.distinctUntilChanged()
 
+    // Persistent full-browser preferences. Defaults preserve the current browser behavior.
+    val browserJavaScriptEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_JAVASCRIPT] ?: syncPrefs.getBoolean(PREF_BROWSER_JAVASCRIPT, true)
+    }.distinctUntilChanged()
+
+    val browserAdBlockingEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_AD_BLOCKING] ?: syncPrefs.getBoolean(PREF_BROWSER_AD_BLOCKING, true)
+    }.distinctUntilChanged()
+
+    val browserLoadImages: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_LOAD_IMAGES] ?: syncPrefs.getBoolean(PREF_BROWSER_LOAD_IMAGES, true)
+    }.distinctUntilChanged()
+
+    val browserThirdPartyCookies: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_THIRD_PARTY_COOKIES] ?: syncPrefs.getBoolean(PREF_BROWSER_THIRD_PARTY_COOKIES, false)
+    }.distinctUntilChanged()
+
+    val browserSaveHistory: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_SAVE_HISTORY] ?: syncPrefs.getBoolean(PREF_BROWSER_SAVE_HISTORY, true)
+    }.distinctUntilChanged()
+
+    val browserDesktopSiteByDefault: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_DESKTOP_BY_DEFAULT] ?: syncPrefs.getBoolean(PREF_BROWSER_DESKTOP_BY_DEFAULT, false)
+    }.distinctUntilChanged()
+
+    val browserTextZoom: Flow<Int> = appContext.galleryDataStore.data.map { prefs ->
+        (prefs[KEY_BROWSER_TEXT_ZOOM] ?: syncPrefs.getInt(PREF_BROWSER_TEXT_ZOOM, 100)).coerceIn(50, 200)
+    }.distinctUntilChanged()
+
     suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) {
         syncPrefs.edit().putString(PREF_VIDEO_QUALITY, quality.id).apply()
         appContext.galleryDataStore.edit { it[KEY_VIDEO_QUALITY] = quality.id }
@@ -174,6 +203,42 @@ class DownloaderPreferencesManager(private val context: Context) {
         appContext.galleryDataStore.edit { it[KEY_SEARCH_ENGINE] = engine.name }
     }
 
+    suspend fun setBrowserJavaScriptEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_JAVASCRIPT, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_JAVASCRIPT] = enabled }
+    }
+
+    suspend fun setBrowserAdBlockingEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_AD_BLOCKING, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_AD_BLOCKING] = enabled }
+    }
+
+    suspend fun setBrowserLoadImages(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_LOAD_IMAGES, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_LOAD_IMAGES] = enabled }
+    }
+
+    suspend fun setBrowserThirdPartyCookies(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_THIRD_PARTY_COOKIES, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_THIRD_PARTY_COOKIES] = enabled }
+    }
+
+    suspend fun setBrowserSaveHistory(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_SAVE_HISTORY, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_SAVE_HISTORY] = enabled }
+    }
+
+    suspend fun setBrowserDesktopSiteByDefault(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_DESKTOP_BY_DEFAULT, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_DESKTOP_BY_DEFAULT] = enabled }
+    }
+
+    suspend fun setBrowserTextZoom(zoom: Int) {
+        val clamped = zoom.coerceIn(50, 200)
+        syncPrefs.edit().putInt(PREF_BROWSER_TEXT_ZOOM, clamped).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_TEXT_ZOOM] = clamped }
+    }
+
     companion object {
         const val SYNC_PREFS_NAME = "emre_downloader_prefs"
         const val DEFAULT_FILENAME_TEMPLATE = "{title}_{hash}"
@@ -191,6 +256,13 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_WIFI_ONLY = "wifi_only_downloads"
         private const val PREF_MAX_CONCURRENT = "max_concurrent_downloads"
         private const val PREF_SEARCH_ENGINE = "browser_search_engine"
+        private const val PREF_BROWSER_JAVASCRIPT = "browser_javascript_enabled"
+        private const val PREF_BROWSER_AD_BLOCKING = "browser_ad_blocking_enabled"
+        private const val PREF_BROWSER_LOAD_IMAGES = "browser_load_images"
+        private const val PREF_BROWSER_THIRD_PARTY_COOKIES = "browser_third_party_cookies"
+        private const val PREF_BROWSER_SAVE_HISTORY = "browser_save_history"
+        private const val PREF_BROWSER_DESKTOP_BY_DEFAULT = "browser_desktop_site_by_default"
+        private const val PREF_BROWSER_TEXT_ZOOM = "browser_text_zoom"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -205,6 +277,13 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_MAX_CONCURRENT = intPreferencesKey(PREF_MAX_CONCURRENT)
         private val KEY_ENABLED_PROVIDERS = stringSetPreferencesKey("enabled_providers")
         private val KEY_SEARCH_ENGINE = stringPreferencesKey(PREF_SEARCH_ENGINE)
+        private val KEY_BROWSER_JAVASCRIPT = booleanPreferencesKey(PREF_BROWSER_JAVASCRIPT)
+        private val KEY_BROWSER_AD_BLOCKING = booleanPreferencesKey(PREF_BROWSER_AD_BLOCKING)
+        private val KEY_BROWSER_LOAD_IMAGES = booleanPreferencesKey(PREF_BROWSER_LOAD_IMAGES)
+        private val KEY_BROWSER_THIRD_PARTY_COOKIES = booleanPreferencesKey(PREF_BROWSER_THIRD_PARTY_COOKIES)
+        private val KEY_BROWSER_SAVE_HISTORY = booleanPreferencesKey(PREF_BROWSER_SAVE_HISTORY)
+        private val KEY_BROWSER_DESKTOP_BY_DEFAULT = booleanPreferencesKey(PREF_BROWSER_DESKTOP_BY_DEFAULT)
+        private val KEY_BROWSER_TEXT_ZOOM = intPreferencesKey(PREF_BROWSER_TEXT_ZOOM)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext
@@ -239,6 +318,10 @@ class DownloaderPreferencesManager(private val context: Context) {
             return BrowserSearchEngine.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
                 ?: BrowserSearchEngine.DUCKDUCKGO
         }
+
+        fun getBrowserDesktopSiteByDefaultSync(context: Context): Boolean =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_BROWSER_DESKTOP_BY_DEFAULT, false)
 
         fun resolveSubfolderName(
             context: Context,

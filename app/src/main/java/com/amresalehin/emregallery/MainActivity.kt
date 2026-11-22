@@ -93,20 +93,12 @@ class MainActivity : FragmentActivity() {
      * Ensures Emre Gallery renders at maximum fluidity without artificial frame rate capping.
      */
     private fun applyHighRefreshRate() {
-        val targetFps = 120f
-        val currentWindow = this.window ?: return
+        val currentWindow = window ?: return
 
-        // Android 6.0+ (API 23+) WindowManager.LayoutParams
+        // Request a refresh rate the attached display actually reports as supported.
+        // Hard-coding 120Hz can leave preferredRefreshRate inconsistent with the
+        // selected display mode on 60Hz emulators and devices.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val params = currentWindow.attributes
-            params.preferredRefreshRate = targetFps
-
-            // Android 15+ (API 35) frame rate boost on touch
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                params.setFrameRateBoostOnTouchEnabled(true)
-            }
-
-            // Select physical display mode >= 119Hz if hardware supports it
             val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 display
             } else {
@@ -114,19 +106,32 @@ class MainActivity : FragmentActivity() {
                 windowManager.defaultDisplay
             }
 
-            val modes = currentDisplay?.supportedModes ?: emptyArray()
-            val bestHighRateMode = modes.filter { it.refreshRate >= 119f }
+            val supportedModes = currentDisplay?.supportedModes ?: emptyArray()
+            val preferredMode = supportedModes
+                .filter { it.refreshRate >= 60f }
                 .maxByOrNull { it.refreshRate }
-                ?: modes.maxByOrNull { it.refreshRate }
 
-            if (bestHighRateMode != null && bestHighRateMode.refreshRate >= 60f) {
-                params.preferredDisplayModeId = bestHighRateMode.modeId
+            val params = currentWindow.attributes
+            if (preferredMode != null) {
+                params.preferredRefreshRate = preferredMode.refreshRate
+                params.preferredDisplayModeId = preferredMode.modeId
+            } else {
+                // Leave mode selection to Android when the display reports no usable modes.
+                params.preferredRefreshRate = 0f
+                params.preferredDisplayModeId = 0
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                params.setFrameRateBoostOnTouchEnabled(
+                    preferredMode != null && preferredMode.refreshRate > 60f
+                )
             }
 
             currentWindow.attributes = params
+            prefs.edit()
+                .putFloat("configured_refresh_rate", preferredMode?.refreshRate ?: 0f)
+                .apply()
         }
-
-        prefs.edit().putFloat("configured_refresh_rate", targetFps).apply()
     }
 
 }

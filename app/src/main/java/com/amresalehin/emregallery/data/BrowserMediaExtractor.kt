@@ -40,6 +40,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val seenCandidateUrls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val blobCaptureStore = BrowserBlobCaptureStore(context)
     private var webView: WebView? = null
     @Volatile
     private var isCancelled = false
@@ -222,16 +223,42 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
+                fun dispatchCapturedBlobItem(item: ScrapedMediaItem) {
+                    if (isCancelled || !seenCandidateUrls.add(item.url)) return
+                    val key = MediaClassifier.canonicalKey(item.url)
+                    val accepted = synchronized(seenMap) {
+                        val existing = seenMap[key]
+                        if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) false
+                        else {
+                            seenMap[key] = item
+                            true
+                        }
+                    }
+                    if (!accepted) return
+                    DownloaderSession.addDiscoveredItem(item)
+                    mainHandler.post {
+                        if (!isCancelled) onMediaDiscovered(item)
+                    }
+                }
+
                 wv.addJavascriptInterface(
-                    EmreMediaBridge { rawUrl ->
-                        if (!isCancelled && seenCandidateUrls.size < 2500 && seenCandidateUrls.add(rawUrl)) {
-                            mediaProcessingExecutor.execute {
-                                if (!isCancelled) {
-                                    dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE)
+                    EmreMediaBridge(
+                        onMediaFound = { rawUrl, mimeHint ->
+                            if (!isCancelled && seenCandidateUrls.size < 2500 && seenCandidateUrls.add(rawUrl)) {
+                                mediaProcessingExecutor.execute {
+                                    if (!isCancelled) {
+                                        dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE, mimeHint = mimeHint)
+                                    }
                                 }
                             }
+                        },
+                        blobCaptureStore = blobCaptureStore,
+                        onBlobCaptured = { item ->
+                            mediaProcessingExecutor.execute {
+                                if (!isCancelled) dispatchCapturedBlobItem(item)
+                            }
                         }
-                    },
+                    ),
                     "EmreBridge"
                 )
 
@@ -375,6 +402,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         if (isCancelled) return
+                        view?.evaluateJavascript(MediaCaptureEngine.getDynamicMediaCaptureScript(), null)
                         pendingGracePeriodRunnable?.let { mainHandler.removeCallbacks(it) }
                         if (pageFinishedCount > 0) {
                             onStatusUpdate("Verification solved / page navigating to dynamic content...")
@@ -388,12 +416,13 @@ class BrowserMediaExtractor(private val context: Context) {
                         pageFinishedCount++
 
                         syncCookies()
-                        onStatusUpdate("Scanning DOM, computed CSS, and dynamic media tags...")
+                        onStatusUpdate("Scanning DOM, API responses, Blob URLs, and dynamic media tags...")
 
-                        // Setup MutationObserver
+                        // Install page-context API/Blob hooks before DOM and mutation scans.
+                        wv.evaluateJavascript(MediaCaptureEngine.getDynamicMediaCaptureScript(), null)
                         wv.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
 
-                        fun performScanAndScroll(onComplete: () -> Unit) {
+                        fun performScanAndScroll(onComplete: () -> Unit, forceScroll: Boolean = false) {
                             wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { scanJson ->
                                 if (isCancelled || isExtractionCompleted) return@evaluateJavascript
                                 val entries = MediaCaptureEngine.parseJsDomScanResult(scanJson, normalizedUrl)
@@ -416,8 +445,14 @@ class BrowserMediaExtractor(private val context: Context) {
                                 }
 
                                 val currentCountAfterInitial = synchronized(seenMap) { seenMap.size }
-                                if (currentCountAfterInitial > 0) {
-                                    onStatusUpdate("Discovered media ($currentCountAfterInitial). Auto-scrolling to trigger lazy loading...")
+                                if (currentCountAfterInitial > 0 || forceScroll) {
+                                    onStatusUpdate(
+                                        if (currentCountAfterInitial > 0) {
+                                            "Discovered media ($currentCountAfterInitial). Auto-scrolling for more lazy-loaded media..."
+                                        } else {
+                                            "No media in the initial viewport. Auto-scrolling to trigger lazy loading..."
+                                        }
+                                    )
                                     executeAdaptiveScrollSequence(wv) {
                                         if (isCancelled || isExtractionCompleted) return@executeAdaptiveScrollSequence
                                         wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { postScrollJson ->
@@ -442,7 +477,7 @@ class BrowserMediaExtractor(private val context: Context) {
                                             }
                                             val totalCount = synchronized(seenMap) { seenMap.size }
                                             onStatusUpdate("Live browser extraction completed ($totalCount items).")
-                                            safeComplete(null)
+                                            if (totalCount == 0) onComplete() else safeComplete(null)
                                         }
                                     }
                                 } else {
@@ -482,13 +517,13 @@ class BrowserMediaExtractor(private val context: Context) {
                                 // Grace period: Give challenge / client-side JS 2800ms to complete and populate DOM
                                 val graceRunnable = Runnable {
                                     if (isCancelled || isExtractionCompleted) return@Runnable
-                                    performScanAndScroll {
-                                        // Still 0 items after grace period
+                                    performScanAndScroll({
+                                        // Still 0 items after hydration grace and auto-scrolling.
                                         val finalReason = detectedProtectionReason
-                                            ?: "The webpage is dynamically protected or requires interactive verification/login."
+                                            ?: "No media discovered after dynamic page loading and auto-scrolling."
                                         onStatusUpdate(finalReason)
                                         safeComplete(finalReason)
-                                    }
+                                    }, forceScroll = true)
                                 }
                                 pendingGracePeriodRunnable = graceRunnable
                                 mainHandler.postDelayed(graceRunnable, if (isWaf) 3200L else 2400L)
@@ -602,6 +637,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
     fun cleanup() {
         isCancelled = true
+        blobCaptureStore.abortAll()
         mainHandler.removeCallbacksAndMessages(null)
         seenCandidateUrls.clear()
         try {

@@ -6,6 +6,7 @@ import android.webkit.WebView
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.util.Locale
 
 /**
  * Unified Media Capture Engine.

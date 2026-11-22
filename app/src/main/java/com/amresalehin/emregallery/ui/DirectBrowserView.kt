@@ -208,6 +208,13 @@ fun DirectBrowserView(
         browserToolbarFirstFrameReady = true
     }
 
+    // Keep the retained browser's page state, but pause its own processing while it is hidden.
+    // Do not use pauseTimers(): that API affects every WebView in the process, including extractors.
+    LaunchedEffect(webViewInstance, isActive) {
+        val activeView = webViewInstance ?: return@LaunchedEffect
+        if (isActive) activeView.onResume() else activeView.onPause()
+    }
+
     val clipboardManager = LocalClipboardManager.current
     val historyManager = remember { BrowserHistoryManager(context) }
     val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())

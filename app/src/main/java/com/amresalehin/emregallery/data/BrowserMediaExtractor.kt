@@ -143,8 +143,9 @@ class BrowserMediaExtractor(private val context: Context) {
                     javaScriptCanOpenWindowsAutomatically = true
                 }
 
+                // A newly-created extraction WebView is not globally paused. Avoid resumeTimers(),
+                // which changes timer state for every WebView in the process.
                 wv.onResume()
-                wv.resumeTimers()
 
                 val seenMap = mutableMapOf<String, ScrapedMediaItem>()
                 var isExtractionCompleted = false

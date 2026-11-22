@@ -626,6 +626,25 @@ object MediaCaptureEngine {
                         }
                         return true;
                     }
+
+                    // Some sites attach media as CSS backgrounds after hydration or scrolling.
+                    if (node.style || node.getBoundingClientRect) {
+                        try {
+                            var bounds = node.getBoundingClientRect();
+                            if (bounds.width >= 120 && bounds.height >= 120) {
+                                var background = node.style ? node.style.backgroundImage : '';
+                                if (!background || background === 'none') {
+                                    background = window.getComputedStyle(node).backgroundImage || '';
+                                }
+                                if (background.indexOf('url(') !== -1) {
+                                    var bgMatch = background.match(/url\(['"]?(.*?)['"]?\)/);
+                                    if (bgMatch && bgMatch[1]) {
+                                        report(bgMatch[1], 'image/jpeg', node.getAttribute('aria-label') || node.getAttribute('title') || '');
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
                     return false;
                 }
 
@@ -669,7 +688,7 @@ object MediaCaptureEngine {
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['src', 'data-src', 'data-original', 'data-lazy-src', 'srcset', 'data-srcset', 'poster']
+                    attributeFilter: ['src', 'data-src', 'data-original', 'data-lazy-src', 'srcset', 'data-srcset', 'poster', 'style']
                 });
             })();
         """.trimIndent()

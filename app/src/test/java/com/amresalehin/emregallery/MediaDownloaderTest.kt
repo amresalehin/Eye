@@ -43,6 +43,40 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun browserPreferencesPersistAndClampTextZoom() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager(context)
+
+        prefs.setBrowserJavaScriptEnabled(false)
+        prefs.setBrowserAdBlockingEnabled(false)
+        prefs.setBrowserLoadImages(false)
+        prefs.setBrowserThirdPartyCookies(true)
+        prefs.setBrowserSaveHistory(false)
+        prefs.setBrowserDesktopSiteByDefault(true)
+        prefs.setBrowserTextZoom(175)
+
+        assertFalse(prefs.browserJavaScriptEnabled.first())
+        assertFalse(prefs.browserAdBlockingEnabled.first())
+        assertFalse(prefs.browserLoadImages.first())
+        assertTrue(prefs.browserThirdPartyCookies.first())
+        assertFalse(prefs.browserSaveHistory.first())
+        assertTrue(prefs.browserDesktopSiteByDefault.first())
+        assertEquals(175, prefs.browserTextZoom.first())
+
+        prefs.setBrowserTextZoom(250)
+        assertEquals(200, prefs.browserTextZoom.first())
+
+        // Restore defaults so other tests do not inherit these preference values.
+        prefs.setBrowserJavaScriptEnabled(true)
+        prefs.setBrowserAdBlockingEnabled(true)
+        prefs.setBrowserLoadImages(true)
+        prefs.setBrowserThirdPartyCookies(false)
+        prefs.setBrowserSaveHistory(true)
+        prefs.setBrowserDesktopSiteByDefault(false)
+        prefs.setBrowserTextZoom(100)
+    }
+
+    @Test
     fun navBackStackEntrySupportsMediaInbox() {
         val entry = NavBackStackEntry(
             destination = Destination.MEDIA_INBOX

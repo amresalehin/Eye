@@ -101,25 +101,86 @@ private fun DownloaderBottomNavigationBar(
     onSelect: (DownloaderViewMode) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    NavigationBar(
-        modifier = modifier.testTag("downloader_bottom_navigation"),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 0.dp
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .testTag("downloader_bottom_navigation")
     ) {
-        val destinations = listOf(
-            Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.Home, "Home"),
-            Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
-            Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved")
-        )
-        destinations.forEach { (destination, icon, label) ->
-            NavigationBarItem(
-                selected = currentMode == destination,
-                onClick = { onSelect(destination) },
-                icon = { Icon(imageVector = icon, contentDescription = label) },
-                label = { Text(label) },
-                alwaysShowLabel = true,
-                modifier = Modifier.testTag("downloader_nav_${label.lowercase()}")
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val destinations = listOf(
+                Triple(DownloaderViewMode.SEARCH_PAGE, Icons.Default.Home, "Home"),
+                Triple(DownloaderViewMode.ACTIVITY_PAGE, Icons.Default.History, "Activity"),
+                Triple(DownloaderViewMode.SAVED_LIBRARY, Icons.Default.Folder, "Saved")
             )
+            destinations.forEach { (destination, icon, label) ->
+                val selected = currentMode == destination
+                val pillWidth by animateDpAsState(
+                    targetValue = if (selected) 58.dp else 40.dp,
+                    animationSpec = snap(),
+                    label = "downloader_nav_pill_width"
+                )
+                val pillColor by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                    animationSpec = snap(),
+                    label = "downloader_nav_pill_color"
+                )
+                val iconTint by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = snap(),
+                    label = "downloader_nav_icon_tint"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { onSelect(destination) }
+                        .padding(vertical = 4.dp)
+                        .testTag("downloader_nav_${label.lowercase()}"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = pillColor,
+                            modifier = Modifier
+                                .height(30.dp)
+                                .width(pillWidth)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = iconTint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -439,28 +500,6 @@ fun MediaInboxScreen(
                         }
                     }
                 },
-                bottomBar = {
-                    if (currentViewMode in listOf(
-                            DownloaderViewMode.SEARCH_PAGE,
-                            DownloaderViewMode.ACTIVITY_PAGE,
-                            DownloaderViewMode.SAVED_LIBRARY
-                        ) && selectedStackForDetail == null
-                    ) {
-                        DownloaderBottomNavigationBar(
-                            currentMode = currentViewMode,
-                            onSelect = { mode ->
-                                if (mode != currentViewMode) {
-                                    selectedStackForDetail = null
-                                    selectedStackIds = emptySet()
-                                    isSearchFocused = false
-                                    focusManager.clearFocus()
-                                    keyboardController?.hide()
-                                    currentViewMode = mode
-                                }
-                            }
-                        )
-                    }
-                },
             ) { innerPadding ->
                 Box(
                     modifier = Modifier
@@ -570,6 +609,37 @@ fun MediaInboxScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // Overlay navigation so it floats above content without reducing the page viewport.
+            if (currentViewMode in listOf(
+                    DownloaderViewMode.SEARCH_PAGE,
+                    DownloaderViewMode.ACTIVITY_PAGE,
+                    DownloaderViewMode.SAVED_LIBRARY
+                ) && selectedStackForDetail == null
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                        .zIndex(10f)
+                ) {
+                    DownloaderBottomNavigationBar(
+                        currentMode = currentViewMode,
+                        onSelect = { mode ->
+                            if (mode != currentViewMode) {
+                                selectedStackForDetail = null
+                                selectedStackIds = emptySet()
+                                isSearchFocused = false
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                currentViewMode = mode
+                            }
+                        }
+                    )
                 }
             }
         }

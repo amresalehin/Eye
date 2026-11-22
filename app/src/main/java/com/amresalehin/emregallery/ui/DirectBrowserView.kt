@@ -121,6 +121,17 @@ fun DirectBrowserView(
     val defaultSearchEngine by downloaderPreferences.searchEngine.collectAsState(
         initial = DownloaderPreferencesManager.getSearchEngineSync(context)
     )
+    val browserJavaScriptEnabled by downloaderPreferences.browserJavaScriptEnabled.collectAsState(initial = true)
+    val browserAdBlockingEnabled by downloaderPreferences.browserAdBlockingEnabled.collectAsState(initial = true)
+    val browserLoadImages by downloaderPreferences.browserLoadImages.collectAsState(initial = true)
+    val browserThirdPartyCookies by downloaderPreferences.browserThirdPartyCookies.collectAsState(initial = false)
+    val browserSaveHistory by downloaderPreferences.browserSaveHistory.collectAsState(initial = true)
+    val browserDesktopSiteByDefault by downloaderPreferences.browserDesktopSiteByDefault.collectAsState(
+        initial = DownloaderPreferencesManager.getBrowserDesktopSiteByDefaultSync(context)
+    )
+    val browserTextZoom by downloaderPreferences.browserTextZoom.collectAsState(initial = 100)
+    val latestAdBlockingEnabled by rememberUpdatedState(browserAdBlockingEnabled)
+    val latestSaveHistoryEnabled by rememberUpdatedState(browserSaveHistory)
     val coroutineScope = rememberCoroutineScope()
 
     val startUrl = remember(initialUrl, defaultSearchEngine) {
@@ -141,7 +152,9 @@ fun DirectBrowserView(
     val loadingProgressState = remember { mutableFloatStateOf(0f) }
     var browserMenuExpanded by remember { mutableStateOf(false) }
     var showBrowserSettings by remember { mutableStateOf(false) }
-    var isDesktopMode by remember { mutableStateOf(false) }
+    var isDesktopMode by remember(browserDesktopSiteByDefault) {
+        mutableStateOf(browserDesktopSiteByDefault)
+    }
     var isAddressBarFocused by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
@@ -256,7 +269,7 @@ fun DirectBrowserView(
         addressInput = formatted
         currentUrl = formatted
         notifyUrlIfChanged(formatted)
-        if (formatted != lastRecordedHistoryUrl) {
+        if (browserSaveHistory && formatted != lastRecordedHistoryUrl) {
             lastRecordedHistoryUrl = formatted
             coroutineScope.launch {
                 historyManager.recordVisit(formatted)
@@ -652,18 +665,7 @@ fun DirectBrowserView(
                                 },
                                 onClick = {
                                     browserMenuExpanded = false
-                                    val nextDesktop = !isDesktopMode
-                                    isDesktopMode = nextDesktop
-                                    webViewInstance?.let { wv ->
-                                        wv.settings.userAgentString = if (nextDesktop) {
-                                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                                        } else {
-                                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                                        }
-                                        if (currentUrl.isNotBlank()) {
-                                            wv.reload()
-                                        }
-                                    }
+                                    isDesktopMode = !isDesktopMode
                                 },
                                 modifier = Modifier.testTag("browser_menu_desktop_site")
                             )
@@ -786,7 +788,9 @@ fun DirectBrowserView(
                             )
 
                             settings.apply {
-                                javaScriptEnabled = true
+                                javaScriptEnabled = browserJavaScriptEnabled
+                                blockNetworkImage = !browserLoadImages
+                                textZoom = browserTextZoom.coerceIn(50, 200)
                                 domStorageEnabled = true
                                 databaseEnabled = true
                                 cacheMode = WebSettings.LOAD_DEFAULT
@@ -796,8 +800,13 @@ fun DirectBrowserView(
                                 loadWithOverviewMode = true
                                 mediaPlaybackRequiresUserGesture = false
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
+                                userAgentString = if (isDesktopMode) {
+                                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                } else {
+                                    OkHttpDownloader.DEFAULT_USER_AGENT
+                                }
                             }
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, browserThirdPartyCookies)
 
                             addJavascriptInterface(
                                 BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
@@ -978,7 +987,7 @@ fun DirectBrowserView(
                                             currentUrl = it
                                             addressInput = it
                                             notifyUrlIfChanged(it)
-                                            if (it != lastRecordedHistoryUrl) {
+                                            if (latestSaveHistoryEnabled && it != lastRecordedHistoryUrl) {
                                                 lastRecordedHistoryUrl = it
                                                 val recordedTitle = view?.title
                                                 coroutineScope.launch {
@@ -1011,7 +1020,7 @@ fun DirectBrowserView(
                                     if (scheme != "http" && scheme != "https") return null
                                     val reqUrl = uri.toString()
 
-                                    if (AdBlockEngine.isAdOrTracker(reqUrl, uri.host)) {
+                                    if (latestAdBlockingEnabled && AdBlockEngine.isAdOrTracker(reqUrl, uri.host)) {
                                         return AdBlockEngine.createEmptyResponse()
                                     }
 
@@ -1041,6 +1050,15 @@ fun DirectBrowserView(
                         if (webViewInstance !== wv) {
                             webViewInstance = wv
                         }
+                        wv.settings.javaScriptEnabled = browserJavaScriptEnabled
+                        wv.settings.blockNetworkImage = !browserLoadImages
+                        wv.settings.textZoom = browserTextZoom.coerceIn(50, 200)
+                        wv.settings.userAgentString = if (isDesktopMode) {
+                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                        } else {
+                            OkHttpDownloader.DEFAULT_USER_AGENT
+                        }
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(wv, browserThirdPartyCookies)
                     },
                     onRelease = { wv ->
                         wv.stopLoading()
@@ -1064,6 +1082,7 @@ fun DirectBrowserView(
                         onRemoveSavedSite = { site ->
                             coroutineScope.launch { historyManager.removeSavedSite(site.url) }
                         },
+                        showHistory = browserSaveHistory,
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface)
@@ -1076,10 +1095,49 @@ fun DirectBrowserView(
         if (showBrowserSettings) {
             BrowserSettingsBottomSheet(
                 searchEngine = defaultSearchEngine,
+                javaScriptEnabled = browserJavaScriptEnabled,
+                adBlockingEnabled = browserAdBlockingEnabled,
+                loadImages = browserLoadImages,
+                thirdPartyCookies = browserThirdPartyCookies,
+                saveHistory = browserSaveHistory,
+                desktopSiteByDefault = browserDesktopSiteByDefault,
+                textZoom = browserTextZoom,
                 onSearchEngineChange = { engine ->
-                    coroutineScope.launch {
-                        downloaderPreferences.setSearchEngine(engine)
+                    coroutineScope.launch { downloaderPreferences.setSearchEngine(engine) }
+                },
+                onJavaScriptChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserJavaScriptEnabled(enabled) }
+                },
+                onAdBlockingChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserAdBlockingEnabled(enabled) }
+                },
+                onLoadImagesChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserLoadImages(enabled) }
+                },
+                onThirdPartyCookiesChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserThirdPartyCookies(enabled) }
+                },
+                onSaveHistoryChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserSaveHistory(enabled) }
+                },
+                onDesktopSiteByDefaultChange = { enabled ->
+                    isDesktopMode = enabled
+                    coroutineScope.launch { downloaderPreferences.setBrowserDesktopSiteByDefault(enabled) }
+                },
+                onTextZoomChange = { zoom ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserTextZoom(zoom) }
+                },
+                onClearBrowsingData = {
+                    coroutineScope.launch { historyManager.clearHistory() }
+                    webViewInstance?.apply {
+                        clearHistory()
+                        clearCache(true)
+                        clearFormData()
                     }
+                    CookieManager.getInstance().removeAllCookies(null)
+                    CookieManager.getInstance().flush()
+                    WebStorage.getInstance().deleteAllData()
+                    lastRecordedHistoryUrl = ""
                 },
                 onDismiss = { showBrowserSettings = false }
             )

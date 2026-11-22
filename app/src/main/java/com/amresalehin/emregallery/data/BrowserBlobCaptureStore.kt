@@ -36,7 +36,9 @@ class BrowserBlobCaptureStore(context: Context) {
 
         val safeMime = mimeType.orEmpty().substringBefore(';').trim().lowercase(Locale.ROOT)
         val safeName = sanitizeFileName(fileName.orEmpty())
-        val suppliedExtension = safeName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val suppliedExtension = if (safeName.contains('.')) {
+            safeName.substringAfterLast('.').lowercase(Locale.ROOT)
+        } else ""
         val mimeExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(safeMime)?.lowercase(Locale.ROOT)
         val extension = when {
             suppliedExtension in MEDIA_EXTENSIONS && (mimeExtension == null || suppliedExtension == mimeExtension) -> suppliedExtension
@@ -57,7 +59,7 @@ class BrowserBlobCaptureStore(context: Context) {
             val temporaryFile = File(captureDirectory, "${id}.part")
             if (temporaryFile.exists() && !temporaryFile.delete()) return false
             val output = BufferedOutputStream(FileOutputStream(temporaryFile), IO_BUFFER_BYTES)
-            val finalName = if (safeName.substringAfterLast('.', "").isBlank()) "${safeName}.${extension}" else safeName
+            val finalName = if (suppliedExtension !in MEDIA_EXTENSIONS) "${safeName}.${extension}" else safeName
             sessions[id] = CaptureSession(temporaryFile, output, normalizedMime, finalName, expectedBytes)
             true
         } catch (_: Exception) {
@@ -169,7 +171,7 @@ class BrowserBlobCaptureStore(context: Context) {
     }
 
     companion object {
-        private const val MAX_CONCURRENT_CAPTURES = 2
+        private const val MAX_CONCURRENT_CAPTURES = 4
         private const val MAX_CAPTURE_BYTES = 512L * 1024L * 1024L
         private const val IO_BUFFER_BYTES = 64 * 1024
         private const val MAX_ENCODED_CHUNK_CHARS = 96 * 1024

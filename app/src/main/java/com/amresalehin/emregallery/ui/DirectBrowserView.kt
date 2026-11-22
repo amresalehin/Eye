@@ -288,6 +288,27 @@ fun DirectBrowserView(
         }
     }
 
+    var lastAppliedBrowserSettings by remember { mutableStateOf<String?>(null) }
+    val browserRuntimeSettingsKey = listOf(
+        browserJavaScriptEnabled,
+        browserAdBlockingEnabled,
+        browserLoadImages,
+        browserThirdPartyCookies,
+        isDesktopMode
+    ).joinToString("|")
+
+    LaunchedEffect(webViewInstance, browserRuntimeSettingsKey) {
+        val activeWebView = webViewInstance ?: return@LaunchedEffect
+        val previousSettings = lastAppliedBrowserSettings
+        lastAppliedBrowserSettings = browserRuntimeSettingsKey
+        if (previousSettings != null &&
+            previousSettings != browserRuntimeSettingsKey &&
+            currentUrl.isNotBlank()
+        ) {
+            activeWebView.reload()
+        }
+    }
+
     fun scanCurrentPageDOM(wv: WebView?) {
         if (wv == null) return
         val current = wv.url ?: return

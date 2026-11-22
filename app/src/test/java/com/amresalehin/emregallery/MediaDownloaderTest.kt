@@ -5,6 +5,7 @@ import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.data.ContentAwareMediaFilter
 import com.amresalehin.emregallery.data.DualMediaExtractor
+import com.amresalehin.emregallery.data.GalleryDlEngine
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
@@ -37,6 +38,50 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaDownloaderTest {
+
+    @Test
+    fun parsedEngineItemsRetainExtractorAndFormatMetadata() {
+        val pageUrl = "https://example.com/playlist"
+        val root = org.json.JSONObject().apply {
+            put("engine", "yt-dlp")
+            put("pageTitle", "Example playlist")
+            put("items", org.json.JSONArray().put(
+                org.json.JSONObject().apply {
+                    put("id", "ytdlp_0_item")
+                    put("url", "https://example.com/watch?id=1")
+                    put("title", "Example video.mp4")
+                    put("category", "VIDEOS")
+                    put("format", "MP4")
+                    put("mimeType", "video/mp4")
+                    put("isVideo", true)
+                    put("source", "yt-dlp")
+                    put("metadata", org.json.JSONObject().apply {
+                        put("extractor", "Example")
+                        put("extractor_key", "ExampleIE")
+                        put("format_id", "137")
+                        put("audio_format_id", "140")
+                        put("playlist_title", "Example playlist")
+                        put("format_options", org.json.JSONArray().put(
+                            org.json.JSONObject().put("format_id", "137").put("selected", true)
+                        ))
+                    })
+                }
+            ))
+        }
+
+        val (pageTitle, items) = GalleryDlEngine.parseExtractedItems(root, pageUrl)
+        val item = items.single()
+
+        assertEquals("Example playlist", pageTitle)
+        assertEquals("Example", item.metadata["extractor"])
+        assertEquals("ExampleIE", item.metadata["extractor_key"])
+        assertEquals("137", item.metadata["format_id"])
+        assertEquals("140", item.metadata["audio_format_id"])
+        assertEquals("Example playlist", item.metadata["playlist_title"])
+        assertTrue(item.metadata["format_options"].orEmpty().contains("\"format_id\":\"137\""))
+        assertEquals(pageUrl, item.downloadHeaders["Referer"])
+        assertEquals("yt-dlp", item.provenance.extractorEngine)
+    }
 
     @Test
     fun shareBrowserHandoffTargetsMainActivityWithIncomingUrl() {

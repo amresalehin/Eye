@@ -100,7 +100,9 @@ class DirectMediaProvider : ExtractionProvider {
 
 class GalleryDlProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
-        return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
+        if (!GalleryDlEngine.isAvailable()) return false
+        val support = GalleryDlEngine.checkSupport(context.url)
+        return support.isSupported && "gallery-dl" in support.supportedEngines
     }
 
     override suspend fun extract(
@@ -125,24 +127,12 @@ class GalleryDlProvider : ExtractionProvider {
 }
 
 class YtDlpProvider : ExtractionProvider {
-    companion object {
-        val VIDEO_HOSTS = listOf(
-            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-            "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "fb.watch",
-            "instagram.com", "reddit.com", "redd.it", "v.redd.it", "twitter.com", "x.com"
-        )
-
-        fun matchesSupportedHost(url: String): Boolean {
-            val lower = url.lowercase()
-            return VIDEO_HOSTS.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
-        }
-    }
-
     override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!GalleryDlEngine.isAvailable()) return false
-        if (matchesSupportedHost(context.url)) return true
+        if (!GalleryDlEngine.isAvailable() || !MediaClassifier.isValidWebUrl(context.url)) return false
         val support = GalleryDlEngine.checkSupport(context.url)
-        return support.isSupported && support.engine == "yt-dlp"
+        // Engine selection comes from yt-dlp's live extractor registry (including
+        // its generic HTTP(S) fallback), never from a manually maintained host list.
+        return support.isSupported && "yt-dlp" in support.supportedEngines
     }
 
     override suspend fun extract(
@@ -428,7 +418,8 @@ class DualMediaExtractor(private val context: Context) {
                             val upgraded = preferred.copy(
                                 id = existing.id,
                                 thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
-                                provenance = preferred.provenance.copy(extractorEngine = mergedEngine)
+                                provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                                metadata = secondary.metadata + preferred.metadata
                             )
                             if (upgraded != existing) {
                                 itemsMap[key] = upgraded
@@ -488,7 +479,8 @@ class DualMediaExtractor(private val context: Context) {
                             thumbnailUrl = mergedThumb,
                             resolutionHint = mergedResolution,
                             provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                            downloadHeaders = mergedHeaders
+                            downloadHeaders = mergedHeaders,
+                            metadata = secondary.metadata + preferred.metadata
                         )
                         if (upgraded != existing) {
                             itemsMap[key] = upgraded
@@ -749,7 +741,8 @@ class DualMediaExtractor(private val context: Context) {
                     url = resolvedUrl,
                     thumbnailUrl = mergedThumb,
                     provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                    downloadHeaders = mergedHeaders
+                    downloadHeaders = mergedHeaders,
+                    metadata = secondary.metadata + preferred.metadata
                 )
                 if (upgraded != existing) {
                     existingMap[key] = upgraded

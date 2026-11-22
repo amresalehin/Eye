@@ -34,7 +34,8 @@ data class GalleryDlSupportInfo(
     val subcategory: String,
     val extractorName: String,
     val displayName: String,
-    val engine: String = ""
+    val engine: String = "",
+    val supportedEngines: Set<String> = emptySet()
 )
 
 data class GalleryDlOptions(
@@ -166,18 +167,21 @@ object GalleryDlEngine {
 
             GalleryDlStatus(
                 available = json.optBoolean("available", true),
-                version = json.optString("version", "1.32.19"),
-                engineName = json.optString("engine", "gallery-dl (Chaquopy)"),
-                supportedExtractorsCount = json.optInt("supported_categories_count", 287),
+                version = json.optString("version", "Unknown"),
+                engineName = json.optString("engine", "Python extraction runtime"),
+                supportedExtractorsCount = json.optInt(
+                    "supported_extractors_count",
+                    json.optInt("supported_categories_count", 0)
+                ),
                 popularSites = if (sitesList.isNotEmpty()) sitesList else defaultPopularSites()
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get gallery-dl status", e)
             GalleryDlStatus(
                 available = true,
-                version = "1.32.19",
-                engineName = "gallery-dl 1.32.19",
-                supportedExtractorsCount = 287,
+                version = "Unknown",
+                engineName = "Python extraction runtime (status unavailable)",
+                supportedExtractorsCount = 0,
                 popularSites = defaultPopularSites()
             )
         }
@@ -192,19 +196,8 @@ object GalleryDlEngine {
         }
 
         if (!isAvailable()) {
-            // Heuristic check if Python isn't active
-            val lower = url.lowercase()
-            for (site in defaultPopularSites()) {
-                if (site.domains.any { lower.contains(it) }) {
-                    return GalleryDlSupportInfo(
-                        isSupported = true,
-                        category = site.name.lowercase(),
-                        subcategory = "",
-                        extractorName = "${site.name}Extractor",
-                        displayName = site.name
-                    )
-                }
-            }
+            // Never claim site support from a hand-maintained list when the
+            // actual extractor registries are not running.
             return GalleryDlSupportInfo(false, "", "", "", "")
         }
 
@@ -213,13 +206,23 @@ object GalleryDlEngine {
             val runner = py.getModule("gallery_dl_runner")
             val checkJson = runner.callAttr("check_support", url.trim()).toString()
             val json = JSONObject(checkJson)
+            val enginesJson = json.optJSONArray("engines")
+            val engines = buildSet {
+                if (enginesJson != null) {
+                    for (index in 0 until enginesJson.length()) {
+                        enginesJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+                json.optString("engine").takeIf { it.isNotBlank() }?.let(::add)
+            }
             GalleryDlSupportInfo(
-                isSupported = json.optBoolean("supported", false),
+                isSupported = json.optBoolean("supported", engines.isNotEmpty()),
                 category = json.optString("category", ""),
                 subcategory = json.optString("subcategory", ""),
                 extractorName = json.optString("extractor", ""),
                 displayName = json.optString("display_name", json.optString("category", "")),
-                engine = json.optString("engine", "")
+                engine = json.optString("engine", ""),
+                supportedEngines = engines
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
@@ -257,6 +260,19 @@ object GalleryDlEngine {
                 null
             }
 
+            val itemMetadata = mutableMapOf("source_url" to pageUrl)
+            obj.optJSONObject("metadata")?.let { metadataJson ->
+                val keys = metadataJson.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = metadataJson.opt(key)
+                    if (value != null && value != JSONObject.NULL) {
+                        itemMetadata[key] = value.toString()
+                    }
+                }
+            }
+            obj.optJSONArray("formatOptions")?.let { itemMetadata["available_formats"] = it.toString() }
+
             val item = ScrapedMediaItem(
                 id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
@@ -276,7 +292,7 @@ object GalleryDlEngine {
                     extractorEngine = itemSource,
                     pageUrl = pageUrl
                 ),
-                metadata = mapOf("source_url" to pageUrl),
+                metadata = itemMetadata,
                 downloadHeaders = mapOf(
                     "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
                     "Referer" to pageUrl

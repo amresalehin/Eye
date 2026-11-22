@@ -7,6 +7,7 @@ import hashlib
 import re
 import shutil
 import threading
+from functools import lru_cache
 
 _gdl_lock = threading.Lock()
 
@@ -135,36 +136,87 @@ def _mux_with_android_media_muxer(video_path, audio_path, target_path):
     except Exception:
         return False
 
+@lru_cache(maxsize=1)
+def _get_ytdlp_extractors():
+    if not YTDLP_AVAILABLE:
+        return []
+    try:
+        return list(yt_dlp.extractor.gen_extractors())
+    except Exception:
+        try:
+            from yt_dlp.extractor import gen_extractors
+            return list(gen_extractors())
+        except Exception:
+            return []
+
+
+def _count_gallery_dl_extractors():
+    if not GALLERY_DL_AVAILABLE:
+        return 0
+    try:
+        return len(list(gdl_extractor.extractors()))
+    except Exception:
+        return 0
+
+
+def _count_ytdlp_extractors():
+    return sum(
+        1 for extractor in _get_ytdlp_extractors()
+        if (getattr(extractor, "IE_NAME", "") or "").lower() != "generic"
+    )
+
+
 def get_engine_status():
-    """Returns runtime status and version information synchronized with GalleryDlEngine."""
-    gdl_ver = getattr(gallery_dl, "__version__", "1.32.19") if GALLERY_DL_AVAILABLE else "N/A"
-    ytdlp_ver = getattr(yt_dlp, "__version__", "2026.10.21") if YTDLP_AVAILABLE else "N/A"
+    """Return live engine versions and extractor counts from the installed runtimes."""
+    gdl_ver = getattr(gallery_dl, "__version__", "Unknown") if GALLERY_DL_AVAILABLE else "Unavailable"
+    ytdlp_ver = getattr(yt_dlp, "__version__", "Unknown") if YTDLP_AVAILABLE else "Unavailable"
+    gdl_count = _count_gallery_dl_extractors()
+    ytdlp_count = _count_ytdlp_extractors()
     available = GALLERY_DL_AVAILABLE or YTDLP_AVAILABLE
     engine_name = f"gallery-dl {gdl_ver} / yt-dlp {ytdlp_ver}" if available else "Python Engine Unavailable"
 
     return json.dumps({
         "available": available,
-        "version": gdl_ver,
+        "version": gdl_ver if GALLERY_DL_AVAILABLE else ytdlp_ver,
         "engine": engine_name,
         "gallery_dl_available": GALLERY_DL_AVAILABLE,
         "gallery_dl_version": gdl_ver,
+        "gallery_dl_extractors_count": gdl_count,
         "yt_dlp_available": YTDLP_AVAILABLE,
         "yt_dlp_version": ytdlp_ver,
+        "yt_dlp_extractors_count": ytdlp_count,
         "python_version": sys.version.split()[0],
-        "supported_categories_count": 287 if GALLERY_DL_AVAILABLE else 0,
+        "supported_extractors_count": gdl_count + ytdlp_count,
+        # Compatibility key for older Android builds; now sourced dynamically.
+        "supported_categories_count": gdl_count + ytdlp_count,
         "popular_extractors": POPULAR_EXTRACTORS
     })
 
+
+@lru_cache(maxsize=512)
 def check_support(url):
     """
-    Checks if a URL is handled by gallery-dl or yt-dlp site extractors.
+    Ask each installed engine's native extractor registry about the URL.
+
+    The generic yt-dlp extractor is retained as a final fallback for ordinary
+    HTTP(S) pages. A positive result means an extraction attempt is worthwhile,
+    not that the remote site is guaranteed to expose downloadable media.
     """
-    if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": "", "engine": ""})
+    clean_url = (url or "").strip()
+    if not clean_url:
+        return json.dumps({
+            "supported": False, "category": "", "extractor": "",
+            "engine": "", "engines": [], "extractors": {}
+        })
 
-    clean_url = url.strip()
+    engines = []
+    extractors = {}
+    category = ""
+    subcategory = ""
+    primary_extractor = ""
 
-    # 1. Check gallery-dl site extractors (skip generic directlink matcher)
+    # gallery-dl site-specific extractor. Direct links are handled by Eye's
+    # direct-media provider and should not masquerade as a website extractor.
     if GALLERY_DL_AVAILABLE:
         try:
             ext = gdl_extractor.find(clean_url)
@@ -173,42 +225,64 @@ def check_support(url):
                 if cat != "directlink":
                     subcat = getattr(ext, "subcategory", "") or ""
                     name = ext.__class__.__name__
-                    return json.dumps({
-                        "supported": True,
-                        "category": cat,
-                        "subcategory": subcat,
-                        "extractor": name,
-                        "engine": "gallery-dl"
-                    })
+                    engines.append("gallery-dl")
+                    extractors["gallery-dl"] = {
+                        "name": name, "category": cat, "subcategory": subcat
+                    }
+                    category = category or cat
+                    subcategory = subcategory or subcat
+                    primary_extractor = primary_extractor or name
         except Exception:
             pass
 
-    # 2. Check yt-dlp site extractors (fast regex check across all built-in extractors, excluding generic)
+    # yt-dlp's registered site extractors are authoritative. Do not gate them
+    # behind a manually curated host list: that list inevitably falls behind.
     if YTDLP_AVAILABLE:
-        try:
-            lower = clean_url.lower()
-            if any(vh in lower for vh in SOCIAL_VIDEO_HOSTS) or ".m3u8" in lower or ".mpd" in lower:
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
-            for ydl_ext in yt_dlp.extractor.gen_extractors():
-                ie_name = getattr(ydl_ext, "IE_NAME", "generic")
-                if ie_name and ie_name.lower() != "generic" and ydl_ext.suitable(clean_url):
-                    return json.dumps({
-                        "supported": True,
-                        "category": "video",
-                        "subcategory": "extractor",
-                        "extractor": ie_name,
-                        "engine": "yt-dlp"
-                    })
-        except Exception:
-            pass
+        ytdlp_extractors = _get_ytdlp_extractors()
+        site_match = None
+        generic_match = None
+        for ydl_ext in ytdlp_extractors:
+            ie_name = (getattr(ydl_ext, "IE_NAME", "") or "").strip()
+            try:
+                if not ydl_ext.suitable(clean_url):
+                    continue
+            except Exception:
+                continue
+            if ie_name.lower() == "generic":
+                generic_match = ydl_ext
+            else:
+                site_match = ydl_ext
+                break
 
-    return json.dumps({"supported": False, "category": "", "extractor": "", "engine": ""})
+        if site_match is not None:
+            name = getattr(site_match, "IE_NAME", "") or site_match.__class__.__name__
+            extractors["yt-dlp"] = {
+                "name": name, "category": "site", "subcategory": "extractor"
+            }
+            engines.append("yt-dlp")
+            category = category or "media"
+            subcategory = subcategory or "extractor"
+            primary_extractor = primary_extractor or name
+        elif generic_match is not None and clean_url.lower().startswith(("http://", "https://")):
+            name = getattr(generic_match, "IE_NAME", "") or "generic"
+            extractors["yt-dlp"] = {
+                "name": name, "category": "generic", "subcategory": "fallback"
+            }
+            engines.append("yt-dlp")
+            category = category or "generic"
+            subcategory = subcategory or "fallback"
+            primary_extractor = primary_extractor or name
+
+    return json.dumps({
+        "supported": bool(engines),
+        "category": category,
+        "subcategory": subcategory,
+        "extractor": primary_extractor,
+        "engine": engines[0] if engines else "",
+        "engines": engines,
+        "extractors": extractors
+    })
+
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -329,6 +403,22 @@ def extract_gallery_dl(url, options_json="{}"):
                     # Route Reddit DASH videos extracted by gallery-dl through yt-dlp so audio is muxed
                     item_source = "yt-dlp" if ("v.redd.it/" in lower_url and is_video) else "gallery-dl"
 
+                    # Preserve useful native extractor metadata without serializing
+                    # arbitrary Python objects returned by individual extractors.
+                    item_metadata = {
+                        "extractor": ext.__class__.__name__,
+                        "category": getattr(ext, "category", "") or "",
+                        "subcategory": getattr(ext, "subcategory", "") or "",
+                    }
+                    for metadata_key in (
+                        "id", "post_id", "num", "filename", "extension",
+                        "title", "description", "date", "timestamp", "author",
+                        "width", "height", "filesize", "duration"
+                    ):
+                        metadata_value = kwdict.get(metadata_key)
+                        if isinstance(metadata_value, (str, int, float, bool)):
+                            item_metadata[metadata_key] = metadata_value
+
                     url_hash = hashlib.sha256(item_url.encode('utf-8')).hexdigest()[:12]
                     items.append({
                         "id": f"gdl_{len(items)}_{url_hash}",
@@ -344,7 +434,8 @@ def extract_gallery_dl(url, options_json="{}"):
                         "resolutionHint": resolution_hint,
                         "sizeBytes": size_bytes,
                         "durationMillis": duration_ms,
-                        "source": item_source
+                        "source": item_source,
+                        "metadata": item_metadata
                     })
     except Exception as e:
         return json.dumps({
@@ -552,11 +643,19 @@ def extract_yt_dlp(url, options_json="{}"):
                     if not entry or not isinstance(entry, dict):
                         continue
 
-                    # Preserve webpage URL so yt-dlp downloads and muxes non-expired video+audio streams at save time
-                    page_url = entry.get("webpage_url") or clean_url
+                    # Preserve each playlist entry's own webpage URL so yt-dlp can
+                    # resolve fresh, non-expired formats at download time. Never map
+                    # every URL-less playlist entry back to the parent page URL.
+                    page_url = entry.get("webpage_url") or entry.get("original_url")
+                    if not page_url:
+                        candidate_url = entry.get("url")
+                        if isinstance(candidate_url, str) and candidate_url.lower().startswith(("http://", "https://")):
+                            page_url = candidate_url
+                    if not isinstance(page_url, str) or not page_url.lower().startswith(("http://", "https://")):
+                        continue
                     direct_url = page_url
 
-                    if not direct_url or direct_url in seen_urls:
+                    if direct_url in seen_urls:
                         continue
 
                     seen_urls.add(direct_url)
@@ -574,7 +673,7 @@ def extract_yt_dlp(url, options_json="{}"):
                     item_title = f"{v_title}.{v_ext}" if not v_title.endswith(f".{v_ext}") else v_title
 
                     if not page_title:
-                        page_title = v_title
+                        page_title = info.get("title") or entry.get("playlist_title") or v_title
 
                     width = (primary_fmt or {}).get("width") or entry.get("width")
                     height = (primary_fmt or {}).get("height") or entry.get("height")
@@ -596,8 +695,56 @@ def extract_yt_dlp(url, options_json="{}"):
                     duration_ms = _parse_duration_millis(
                         entry.get("duration")
                         if entry.get("duration") is not None
-                        else (entry.get("duration_string") or info.get("duration"))
+                        else entry.get("duration_string")
                     )
+
+                    # Keep a compact, selectable description of available formats
+                    # rather than discarding everything except the preferred one.
+                    selected_ids = set()
+                    if primary_fmt and primary_fmt.get("format_id") is not None:
+                        selected_ids.add(str(primary_fmt.get("format_id")))
+                    if secondary_fmt and secondary_fmt.get("format_id") is not None:
+                        selected_ids.add(str(secondary_fmt.get("format_id")))
+
+                    compact_formats = []
+                    for fmt in formats:
+                        if not isinstance(fmt, dict) or fmt.get("format_id") is None:
+                            continue
+                        compact = {}
+                        for field in (
+                            "format_id", "format", "format_note", "ext",
+                            "width", "height", "fps", "filesize",
+                            "filesize_approx", "vcodec", "acodec",
+                            "tbr", "vbr", "abr", "asr", "protocol"
+                        ):
+                            value = fmt.get(field)
+                            if isinstance(value, (str, int, float, bool)):
+                                compact[field] = value
+                        compact["selected"] = str(fmt.get("format_id")) in selected_ids
+                        compact_formats.append(compact)
+
+                    compact_formats.sort(
+                        key=lambda f: (
+                            1 if f.get("selected") else 0,
+                            int(f.get("height") or 0),
+                            float(f.get("tbr") or f.get("vbr") or f.get("abr") or 0)
+                        ),
+                        reverse=True
+                    )
+                    compact_formats = compact_formats[:30]
+                    metadata = {
+                        "extractor": entry.get("extractor") or info.get("extractor") or "",
+                        "extractor_key": entry.get("extractor_key") or info.get("extractor_key") or "",
+                        "webpage_url": page_url,
+                        "original_url": entry.get("original_url") or "",
+                        "format_id": (primary_fmt or {}).get("format_id") or "",
+                        "audio_format_id": (secondary_fmt or {}).get("format_id") or "",
+                        "available_formats_count": len(formats),
+                        "format_options": compact_formats,
+                    }
+                    if info.get("_type") == "playlist":
+                        metadata["playlist_id"] = info.get("id") or ""
+                        metadata["playlist_title"] = info.get("title") or ""
 
                     url_hash = hashlib.sha256(direct_url.encode('utf-8')).hexdigest()[:12]
                     items.append({
@@ -614,7 +761,8 @@ def extract_yt_dlp(url, options_json="{}"):
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
                         "durationMillis": duration_ms,
-                        "source": "yt-dlp"
+                        "source": "yt-dlp",
+                        "metadata": metadata
                     })
     except Exception as e:
         return json.dumps({

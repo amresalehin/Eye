@@ -1101,13 +1101,17 @@ object MediaClassifier {
                 }
 
                 val resolvedOriginalUrl = resolveOriginalMedia(best.url).mediaUrl
+                val mergedMetadata = group.fold(emptyMap<String, String>()) { accumulated, candidate ->
+                    accumulated + candidate.metadata
+                } + best.metadata
                 val merged = best.copy(
                     url = resolvedOriginalUrl,
                     thumbnailUrl = bestThumb,
                     resolutionHint = mergedResolution,
                     durationMillis = mergedDuration,
                     provenance = mergedProvenance,
-                    downloadHeaders = mergedHeaders
+                    downloadHeaders = mergedHeaders,
+                    metadata = mergedMetadata
                 )
                 result.add(merged)
             }

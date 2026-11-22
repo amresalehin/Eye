@@ -40,7 +40,7 @@ class BrowserBlobCaptureStore(context: Context) {
         val mimeExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(safeMime)?.lowercase(Locale.ROOT)
         val extension = when {
             suppliedExtension in MEDIA_EXTENSIONS && (mimeExtension == null || suppliedExtension == mimeExtension) -> suppliedExtension
-            mimeExtension in MEDIA_EXTENSIONS -> mimeExtension!!
+            mimeExtension != null && mimeExtension in MEDIA_EXTENSIONS -> mimeExtension
             suppliedExtension in MEDIA_EXTENSIONS -> suppliedExtension
             else -> return false
         }
@@ -54,10 +54,10 @@ class BrowserBlobCaptureStore(context: Context) {
 
         return try {
             if (!captureDirectory.exists() && !captureDirectory.mkdirs()) return false
-            val temporaryFile = File(captureDirectory, "$" + "{id}.part")
+            val temporaryFile = File(captureDirectory, "${id}.part")
             if (temporaryFile.exists() && !temporaryFile.delete()) return false
             val output = BufferedOutputStream(FileOutputStream(temporaryFile), IO_BUFFER_BYTES)
-            val finalName = if (safeName.substringAfterLast('.', "").isBlank()) "$" + "{safeName}.$" + "{extension}" else safeName
+            val finalName = if (safeName.substringAfterLast('.', "").isBlank()) "${safeName}.${extension}" else safeName
             sessions[id] = CaptureSession(temporaryFile, output, normalizedMime, finalName, expectedBytes)
             true
         } catch (_: Exception) {
@@ -101,7 +101,7 @@ class BrowserBlobCaptureStore(context: Context) {
             }
 
             val extension = session.fileName.substringAfterLast('.', "bin")
-            val destination = File(captureDirectory, "$" + "{id}.$" + "{extension}")
+            val destination = File(captureDirectory, "${id}.${extension}")
             if (destination.exists() && !destination.delete()) {
                 session.temporaryFile.delete()
                 return null
@@ -115,7 +115,7 @@ class BrowserBlobCaptureStore(context: Context) {
             val classification = MediaClassifier.classify(mediaUrl, session.mimeType)
             val thumbnail = if (classification.category == MediaCategory.IMAGES) mediaUrl else null
             ScrapedMediaItem(
-                id = "browser_blob_$" + "{id}",
+                id = "browser_blob_${id}",
                 url = mediaUrl,
                 title = destination.name,
                 isVideo = classification.isVideo,

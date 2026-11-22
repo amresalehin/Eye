@@ -491,18 +491,28 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testGalleryDlSupportInfoDetection() {
+    fun testGalleryDlSupportInfoDetectionUsesLiveEngineAvailability() {
+        val runtimeAvailable = com.amresalehin.emregallery.data.GalleryDlEngine.isAvailable()
+
         val redditCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.reddit.com/r/earthporn/comments/123/mountains")
-        assertTrue(redditCheck.isSupported)
-
         val imgurCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://imgur.com/a/abcde")
-        assertTrue(imgurCheck.isSupported)
-
         val artstationCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://artstation.com/artwork/xyz123")
-        assertTrue(artstationCheck.isSupported)
-
         val genericCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://nonexistent-random-domain-12345.com")
-        assertEquals(false, genericCheck.isSupported)
+
+        // Support must come from initialized native extractor registries, never
+        // from an offline hardcoded popular-site list. yt-dlp's generic extractor
+        // is also allowed to inspect ordinary HTTP(S) URLs when the runtime exists.
+        assertEquals(runtimeAvailable, redditCheck.isSupported)
+        assertEquals(runtimeAvailable, imgurCheck.isSupported)
+        assertEquals(runtimeAvailable, artstationCheck.isSupported)
+        assertEquals(runtimeAvailable, genericCheck.isSupported)
+
+        if (runtimeAvailable) {
+            assertTrue(redditCheck.supportedEngines.isNotEmpty())
+            assertTrue(imgurCheck.supportedEngines.isNotEmpty())
+            assertTrue(artstationCheck.supportedEngines.isNotEmpty())
+            assertTrue(genericCheck.supportedEngines.contains("yt-dlp"))
+        }
     }
 
     @Test
@@ -828,8 +838,10 @@ class MediaDownloaderTest {
     @Test
     fun testGalleryDlSupportInfoAndDeterministicStorageHelpers() {
         val redditSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.reddit.com/r/pics/comments/abc/test/")
-        assertTrue(redditSupport.isSupported)
-        assertEquals("reddit", redditSupport.category)
+        assertEquals(com.amresalehin.emregallery.data.GalleryDlEngine.isAvailable(), redditSupport.isSupported)
+        if (redditSupport.isSupported) {
+            assertTrue(redditSupport.supportedEngines.isNotEmpty())
+        }
 
         val context: Context = ApplicationProvider.getApplicationContext()
         val id1 = OkHttpDownloader.generateDeterministicId("https://cdn.example.com/a/video.mp4", "video.mp4")

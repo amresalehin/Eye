@@ -21,10 +21,15 @@ import kotlin.math.abs
  */
 object DownloadQueueManager {
 
-    fun buildNetworkConstraints(context: Context): Constraints {
+    fun buildNetworkConstraints(context: Context, requiresNetwork: Boolean = true): Constraints {
         val wifiOnly = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.isWifiOnlySync(context)
+        val requiredNetwork = when {
+            !requiresNetwork -> NetworkType.NOT_REQUIRED
+            wifiOnly -> NetworkType.UNMETERED
+            else -> NetworkType.CONNECTED
+        }
         return Constraints.Builder()
-            .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+            .setRequiredNetworkType(requiredNetwork)
             .build()
     }
 
@@ -115,7 +120,7 @@ object DownloadQueueManager {
             .build()
 
         val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
-            .setConstraints(buildNetworkConstraints(context))
+            .setConstraints(buildNetworkConstraints(context, requiresNetwork = !item.url.startsWith("file:", ignoreCase = true)))
             .setInputData(inputData)
             .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
             .addTag("item_${item.id}")
@@ -205,7 +210,7 @@ object DownloadQueueManager {
                 .build()
 
             val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
-                .setConstraints(buildNetworkConstraints(context))
+                .setConstraints(buildNetworkConstraints(context, requiresNetwork = !item.url.startsWith("file:", ignoreCase = true)))
                 .setInputData(inputData)
                 .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
                 .addTag("item_${item.id}")

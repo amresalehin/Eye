@@ -708,7 +708,7 @@ fun GalleryApp() {
         }
     }
 
-    val visibleMedia = remember(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums) {
+    val visibleMedia = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
         media.filter { item ->
             val isItemBinned = item.isTrashed || item.uri in inBin
             val inScope = when (albumFilter) {

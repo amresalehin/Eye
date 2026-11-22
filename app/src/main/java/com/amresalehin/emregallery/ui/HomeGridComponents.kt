@@ -143,7 +143,11 @@ fun HomeFastScrollbar(
 }
 
 @Composable
-fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit) {
+fun MemoriesStrip(
+    media: List<MediaItem>,
+    onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
+    listState: LazyListState
+) {
     val today = remember { Calendar.getInstance() }
     val currentYear = today.get(Calendar.YEAR)
     val todayMonth = today.get(Calendar.MONTH)
@@ -198,7 +202,11 @@ fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (stories: List<StoryGrou
     if (stories.isEmpty()) return
 
     Column {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+        LazyRow(
+            state = listState,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 4.dp)
+        ) {
             items(stories.size, key = { index -> stories[index].first }) { index ->
                 val (title, storyMedia) = stories[index]
                 val cover = storyMedia.first()

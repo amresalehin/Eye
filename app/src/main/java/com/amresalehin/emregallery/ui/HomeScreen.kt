@@ -78,6 +78,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
+    val memoriesListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
@@ -393,8 +394,14 @@ fun HomeScreen(
                 }
             } else if (sortedMedia.isNotEmpty()) {
                 if (albumTitle == null) {
-                    item { MemoriesStrip(sortedMedia, onOpenMemory) }
-                    item {
+                    item(key = "home_memories_strip", contentType = "memories_strip") {
+                        MemoriesStrip(
+                            media = sortedMedia,
+                            onOpenMemory = onOpenMemory,
+                            listState = memoriesListState
+                        )
+                    }
+                    item(key = "home_memories_divider", contentType = "divider") {
                         HorizontalDivider(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),

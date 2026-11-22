@@ -375,7 +375,7 @@ object MediaCaptureEngine {
                                 var descriptor = splitBits[1] || '';
                                 var absSrcset = resolveAbs(u, 'image/jpeg', img.getAttribute('alt') || '');
                                 if (absSrcset) {
-                                    pushCandidate({u: absSrcset, s: 'SRCSET', r: descriptor});
+                                    pushCandidate({u: absSrcset, s: 'SRCSET', r: descriptor, m: 'image/jpeg'});
                                 }
                             }
                         }
@@ -387,12 +387,12 @@ object MediaCaptureEngine {
                                   img.getAttribute('data-hi-res-src') || img.getAttribute('data-zoom-image');
                     if (dataSrc) {
                         var absData = resolveAbs(dataSrc, 'image/jpeg', img.getAttribute('alt') || '');
-                        if (absData) pushCandidate({u: absData, s: 'DATA_SRC'});
+                        if (absData) pushCandidate({u: absData, s: 'DATA_SRC', m: 'image/jpeg'});
                     }
                     var rawSrc = img.src || img.getAttribute('src');
                     if (rawSrc) {
                         var absRaw = resolveAbs(rawSrc, 'image/jpeg', img.getAttribute('alt') || '');
-                        if (absRaw) pushCandidate({u: absRaw, s: 'DOM'});
+                        if (absRaw) pushCandidate({u: absRaw, s: 'DOM', m: 'image/jpeg'});
                     }
                 }
 
@@ -413,7 +413,7 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenVideo) {
-                        pushCandidate({u: chosenVideo, s: 'DOM', p: poster, r: 'video', d: vDur});
+                        pushCandidate({u: chosenVideo, s: 'DOM', p: poster, r: 'video', d: vDur, m: (vid.getAttribute('type') || (vid.querySelector('source') && vid.querySelector('source').type) || 'video/mp4')});
                     } else if (poster) {
                         pushCandidate({u: poster, s: 'POSTER', r: 'poster'});
                     }
@@ -435,7 +435,7 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenAudio) {
-                        pushCandidate({u: chosenAudio, s: 'DOM', r: 'audio', d: aDur});
+                        pushCandidate({u: chosenAudio, s: 'DOM', r: 'audio', d: aDur, m: (au.getAttribute('type') || (au.querySelector('source') && au.querySelector('source').type) || 'audio/mpeg')});
                     }
                 }
 
@@ -449,7 +449,7 @@ object MediaCaptureEngine {
                             var item = arr[idx];
                             if (item.contentUrl) {
                                 var cu = resolveAbs(item.contentUrl);
-                                if (cu) pushCandidate({u: cu, s: 'DOM', r: 'json-ld', d: item.duration || null});
+                                if (cu) pushCandidate({u: cu, s: 'DOM', r: 'json-ld', d: item.duration || null, m: item.encodingFormat || item.fileFormat || ''});
                             }
                             if (item.thumbnailUrl) {
                                 var tu = resolveAbs(item.thumbnailUrl);
@@ -525,7 +525,9 @@ object MediaCaptureEngine {
                         if (seenUrls.size > 2500) seenUrls.clear();
                         seenUrls.add(u);
                         seenUrls.add(abs);
-                        if (window.EmreBridge && window.EmreBridge.reportMedia) {
+                        if (window.EmreBridge && window.EmreBridge.reportMediaWithMime && mimeHint) {
+                            window.EmreBridge.reportMediaWithMime(abs, mimeHint);
+                        } else if (window.EmreBridge && window.EmreBridge.reportMedia) {
                             window.EmreBridge.reportMedia(abs);
                         }
                     } catch(e) {}
@@ -547,7 +549,7 @@ object MediaCaptureEngine {
                             var parts = srcset.split(',');
                             for (var i = 0; i < parts.length; i++) {
                                 var bit = parts[i].trim().split(/\s+/)[0];
-                                if (bit) report(bit);
+                                if (bit) report(bit, 'image/jpeg', imageName);
                             }
                         }
                         return true;
@@ -591,7 +593,7 @@ object MediaCaptureEngine {
                                 var sParts = sSrcset.split(',');
                                 for (var si = 0; si < sParts.length; si++) {
                                     var sBit = sParts[si].trim().split(/\s+/)[0];
-                                    if (sBit) report(sBit);
+                                    if (sBit) report(sBit, node.getAttribute('type') || 'image/jpeg', node.getAttribute('title') || '');
                                 }
                             }
                         }
@@ -745,7 +747,11 @@ object MediaCaptureEngine {
         if (AdBlockEngine.isAdOrTracker(trimmed)) return null
 
         val resolved = MediaClassifier.resolveUrl(trimmed, baseUrl) ?: return null
-        if (!MediaClassifier.isValidMedia(resolved)) return null
+        val normalizedMimeHint = mimeHint?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val hasMediaMimeHint = normalizedMimeHint.startsWith("image/") ||
+            normalizedMimeHint.startsWith("video/") ||
+            normalizedMimeHint.startsWith("audio/")
+        if (!MediaClassifier.isValidMedia(resolved) && !hasMediaMimeHint) return null
         if (MediaClassifier.isMediaFragment(resolved)) return null
 
         val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
@@ -936,12 +942,14 @@ object MediaCaptureEngine {
                     val poster = obj.optString("p", "").ifBlank { null }
                     val res = obj.optString("r", "").ifBlank { null }
                     val durationMs = parseDurationToMillis(obj.opt("d"))
+                    val mimeHint = obj.optString("m", "").ifBlank { null }
                     val item = buildMediaItem(
                         rawUrl = rawUrl,
                         source = source,
                         baseUrl = baseUrl,
                         poster = poster,
                         resolutionHint = res,
+                        mimeHint = mimeHint,
                         indexHint = i,
                         durationMillis = durationMs,
                         precomputedCookieHeader = batchCookieHeader

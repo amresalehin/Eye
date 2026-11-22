@@ -1152,9 +1152,26 @@ fun DirectBrowserView(
 @Composable
 private fun BrowserSettingsBottomSheet(
     searchEngine: BrowserSearchEngine,
+    javaScriptEnabled: Boolean,
+    adBlockingEnabled: Boolean,
+    loadImages: Boolean,
+    thirdPartyCookies: Boolean,
+    saveHistory: Boolean,
+    desktopSiteByDefault: Boolean,
+    textZoom: Int,
     onSearchEngineChange: (BrowserSearchEngine) -> Unit,
+    onJavaScriptChange: (Boolean) -> Unit,
+    onAdBlockingChange: (Boolean) -> Unit,
+    onLoadImagesChange: (Boolean) -> Unit,
+    onThirdPartyCookiesChange: (Boolean) -> Unit,
+    onSaveHistoryChange: (Boolean) -> Unit,
+    onDesktopSiteByDefaultChange: (Boolean) -> Unit,
+    onTextZoomChange: (Int) -> Unit,
+    onClearBrowsingData: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showClearDataConfirmation by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -1166,19 +1183,15 @@ private fun BrowserSettingsBottomSheet(
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
                 text = "Browser settings",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-            Text(
-                text = "Choose the search engine used when you enter search terms in the address bar.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
+            BrowserSettingsSectionTitle("General")
             Text(
                 text = "Default search engine",
                 style = MaterialTheme.typography.titleSmall,
@@ -1198,7 +1211,7 @@ private fun BrowserSettingsBottomSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
@@ -1214,8 +1227,164 @@ private fun BrowserSettingsBottomSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+
+            HorizontalDivider()
+            BrowserSettingsSectionTitle("Privacy")
+            BrowserSettingsSwitchRow(
+                title = "Block ads and trackers",
+                description = "Block known advertising and tracking requests",
+                checked = adBlockingEnabled,
+                onCheckedChange = onAdBlockingChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Save browsing history",
+                description = "Show recently visited sites on the browser home page",
+                checked = saveHistory,
+                onCheckedChange = onSaveHistoryChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Third-party cookies",
+                description = "Allow cookies from sites other than the one you visit",
+                checked = thirdPartyCookies,
+                onCheckedChange = onThirdPartyCookiesChange
+            )
+            OutlinedButton(
+                onClick = { showClearDataConfirmation = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Clear browsing data")
+            }
+
+            HorizontalDivider()
+            BrowserSettingsSectionTitle("Site settings")
+            BrowserSettingsSwitchRow(
+                title = "JavaScript",
+                description = "Allow websites to run JavaScript",
+                checked = javaScriptEnabled,
+                onCheckedChange = onJavaScriptChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Load images",
+                description = "Show images embedded in web pages",
+                checked = loadImages,
+                onCheckedChange = onLoadImagesChange
+            )
+
+            HorizontalDivider()
+            BrowserSettingsSectionTitle("Appearance")
+            BrowserSettingsSwitchRow(
+                title = "Desktop site by default",
+                description = "Request desktop versions of websites when possible",
+                checked = desktopSiteByDefault,
+                onCheckedChange = onDesktopSiteByDefaultChange
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Page text size",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "$textZoom%",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Slider(
+                    value = textZoom.toFloat().coerceIn(75f, 150f),
+                    onValueChange = { onTextZoomChange(it.toInt().coerceIn(75, 150)) },
+                    valueRange = 75f..150f,
+                    steps = 14,
+                    modifier = Modifier.testTag("browser_text_zoom_slider")
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("75%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("150%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
         }
+    }
+
+    if (showClearDataConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearDataConfirmation = false },
+            title = { Text("Clear browsing data?") },
+            text = {
+                Text("This clears browsing history, cached pages, cookies and website storage. Saved shortcuts and downloaded media will remain.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDataConfirmation = false
+                        onClearBrowsingData()
+                    },
+                    modifier = Modifier.testTag("browser_confirm_clear_data")
+                ) {
+                    Text("Clear data", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDataConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun BrowserSettingsSectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
+private fun BrowserSettingsSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 
@@ -1284,6 +1453,7 @@ private fun BrowserHomeFavicon(
 fun BrowserEmptyHomePage(
     onNavigate: (String) -> Unit,
     onRemoveSavedSite: (BrowserSite) -> Unit = {},
+    showHistory: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1291,14 +1461,18 @@ fun BrowserEmptyHomePage(
     val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
     val savedSites by historyManager.savedSites.collectAsState(initial = emptyList())
 
-    val shortcutSites = remember(allHistorySites) {
-        allHistorySites.sortedWith(
-            compareByDescending<BrowserSite> { it.visitCount }
-                .thenByDescending { it.lastVisitedMillis }
-        ).take(5)
+    val shortcutSites = remember(allHistorySites, showHistory) {
+        if (showHistory) {
+            allHistorySites.sortedWith(
+                compareByDescending<BrowserSite> { it.visitCount }
+                    .thenByDescending { it.lastVisitedMillis }
+            ).take(5)
+        } else {
+            emptyList()
+        }
     }
-    val recentSites = remember(allHistorySites) {
-        allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(8)
+    val recentSites = remember(allHistorySites, showHistory) {
+        if (showHistory) allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(8) else emptyList()
     }
 
     Column(
@@ -1398,6 +1572,7 @@ fun BrowserEmptyHomePage(
             }
         }
 
+        if (showHistory) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1571,6 +1746,7 @@ fun BrowserEmptyHomePage(
                     }
                 }
             }
+        }
         }
 
         Spacer(Modifier.height(12.dp))

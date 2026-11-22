@@ -39,6 +39,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.delay
@@ -233,6 +234,17 @@ fun VideoPlayerSurface(
         animationSpec = tween(durationMillis = 180),
         label = "video_frame_handoff"
     )
+    val isFullscreen = videoState.isFullscreen
+    val resizeMode = if (isFullscreen) {
+        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    } else {
+        AspectRatioFrameLayout.RESIZE_MODE_FIT
+    }
+    val playerBackground = if (isFullscreen) {
+        android.graphics.Color.BLACK
+    } else {
+        android.graphics.Color.TRANSPARENT
+    }
 
     AndroidView(
         factory = { ctx ->
@@ -240,8 +252,9 @@ fun VideoPlayerSurface(
                 player = videoState.player
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                this.resizeMode = resizeMode
+                setShutterBackgroundColor(playerBackground)
+                setBackgroundColor(playerBackground)
                 isClickable = false
                 isFocusable = false
             }
@@ -255,7 +268,9 @@ fun VideoPlayerSurface(
             }
             pv.useController = false
             pv.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-            pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+            pv.resizeMode = resizeMode
+            pv.setShutterBackgroundColor(playerBackground)
+            pv.setBackgroundColor(playerBackground)
         }
     )
 }

@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
@@ -141,23 +142,30 @@ fun ViewerScreen(
         onPlayIntentChange = { sessionPlayIntent = it }
     )
 
-    // True fullscreen window immersion management
+    // Fullscreen playback uses the device's landscape sensors and hides all system bars.
+    // MainActivity handles orientation configuration changes so the active player/state survives rotation.
     val activity = remember(context) { context.findActivity() }
+    val originalRequestedOrientation = remember(activity) {
+        activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
     DisposableEffect(videoState.isFullscreen, activity) {
         val window = activity?.window
-        if (window != null) {
-            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-            if (videoState.isFullscreen) {
-                insetsController.hide(WindowInsetsCompat.Type.systemBars())
-                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            } else {
-                insetsController.show(WindowInsetsCompat.Type.systemBars())
-            }
+        val insetsController = window?.let {
+            WindowCompat.getInsetsController(it, it.decorView)
+        }
+        if (videoState.isFullscreen) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            insetsController?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            activity?.requestedOrientation = originalRequestedOrientation
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
-            if (window != null) {
-                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-                insetsController.show(WindowInsetsCompat.Type.systemBars())
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
+            if (videoState.isFullscreen) {
+                activity?.requestedOrientation = originalRequestedOrientation
             }
         }
     }
@@ -613,7 +621,6 @@ fun ViewerScreen(
                     onClick = { videoState.isFullscreen = false },
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .statusBarsPadding()
                         .padding(16.dp)
                         .size(44.dp)
                         .background(Color.Black.copy(alpha = 0.55f), CircleShape)
@@ -633,7 +640,7 @@ fun ViewerScreen(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .navigationBarsPadding()
+                        .then(if (videoState.isFullscreen) Modifier else Modifier.navigationBarsPadding())
                         .graphicsLayer {
                             val p = transitionProgress.value
                             translationY = (80.dp.toPx()) * (1f - p)
@@ -1099,10 +1106,10 @@ private fun ZoomableMediaItem(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                val fittedModifier = if (fittedW > 0f && fittedH > 0f) {
-                    Modifier.size(fittedWidthDp, fittedHeightDp)
-                } else {
-                    Modifier.fillMaxSize()
+                val fittedModifier = when {
+                    isVideo && videoState?.isFullscreen == true -> Modifier.fillMaxSize()
+                    fittedW > 0f && fittedH > 0f -> Modifier.size(fittedWidthDp, fittedHeightDp)
+                    else -> Modifier.fillMaxSize()
                 }
 
                 // Inner fitted container executing uniform shared-element scale, position, and crop to thumbnail

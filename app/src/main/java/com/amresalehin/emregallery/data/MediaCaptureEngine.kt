@@ -29,6 +29,276 @@ object MediaCaptureEngine {
      */
     private val IMAGE_FORMAT_QUERY_REGEX = Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""")
 
+    /**
+     * Installs page-context hooks for media URLs returned by fetch/XHR APIs and for Blob object
+     * URLs created by JavaScript. Blob bytes are streamed to the native bridge in bounded chunks;
+     * the page's own fetch/XHR responses are never consumed or modified.
+     */
+    fun getDynamicMediaCaptureScript(): String {
+        return """
+            (function() {
+                if (window.__emreDynamicMediaCaptureInstalled) {
+                    if (window.__emreScanBlobElements) window.__emreScanBlobElements();
+                    return;
+                }
+                window.__emreDynamicMediaCaptureInstalled = true;
+
+                var seenBlobUrls = window.__emreSeenBlobUrls || new Set();
+                var activeBlobUrls = window.__emreActiveBlobUrls || new Set();
+                window.__emreSeenBlobUrls = seenBlobUrls;
+                window.__emreActiveBlobUrls = activeBlobUrls;
+                var MAX_API_BYTES = 1024 * 1024;
+                var MAX_API_NODES = 5000;
+
+                function mimeFromHint(hint) {
+                    var h = (hint || '').toLowerCase();
+                    if (/(image|photo|picture|thumbnail|poster|cover|artwork)/.test(h)) return 'image/jpeg';
+                    if (/(video|clip|movie|stream)/.test(h)) return 'video/mp4';
+                    if (/(audio|music|sound|track)/.test(h)) return 'audio/mpeg';
+                    return '';
+                }
+
+                function mediaUrlPattern(url) {
+                    return /\.(?:jpe?g|png|webp|gif|avif|bmp|svg|mp4|m4v|mov|webm|mkv|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd|m4s|ts)(?:[?#]|$)/i.test(url) ||
+                        /[?&](?:format|fmt|ext|mime)=(?:jpe?g|png|webp|gif|mp4|webm|mp3|m4a|m3u8|mpd)/i.test(url);
+                }
+
+                function reportApiUrl(raw, hint) {
+                    if (typeof raw !== 'string' || raw.length < 6 || raw.length > 8192) return;
+                    var value = raw.trim().replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+                    if (value.indexOf('blob:') === 0) {
+                        if (window.__emreCaptureBlobUrl) window.__emreCaptureBlobUrl(value, mimeFromHint(hint), '');
+                        return;
+                    }
+                    var candidate = value;
+                    try {
+                        if (candidate.indexOf('//') === 0 || candidate.indexOf('/') === 0) {
+                            candidate = new URL(candidate, window.location.href).href;
+                        }
+                    } catch(e) {}
+                    if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) {
+                        var match = candidate.match(/https?:\\/\\/[^\\s"'<>]+/i);
+                        if (!match) return;
+                        candidate = match[0].replace(/[),.;\\]}]+$/, '');
+                    }
+                    var mime = mimeFromHint(hint);
+                    if (!mime && !mediaUrlPattern(candidate)) return;
+                    if (window.EmreBridge && window.EmreBridge.reportMediaWithMime) {
+                        window.EmreBridge.reportMediaWithMime(candidate, mime);
+                    } else if (window.EmreBridge && window.EmreBridge.reportMedia) {
+                        window.EmreBridge.reportMedia(candidate);
+                    }
+                }
+
+                function walkApiValue(value, hint, depth, budget) {
+                    if (!value || depth > 12 || budget.count++ > MAX_API_NODES) return;
+                    if (typeof value === 'string') {
+                        var urls = value.match(/https?:\\/\\/[^\\s"'<>\\\\]+/gi);
+                        if (urls && urls.length) {
+                            for (var i = 0; i < Math.min(urls.length, 30); i++) {
+                                reportApiUrl(urls[i].replace(/\\\\\\//g, '/'), hint);
+                            }
+                        } else {
+                            reportApiUrl(value, hint);
+                        }
+                        return;
+                    }
+                    if (Array.isArray(value)) {
+                        for (var i = 0; i < Math.min(value.length, 500); i++) {
+                            walkApiValue(value[i], hint, depth + 1, budget);
+                        }
+                        return;
+                    }
+                    if (typeof value === 'object') {
+                        var typeHint = [
+                            value.mimeType || value.mime_type || value.mediaType || value.media_type || '',
+                            value.type || value.kind || ''
+                        ].join(' ');
+                        var keys = Object.keys(value);
+                        for (var i = 0; i < Math.min(keys.length, 200); i++) {
+                            var key = keys[i];
+                            walkApiValue(value[key], hint + ' ' + typeHint + ' ' + key, depth + 1, budget);
+                        }
+                    }
+                }
+
+                function inspectApiText(text) {
+                    if (!text || text.length > MAX_API_BYTES) return;
+                    try {
+                        var parsed = JSON.parse(text);
+                        walkApiValue(parsed, '', 0, { count: 0 });
+                    } catch(e) {
+                        // Non-JSON text responses can still expose explicit media URLs.
+                        var urls = text.match(/https?:\\/\\/[^\\s"'<>\\\\]+/gi);
+                        if (urls) {
+                            for (var i = 0; i < Math.min(urls.length, 100); i++) {
+                                reportApiUrl(urls[i], '');
+                            }
+                        }
+                    }
+                }
+
+                function inspectApiResponse(response) {
+                    try {
+                        var contentType = (response.headers && response.headers.get('content-type') || '').toLowerCase();
+                        if (contentType.indexOf('json') === -1 && contentType.indexOf('text/') !== 0) return;
+                        var length = Number(response.headers.get('content-length') || 0);
+                        if (length > MAX_API_BYTES || !response.clone) return;
+                        var clone = response.clone();
+                        if (!clone.body || !clone.body.getReader) {
+                            if (length > 0 && length <= MAX_API_BYTES) {
+                                clone.text().then(inspectApiText).catch(function() {});
+                            }
+                            return;
+                        }
+                        (async function() {
+                            var reader = clone.body.getReader();
+                            var chunks = [];
+                            var total = 0;
+                            try {
+                                while (true) {
+                                    var part = await reader.read();
+                                    if (part.done) break;
+                                    total += part.value.byteLength;
+                                    if (total > MAX_API_BYTES) {
+                                        try { await reader.cancel(); } catch(e) {}
+                                        return;
+                                    }
+                                    chunks.push(part.value);
+                                }
+                                var merged = new Uint8Array(total);
+                                var offset = 0;
+                                for (var i = 0; i < chunks.length; i++) {
+                                    merged.set(chunks[i], offset);
+                                    offset += chunks[i].byteLength;
+                                }
+                                inspectApiText(new TextDecoder('utf-8').decode(merged));
+                            } catch(e) {}
+                        })();
+                    } catch(e) {}
+                }
+
+                async function captureBlobUrl(rawUrl, mimeHint, nameHint) {
+                    if (typeof rawUrl !== 'string' || rawUrl.indexOf('blob:') !== 0) return;
+                    if (seenBlobUrls.has(rawUrl) || activeBlobUrls.size >= 2) return;
+                    seenBlobUrls.add(rawUrl);
+                    activeBlobUrls.add(rawUrl);
+                    var captureId = 'blob_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
+                    var started = false;
+                    try {
+                        if (!window.EmreBridge || !window.EmreBridge.beginBlobCapture ||
+                            !window.EmreBridge.appendBlobChunk || !window.EmreBridge.finishBlobCapture) return;
+                        var response = await fetch(rawUrl);
+                        if (!response || !response.ok || !response.body || !response.body.getReader) return;
+                        var responseMime = (response.headers.get('content-type') || '').split(';')[0].trim();
+                        if (!/^(image|video|audio)\\//i.test(responseMime)) responseMime = mimeHint || responseMime;
+                        var contentLength = Number(response.headers.get('content-length') || 0);
+                        var fileName = nameHint || '';
+                        if (!fileName) fileName = 'captured_media';
+                        started = window.EmreBridge.beginBlobCapture(captureId, responseMime, fileName, contentLength);
+                        if (!started) return;
+
+                        var reader = response.body.getReader();
+                        while (true) {
+                            var part = await reader.read();
+                            if (part.done) break;
+                            var bytes = part.value;
+                            for (var offset = 0; offset < bytes.length; offset += 48 * 1024) {
+                                var slice = bytes.subarray(offset, Math.min(offset + 48 * 1024, bytes.length));
+                                var binary = '';
+                                for (var i = 0; i < slice.length; i++) binary += String.fromCharCode(slice[i]);
+                                if (!window.EmreBridge.appendBlobChunk(captureId, btoa(binary))) {
+                                    throw new Error('Native Blob capture rejected a chunk');
+                                }
+                            }
+                        }
+                        if (!window.EmreBridge.finishBlobCapture(captureId, window.location.href)) {
+                            throw new Error('Native Blob capture could not finalize the file');
+                        }
+                        started = false;
+                    } catch(e) {
+                        if (started && window.EmreBridge && window.EmreBridge.abortBlobCapture) {
+                            try { window.EmreBridge.abortBlobCapture(captureId); } catch(ignore) {}
+                        }
+                    } finally {
+                        activeBlobUrls.delete(rawUrl);
+                    }
+                }
+
+                window.__emreCaptureBlobUrl = captureBlobUrl;
+                window.__emreScanBlobElements = function() {
+                    var selectors = 'img[src^="blob:"],video[src^="blob:"],audio[src^="blob:"],source[src^="blob:"],a[href^="blob:"]';
+                    var nodes = document.querySelectorAll(selectors);
+                    for (var i = 0; i < nodes.length; i++) {
+                        var node = nodes[i];
+                        var tag = (node.tagName || '').toUpperCase();
+                        var mime = tag === 'VIDEO' ? 'video/mp4' : tag === 'AUDIO' ? 'audio/mpeg' : 'image/jpeg';
+                        var name = node.getAttribute('download') || node.getAttribute('title') || node.getAttribute('alt') || '';
+                        captureBlobUrl(node.src || node.href, mime, name);
+                    }
+                };
+
+                try {
+                    if (window.URL && URL.createObjectURL && !URL.__emreBlobHookInstalled) {
+                        var originalCreateObjectURL = URL.createObjectURL;
+                        URL.createObjectURL = function(object) {
+                            var createdUrl = originalCreateObjectURL.apply(this, arguments);
+                            try {
+                                if (typeof Blob !== 'undefined' && object instanceof Blob &&
+                                    /^(image|video|audio)\\//i.test(object.type || '')) {
+                                    captureBlobUrl(createdUrl, object.type, object.name || '');
+                                }
+                            } catch(e) {}
+                            return createdUrl;
+                        };
+                        URL.__emreBlobHookInstalled = true;
+                    }
+                } catch(e) {}
+
+                try {
+                    if (window.fetch && !window.fetch.__emreMediaHooked) {
+                        var originalFetch = window.fetch;
+                        var wrappedFetch = function() {
+                            return originalFetch.apply(this, arguments).then(function(response) {
+                                inspectApiResponse(response);
+                                return response;
+                            });
+                        };
+                        wrappedFetch.__emreMediaHooked = true;
+                        window.fetch = wrappedFetch;
+                    }
+                } catch(e) {}
+
+                try {
+                    if (window.XMLHttpRequest && !XMLHttpRequest.prototype.__emreMediaHooked) {
+                        var xhrPrototype = XMLHttpRequest.prototype;
+                        var originalOpen = xhrPrototype.open;
+                        var originalSend = xhrPrototype.send;
+                        xhrPrototype.open = function() {
+                            this.__emreCaptureApiResponse = true;
+                            return originalOpen.apply(this, arguments);
+                        };
+                        xhrPrototype.send = function() {
+                            this.addEventListener('load', function() {
+                                try {
+                                    var contentType = (this.getResponseHeader('content-type') || '').toLowerCase();
+                                    if (contentType.indexOf('json') === -1 && contentType.indexOf('text/') !== 0) return;
+                                    if (typeof this.responseText === 'string' && this.responseText.length <= MAX_API_BYTES) {
+                                        inspectApiText(this.responseText);
+                                    }
+                                } catch(e) {}
+                            });
+                            return originalSend.apply(this, arguments);
+                        };
+                        xhrPrototype.__emreMediaHooked = true;
+                    }
+                } catch(e) {}
+
+                window.__emreScanBlobElements();
+            })();
+        """.trimIndent()
+    }
+
     fun getJsDomScanScript(): String {
         return """
             (function() {

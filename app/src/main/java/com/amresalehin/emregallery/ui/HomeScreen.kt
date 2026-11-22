@@ -73,7 +73,8 @@ fun HomeScreen(
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
-    onOpen: (MediaItem) -> Unit
+    onOpen: (MediaItem) -> Unit,
+    isVisible: Boolean = true
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
@@ -81,7 +82,7 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
 
-    BackHandler(enabled = selectionMode) {
+    BackHandler(enabled = isVisible && selectionMode) {
         onSelectionChange(emptySet())
     }
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
@@ -192,7 +193,8 @@ fun HomeScreen(
 
     // Also predict while the finger is dragging (not just when a fling starts). Update the priority
     // window once per newly visible row, without scheduling work on every scroll frame.
-    LaunchedEffect(listState, predictivePrefetchRows, predictivePrefetchIndex) {
+    LaunchedEffect(isVisible, listState, predictivePrefetchRows, predictivePrefetchIndex) {
+        if (!isVisible) return@LaunchedEffect
         var previousPosition: Pair<Int, Int>? = null
         var previousAnchor = -1
         var previousDirection = 1

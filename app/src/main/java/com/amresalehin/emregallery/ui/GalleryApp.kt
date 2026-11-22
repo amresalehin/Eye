@@ -901,8 +901,20 @@ fun GalleryApp() {
                         }
                     }
 
-                    when (baseDestination) {
-                    Destination.HOME -> HomeScreen(
+                    // Keep the main gallery mounted so navigation away and back does not
+                    // recreate its grid, scroll effects, or remembered UI state.
+                    val homeVisible = baseDestination == Destination.HOME
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                alpha = if (homeVisible) 1f else 0f
+                                translationX = if (homeVisible) 0f else size.width * 2f
+                            }
+                            .zIndex(if (homeVisible) 1f else -1f)
+                    ) {
+                        HomeScreen(
+                            isVisible = homeVisible,
                         listState = homeListState,
                         media = visibleMedia,
                         loading = loading,
@@ -939,6 +951,10 @@ fun GalleryApp() {
                         onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
+                    }
+
+                    when (baseDestination) {
+                    Destination.HOME -> Unit
                     Destination.ALBUMS -> Unit
                     Destination.FAVOURITES -> {
                         val favouriteItems = remember(media, favourites, hidden, inBin, archive) {

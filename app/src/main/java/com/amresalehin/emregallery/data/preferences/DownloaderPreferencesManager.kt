@@ -423,6 +423,10 @@ class DownloaderPreferencesManager(private val context: Context) {
             context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(PREF_BROWSER_DESKTOP_BY_DEFAULT, false)
 
+        fun getBrowserHomepageUrlSync(context: Context): String =
+            context.applicationContext.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(PREF_BROWSER_HOMEPAGE_URL, "").orEmpty()
+
         fun resolveSubfolderName(
             context: Context,
             sourceDomain: String? = null,

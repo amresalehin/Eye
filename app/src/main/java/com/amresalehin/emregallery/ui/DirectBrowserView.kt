@@ -139,7 +139,9 @@ fun DirectBrowserView(
     val browserBlockMixedContent by downloaderPreferences.browserBlockMixedContent.collectAsState(initial = true)
     val browserAllowAutoplay by downloaderPreferences.browserAllowAutoplay.collectAsState(initial = true)
     val browserPinchZoomEnabled by downloaderPreferences.browserPinchZoomEnabled.collectAsState(initial = true)
-    val browserHomepageUrl by downloaderPreferences.browserHomepageUrl.collectAsState(initial = "")
+    val browserHomepageUrl by downloaderPreferences.browserHomepageUrl.collectAsState(
+        initial = DownloaderPreferencesManager.getBrowserHomepageUrlSync(context)
+    )
     val browserShowShortcuts by downloaderPreferences.browserShowShortcuts.collectAsState(initial = true)
     val browserShowRecentlyVisited by downloaderPreferences.browserShowRecentlyVisited.collectAsState(initial = true)
     val browserDarkenWebsites by downloaderPreferences.browserDarkenWebsites.collectAsState(initial = false)
@@ -1528,7 +1530,7 @@ private fun BrowserSettingsScreen(
                     imeAction = ImeAction.Done
                 ),
                 isError = homepageError != null,
-                supportingText = homepageError?.let { error -> ({ Text(error) }) }
+                supportingText = { homepageError?.let { Text(it) } }
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

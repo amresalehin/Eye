@@ -368,7 +368,7 @@ fun VideoPlayerControlsBar(
                         modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
-                            imageVector = if (isFullscreenPortrait) Icons.Default.Landscape else Icons.Default.Portrait,
+                            imageVector = Icons.Default.SwapVert,
                             contentDescription = if (isFullscreenPortrait) "Switch to landscape" else "Switch to portrait",
                             tint = Color.White,
                             modifier = Modifier.size(20.dp)

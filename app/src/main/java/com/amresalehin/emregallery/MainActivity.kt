@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -19,10 +18,6 @@ class MainActivity : FragmentActivity() {
 
     private val incomingBrowserRequest = mutableStateOf<BrowserTabOpenRequest?>(null)
     private var nextBrowserRequestId = 0L
-
-    private val prefs by lazy {
-        getSharedPreferences("window_refresh_rate_state", Context.MODE_PRIVATE)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,14 +65,11 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-apply and persist high refresh rate state when returning from pause/background
+        // Re-apply the display's supported refresh mode when returning to the foreground.
         applyHighRefreshRate()
-        prefs.edit().putBoolean("is_paused", false).apply()
     }
 
     override fun onPause() {
-        // Persist pause state
-        prefs.edit().putBoolean("is_paused", true).putLong("paused_at", System.currentTimeMillis()).apply()
         super.onPause()
     }
 
@@ -128,9 +120,6 @@ class MainActivity : FragmentActivity() {
             }
 
             currentWindow.attributes = params
-            prefs.edit()
-                .putFloat("configured_refresh_rate", preferredMode?.refreshRate ?: 0f)
-                .apply()
         }
     }
 

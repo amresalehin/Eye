@@ -202,10 +202,15 @@ fun DirectBrowserView(
                 batch.add(awaited)
             }
 
+            // Do not let delayed network callbacks from the previous page pollute the new page.
+            val activePageUrl = activeBaseUrlRef.get()
+            val activeBatch = batch.filter { it.baseUrl == activePageUrl }
+            if (activeBatch.isEmpty()) continue
+
             val builtItems = withContext(Dispatchers.Default) {
                 val cookieCache = HashMap<String, String>(4)
-                val built = ArrayList<ScrapedMediaItem>(batch.size)
-                for ((idx, cand) in batch.withIndex()) {
+                val built = ArrayList<ScrapedMediaItem>(activeBatch.size)
+                for ((idx, cand) in activeBatch.withIndex()) {
                     val cookieHeader = cookieCache.getOrPut(cand.baseUrl) {
                         OkHttpDownloader.sharedCookieJar.getCookieString(cand.baseUrl)
                     }
@@ -223,9 +228,9 @@ fun DirectBrowserView(
                 built
             }
 
-            if (builtItems.isNotEmpty()) {
+            if (builtItems.isNotEmpty() && activeBaseUrlRef.get() == activePageUrl) {
                 val title = pageTitleRef.get().ifBlank { null }
-                val domain = runCatching { URL(activeBaseUrlRef.get()).host }.getOrDefault("")
+                val domain = runCatching { URL(activePageUrl).host }.getOrDefault("")
                 DownloaderSession.addDiscoveredItems(builtItems, title)
                 latestOnBatchExtracted(builtItems, title, domain)
             }
@@ -317,11 +322,14 @@ fun DirectBrowserView(
 
         wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { jsonRaw ->
             if (jsonRaw.isNullOrBlank() || jsonRaw == "null") return@evaluateJavascript
+            // A navigation may finish while JavaScript is still serializing the previous page.
+            if (wv.url != current || activeBaseUrlRef.get() != current) return@evaluateJavascript
             coroutineScope.launch {
+                if (wv.url != current || activeBaseUrlRef.get() != current) return@launch
                 val discovered = withContext(Dispatchers.Default) {
                     MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
                 }
-                if (discovered.isNotEmpty()) {
+                if (discovered.isNotEmpty() && wv.url == current && activeBaseUrlRef.get() == current) {
                     val domain = runCatching { URL(current).host }.getOrDefault("")
                     val title = pageTitleRef.get()
                     DownloaderSession.addDiscoveredItems(discovered, title)
@@ -1063,9 +1071,7 @@ fun DirectBrowserView(
                                         } else {
                                             if (it != lastNotifiedUrl) {
                                                 pendingDomScanJob?.cancel()
-                                                if (seenRawUrls.size > 1500) {
-                                                    seenRawUrls.clear()
-                                                }
+                                                seenRawUrls.clear()
                                                 lastScannedDomUrl = ""
                                             }
                                             currentUrl = it
@@ -1075,6 +1081,35 @@ fun DirectBrowserView(
                                     }
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
+                                }
+
+                                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                    super.doUpdateVisitedHistory(view, url, isReload)
+                                    val navigatedUrl = url?.takeIf {
+                                        it.isNotBlank() && it != "about:blank"
+                                    } ?: return
+                                    if (navigatedUrl == lastNotifiedUrl) return
+
+                                    pendingDomScanJob?.cancel()
+                                    seenRawUrls.clear()
+                                    lastScannedDomUrl = ""
+                                    currentUrl = navigatedUrl
+                                    addressInput = navigatedUrl
+                                    notifyUrlIfChanged(navigatedUrl)
+
+                                    val title = view?.title.orEmpty()
+                                    pageTitle = title
+                                    pageTitleRef.set(title)
+                                    pendingDomScanJob = coroutineScope.launch {
+                                        delay(320L)
+                                        if (view?.url == navigatedUrl &&
+                                            activeBaseUrlRef.get() == navigatedUrl &&
+                                            lastScannedDomUrl != navigatedUrl
+                                        ) {
+                                            lastScannedDomUrl = navigatedUrl
+                                            scanCurrentPageDOM(view)
+                                        }
+                                    }
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {

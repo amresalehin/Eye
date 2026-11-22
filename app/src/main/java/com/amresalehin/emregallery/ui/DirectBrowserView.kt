@@ -1408,6 +1408,8 @@ fun DirectBrowserView(
                                     if (!isLoading) isLoading = true
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
+                                            blobCaptureStore.abortAll()
+                                            activeBaseUrlRef.set("")
                                             pendingDomScanJob?.cancel()
                                             seenRawUrls.clear()
                                             lastScannedDomUrl = ""
@@ -1418,6 +1420,8 @@ fun DirectBrowserView(
                                             notifyUrlIfChanged("")
                                         } else {
                                             if (it != lastNotifiedUrl) {
+                                                blobCaptureStore.abortAll()
+                                                activeBaseUrlRef.set(it)
                                                 pendingDomScanJob?.cancel()
                                                 seenRawUrls.clear()
                                                 lastScannedDomUrl = ""

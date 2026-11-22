@@ -121,6 +121,7 @@ private fun BrowserLoadingProgressBar(
 }
 
 @SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DirectBrowserView(
     initialUrl: String = "",

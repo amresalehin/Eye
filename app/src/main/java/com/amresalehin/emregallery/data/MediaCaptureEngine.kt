@@ -58,29 +58,49 @@ object MediaCaptureEngine {
                     return '';
                 }
 
+                function isMediaMime(mime) {
+                    return mime.indexOf('image/') === 0 ||
+                        mime.indexOf('video/') === 0 ||
+                        mime.indexOf('audio/') === 0;
+                }
+
                 function mediaUrlPattern(url) {
                     return /\.(?:jpe?g|png|webp|gif|avif|bmp|svg|mp4|m4v|mov|webm|mkv|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd|m4s|ts)(?:[?#]|$)/i.test(url) ||
                         /[?&](?:format|fmt|ext|mime)=(?:jpe?g|png|webp|gif|mp4|webm|mp3|m4a|m3u8|mpd)/i.test(url);
                 }
 
+                function cleanApiUrlToken(raw) {
+                    if (typeof raw !== 'string') return '';
+                    var value = raw.trim();
+                    value = value.split(String.fromCharCode(92) + '/').join('/');
+                    value = value.replace(/^[([{]+/, '').replace(/[)\]},;]+$/, '');
+                    if (value.indexOf('http://') === 0 || value.indexOf('https://') === 0) return value;
+                    var httpsAt = value.indexOf('https://');
+                    var httpAt = value.indexOf('http://');
+                    var start = httpsAt < 0 ? httpAt : (httpAt < 0 ? httpsAt : Math.min(httpsAt, httpAt));
+                    return start < 0 ? '' : value.substring(start).replace(/[)\]},;]+$/, '');
+                }
+
                 function reportApiUrl(raw, hint) {
                     if (typeof raw !== 'string' || raw.length < 6 || raw.length > 8192) return;
-                    var value = raw.trim().replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+                    var value = raw.trim();
                     if (value.indexOf('blob:') === 0) {
-                        if (window.__emreCaptureBlobUrl) window.__emreCaptureBlobUrl(value, mimeFromHint(hint), '');
+                        if (window.__emreCaptureBlobUrl) {
+                            window.__emreCaptureBlobUrl(value, mimeFromHint(hint), '');
+                        }
                         return;
                     }
-                    var candidate = value;
-                    try {
-                        if (candidate.indexOf('//') === 0 || candidate.indexOf('/') === 0) {
-                            candidate = new URL(candidate, window.location.href).href;
-                        }
-                    } catch(e) {}
-                    if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) {
-                        var match = candidate.match(/https?:\\/\\/[^\\s"'<>]+/i);
-                        if (!match) return;
-                        candidate = match[0].replace(/[),.;\\]}]+$/, '');
+
+                    var candidate = cleanApiUrlToken(value);
+                    if (!candidate) {
+                        try {
+                            if (value.indexOf('/') === 0 || value.indexOf('//') === 0) {
+                                candidate = new URL(value, window.location.href).href;
+                            }
+                        } catch(e) {}
                     }
+                    if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) return;
+
                     var mime = mimeFromHint(hint);
                     if (!mime && !mediaUrlPattern(candidate)) return;
                     if (window.EmreBridge && window.EmreBridge.reportMediaWithMime) {
@@ -91,21 +111,24 @@ object MediaCaptureEngine {
                 }
 
                 function walkApiValue(value, hint, depth, budget) {
-                    if (!value || depth > 12 || budget.count++ > MAX_API_NODES) return;
+                    if (value === null || value === undefined || depth > 12 || budget.count++ > MAX_API_NODES) return;
                     if (typeof value === 'string') {
-                        var urls = value.match(/https?:\\/\\/[^\\s"'<>\\\\]+/gi);
-                        if (urls && urls.length) {
-                            for (var i = 0; i < Math.min(urls.length, 30); i++) {
-                                reportApiUrl(urls[i].replace(/\\\\\\//g, '/'), hint);
+                        var normalized = value.split(String.fromCharCode(92) + '/').join('/');
+                        var tokens = normalized.split(/[\s"'<>]+/);
+                        var reported = false;
+                        for (var i = 0; i < Math.min(tokens.length, 100); i++) {
+                            if (tokens[i].indexOf('http://') === 0 || tokens[i].indexOf('https://') === 0 ||
+                                tokens[i].indexOf('blob:') === 0 || tokens[i].indexOf('/') === 0) {
+                                reportApiUrl(tokens[i], hint);
+                                reported = true;
                             }
-                        } else {
-                            reportApiUrl(value, hint);
                         }
+                        if (!reported) reportApiUrl(normalized, hint);
                         return;
                     }
                     if (Array.isArray(value)) {
-                        for (var i = 0; i < Math.min(value.length, 500); i++) {
-                            walkApiValue(value[i], hint, depth + 1, budget);
+                        for (var j = 0; j < Math.min(value.length, 500); j++) {
+                            walkApiValue(value[j], hint, depth + 1, budget);
                         }
                         return;
                     }
@@ -115,8 +138,8 @@ object MediaCaptureEngine {
                             value.type || value.kind || ''
                         ].join(' ');
                         var keys = Object.keys(value);
-                        for (var i = 0; i < Math.min(keys.length, 200); i++) {
-                            var key = keys[i];
+                        for (var k = 0; k < Math.min(keys.length, 200); k++) {
+                            var key = keys[k];
                             walkApiValue(value[key], hint + ' ' + typeHint + ' ' + key, depth + 1, budget);
                         }
                     }
@@ -125,15 +148,11 @@ object MediaCaptureEngine {
                 function inspectApiText(text) {
                     if (!text || text.length > MAX_API_BYTES) return;
                     try {
-                        var parsed = JSON.parse(text);
-                        walkApiValue(parsed, '', 0, { count: 0 });
+                        walkApiValue(JSON.parse(text), '', 0, { count: 0 });
                     } catch(e) {
-                        // Non-JSON text responses can still expose explicit media URLs.
-                        var urls = text.match(/https?:\\/\\/[^\\s"'<>\\\\]+/gi);
-                        if (urls) {
-                            for (var i = 0; i < Math.min(urls.length, 100); i++) {
-                                reportApiUrl(urls[i], '');
-                            }
+                        var tokens = text.split(/[\s"'<>]+/);
+                        for (var i = 0; i < Math.min(tokens.length, 100); i++) {
+                            reportApiUrl(tokens[i], '');
                         }
                     }
                 }
@@ -190,11 +209,13 @@ object MediaCaptureEngine {
                             !window.EmreBridge.appendBlobChunk || !window.EmreBridge.finishBlobCapture) return;
                         var response = await fetch(rawUrl);
                         if (!response || !response.ok || !response.body || !response.body.getReader) return;
-                        var responseMime = (response.headers.get('content-type') || '').split(';')[0].trim();
-                        if (!/^(image|video|audio)\\//i.test(responseMime)) responseMime = mimeHint || responseMime;
+
+                        var responseMime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+                        if (!isMediaMime(responseMime)) responseMime = mimeHint || responseMime;
+                        if (!isMediaMime(responseMime)) return;
+
                         var contentLength = Number(response.headers.get('content-length') || 0);
-                        var fileName = nameHint || '';
-                        if (!fileName) fileName = 'captured_media';
+                        var fileName = nameHint || 'captured_media';
                         started = window.EmreBridge.beginBlobCapture(captureId, responseMime, fileName, contentLength);
                         if (!started) return;
 
@@ -244,8 +265,7 @@ object MediaCaptureEngine {
                         URL.createObjectURL = function(object) {
                             var createdUrl = originalCreateObjectURL.apply(this, arguments);
                             try {
-                                if (typeof Blob !== 'undefined' && object instanceof Blob &&
-                                    /^(image|video|audio)\\//i.test(object.type || '')) {
+                                if (typeof Blob !== 'undefined' && object instanceof Blob && isMediaMime((object.type || '').toLowerCase())) {
                                     captureBlobUrl(createdUrl, object.type, object.name || '');
                                 }
                             } catch(e) {}
@@ -272,12 +292,7 @@ object MediaCaptureEngine {
                 try {
                     if (window.XMLHttpRequest && !XMLHttpRequest.prototype.__emreMediaHooked) {
                         var xhrPrototype = XMLHttpRequest.prototype;
-                        var originalOpen = xhrPrototype.open;
                         var originalSend = xhrPrototype.send;
-                        xhrPrototype.open = function() {
-                            this.__emreCaptureApiResponse = true;
-                            return originalOpen.apply(this, arguments);
-                        };
                         xhrPrototype.send = function() {
                             this.addEventListener('load', function() {
                                 try {

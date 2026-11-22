@@ -103,8 +103,12 @@ class MediaDownloadWorker(
             } else emptyMap()
         }.getOrDefault(emptyMap())
 
-        val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
-            ?: downloadHeaders["Cookie"]
+        val cookieString = if (mediaUrl.startsWith("file:", ignoreCase = true)) {
+            null
+        } else {
+            OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
+                ?: downloadHeaders["Cookie"]
+        }
         val resolvedSubfolder = com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager.resolveSubfolderName(
             context = applicationContext,
             sourceDomain = sourceDomain,

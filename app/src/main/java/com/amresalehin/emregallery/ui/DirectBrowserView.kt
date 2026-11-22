@@ -507,18 +507,20 @@ fun DirectBrowserView(
                             }
                         }
 
-                        IconButton(
-                            onClick = { navigateToUrl(addressInput) },
-                            modifier = Modifier
-                                .size(32.dp)
-                                .testTag("browser_go_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Go",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        if (isAddressBarFocused && addressInput.isNotBlank()) {
+                            IconButton(
+                                onClick = { navigateToUrl(addressInput) },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("browser_go_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Go",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
 
                     // Three-dot Overflow Menu in Browser Top Bar Right Corner

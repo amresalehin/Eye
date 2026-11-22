@@ -559,7 +559,7 @@ class BrowserMediaExtractor(private val context: Context) {
                                 pendingGracePeriodRunnable = graceRunnable
                                 mainHandler.postDelayed(graceRunnable, if (isWaf) 3200L else 2400L)
                             }
-                        }
+                        })
                     }
                 }
 

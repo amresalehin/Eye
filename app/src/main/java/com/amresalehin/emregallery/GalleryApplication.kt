@@ -5,6 +5,7 @@ import android.content.Context
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
+import coil.decode.SvgDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
@@ -51,6 +52,7 @@ class GalleryApplication : Application() {
             .components {
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
+                add(SvgDecoder.Factory())
             }
             .bitmapConfig(if (isLowRam) android.graphics.Bitmap.Config.RGB_565 else android.graphics.Bitmap.Config.ARGB_8888)
             .allowRgb565(true)

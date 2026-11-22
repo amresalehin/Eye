@@ -20,6 +20,7 @@ import com.amresalehin.emregallery.ui.DetectedPlatform
 import com.amresalehin.emregallery.ui.detectPlatform
 import com.amresalehin.emregallery.ui.NavBackStackEntry
 import com.amresalehin.emregallery.ui.passesDimensionFilter
+import com.amresalehin.emregallery.ui.buildDownloaderPreviewHeaders
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
@@ -825,6 +826,56 @@ class MediaDownloaderTest {
         assertTrue(extractor.state.value.items.isEmpty())
         assertFalse(extractor.state.value.isRunning)
         assertEquals("", extractor.state.value.pageTitle)
+    }
+
+    @Test
+    fun downloaderPreviewHeadersIncludePageRefererAndImageAccept() {
+        val pageUrl = "https://example.com/gallery/page"
+        val item = ScrapedMediaItem(
+            id = "preview_headers_1",
+            url = "https://cdn.example.com/media/image.jpg",
+            title = "Preview image",
+            isVideo = false,
+            provenance = MediaProvenance(
+                extractorEngine = "Static HTML",
+                pageUrl = pageUrl
+            )
+        )
+
+        val headers = buildDownloaderPreviewHeaders(item)
+
+        assertEquals(OkHttpDownloader.DEFAULT_USER_AGENT, headers["User-Agent"])
+        assertEquals(pageUrl, headers["Referer"])
+        assertTrue(headers["Accept"]?.contains("image/") == true)
+    }
+
+    @Test
+    fun downloaderPreviewHeadersPreservePerItemHeadersCaseInsensitively() {
+        val pageUrl = "https://example.com/page"
+        val item = ScrapedMediaItem(
+            id = "preview_headers_2",
+            url = "https://cdn.example.com/media/image.jpg",
+            title = "Preview image",
+            isVideo = false,
+            provenance = MediaProvenance(
+                extractorEngine = "Browser",
+                pageUrl = "https://fallback.example.com/"
+            ),
+            downloadHeaders = mapOf(
+                "user-agent" to "Custom Browser UA",
+                "referer" to pageUrl,
+                "X-Image-Token" to "token-value"
+            )
+        )
+
+        val headers = buildDownloaderPreviewHeaders(item)
+
+        assertEquals("Custom Browser UA", headers["user-agent"])
+        assertEquals(pageUrl, headers["referer"])
+        assertEquals("token-value", headers["X-Image-Token"])
+        assertFalse(headers.containsKey("User-Agent"))
+        assertFalse(headers.containsKey("Referer"))
+        assertTrue(headers.containsKey("Accept"))
     }
 
     @Test

@@ -2414,6 +2414,137 @@ fun DownloaderSettingsBottomSheet(
 }
 
 /**
+ * Build the request headers used by the original page extractor. Referer is important for
+ * CDNs that reject hotlinked thumbnails; the shared OkHttp image client supplies session cookies.
+ */
+internal fun buildDownloaderPreviewHeaders(item: ScrapedMediaItem): Map<String, String> {
+    val headers = linkedMapOf<String, String>()
+    item.downloadHeaders.forEach { (name, value) ->
+        val cleanName = name.trim()
+        if (cleanName.isNotEmpty() && value.isNotBlank() &&
+            headers.keys.none { it.equals(cleanName, ignoreCase = true) }
+        ) {
+            headers[cleanName] = value
+        }
+    }
+
+    fun containsHeader(name: String): Boolean =
+        headers.keys.any { it.equals(name, ignoreCase = true) }
+
+    if (!containsHeader("User-Agent")) {
+        headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
+    }
+    val pageUrl = item.provenance.pageUrl
+        .takeIf { it.isNotBlank() }
+        ?: item.metadata["source_url"]?.takeIf { it.isNotBlank() }
+    if (!containsHeader("Referer") && pageUrl != null) {
+        headers["Referer"] = pageUrl
+    }
+    if (!containsHeader("Accept")) {
+        headers["Accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    }
+    return headers
+}
+
+/**
+ * Loads a discovered thumbnail with its page context. If the chosen thumbnail fails, retry the
+ * original media URL (where it is a decodable image/video) rather than leaving a blank tile.
+ */
+@Composable
+private fun DownloaderMediaThumbnail(
+    item: ScrapedMediaItem,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val candidates = remember(item.id, item.thumbnailUrl, item.url, item.isStream, item.isAudio) {
+        buildList {
+            item.thumbnailUrl?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
+            if (!item.isStream && !item.isAudio) {
+                item.url.trim().takeIf { it.isNotEmpty() }?.let(::add)
+            }
+        }.distinct()
+    }
+    var candidateIndex by remember(item.id, candidates) { mutableIntStateOf(0) }
+    var isLoading by remember(item.id, candidates, candidateIndex) { mutableStateOf(true) }
+    var hasFailed by remember(item.id, candidates, candidateIndex) { mutableStateOf(false) }
+    val previewUrl = candidates.getOrNull(candidateIndex)
+    val requestIndex = candidateIndex
+    val requestHeaders = remember(item.downloadHeaders, item.provenance.pageUrl, item.metadata) {
+        buildDownloaderPreviewHeaders(item)
+    }
+
+    val imageRequest = remember(context, item.id, previewUrl, requestHeaders, requestIndex) {
+        previewUrl?.let { url ->
+            ImageRequest.Builder(context)
+                .data(url)
+                .crossfade(false)
+                .apply {
+                    requestHeaders.forEach { (name, value) -> setHeader(name, value) }
+                }
+                .listener(
+                    onStart = {
+                        if (candidateIndex == requestIndex) isLoading = true
+                    },
+                    onSuccess = { _, _ ->
+                        if (candidateIndex == requestIndex) {
+                            isLoading = false
+                            hasFailed = false
+                        }
+                    },
+                    onError = { _, _ ->
+                        if (candidateIndex == requestIndex) {
+                            isLoading = false
+                            if (requestIndex < candidates.lastIndex) {
+                                candidateIndex = requestIndex + 1
+                            } else {
+                                hasFailed = true
+                            }
+                        }
+                    }
+                )
+                .build()
+        }
+    }
+
+    if (imageRequest != null && !hasFailed) {
+        Box(modifier = modifier) {
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.48f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 1.7.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                    )
+                }
+            }
+        }
+    } else {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (item.isVideo || item.isStream) Icons.Default.VideoLibrary else Icons.Default.Image,
+                contentDescription = "Preview unavailable",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(30.dp)
+            )
+        }
+    }
+}
+
+/**
  * Clean, prominent media card conforming to the minimal Emre design language (Dark-Mode Native).
  * Format label top-left, selection checkbox top-right, filename below thumbnail,
  * dimensions/size bottom-left, media category bottom-right.
@@ -2489,11 +2620,8 @@ fun DownloaderMediaCard(
                         }
                     }
                 } else {
-                    val previewUrl = item.thumbnailUrl ?: item.url
-                    AsyncImage(
-                        model = previewUrl,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Crop,
+                    DownloaderMediaThumbnail(
+                        item = item,
                         modifier = Modifier.fillMaxSize()
                     )
                 }

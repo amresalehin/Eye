@@ -197,7 +197,7 @@ class BrowserMediaExtractor(private val context: Context) {
                         (async function() {
                             try {
                                 if (window.__emreWaitForBlobCaptures) {
-                                    await window.__emreWaitForBlobCaptures(12000);
+                                    await window.__emreWaitForBlobCaptures(30000);
                                 }
                             } catch(e) {}
                             return true;
@@ -206,7 +206,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
                     val fallback = Runnable { deliverCompletion(reason) }
                     blobWaitFallbackRunnable = fallback
-                    mainHandler.postDelayed(fallback, 15000L)
+                    mainHandler.postDelayed(fallback, 35000L)
 
                     wv.evaluateJavascript(waitForBlobsScript) {
                         deliverCompletion(reason)

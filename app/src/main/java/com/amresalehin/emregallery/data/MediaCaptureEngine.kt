@@ -99,7 +99,18 @@ object MediaCaptureEngine {
                             }
                         } catch(e) {}
                     }
-                    if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) return;
+                    if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) {
+                        var mimeHint = mimeFromHint(hint);
+                        if (value.indexOf('/') === 0 || mediaUrlPattern(value) || mimeHint) {
+                            try {
+                                candidate = new URL(value, window.location.href).href;
+                            } catch(e) {
+                                return;
+                            }
+                        } else {
+                            return;
+                        }
+                    }
 
                     var mime = mimeFromHint(hint);
                     if (!mime && !mediaUrlPattern(candidate)) return;
@@ -247,6 +258,20 @@ object MediaCaptureEngine {
                 }
 
                 window.__emreCaptureBlobUrl = captureBlobUrl;
+                window.__emreWaitForBlobCaptures = function(timeoutMs) {
+                    var timeout = Math.max(0, Math.min(Number(timeoutMs) || 12000, 30000));
+                    return new Promise(function(resolve) {
+                        var startedAt = Date.now();
+                        function poll() {
+                            if (activeBlobUrls.size === 0 || Date.now() - startedAt >= timeout) {
+                                resolve(activeBlobUrls.size === 0);
+                            } else {
+                                setTimeout(poll, 100);
+                            }
+                        }
+                        poll();
+                    });
+                };
                 window.__emreScanBlobElements = function() {
                     var selectors = 'img[src^="blob:"],video[src^="blob:"],audio[src^="blob:"],source[src^="blob:"],a[href^="blob:"]';
                     var nodes = document.querySelectorAll(selectors);
@@ -298,7 +323,9 @@ object MediaCaptureEngine {
                                 try {
                                     var contentType = (this.getResponseHeader('content-type') || '').toLowerCase();
                                     if (contentType.indexOf('json') === -1 && contentType.indexOf('text/') !== 0) return;
-                                    if (typeof this.responseText === 'string' && this.responseText.length <= MAX_API_BYTES) {
+                                    if (this.responseType === 'json' && this.response) {
+                                        walkApiValue(this.response, '', 0, { count: 0 });
+                                    } else if (typeof this.responseText === 'string' && this.responseText.length <= MAX_API_BYTES) {
                                         inspectApiText(this.responseText);
                                     }
                                 } catch(e) {}

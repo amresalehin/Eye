@@ -571,13 +571,47 @@ class BrowserMediaExtractor(private val context: Context) {
     }
 
     @Keep
-    class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
+    class EmreMediaBridge(
+        private val onMediaFound: (String, String?) -> Unit,
+        private val blobCaptureStore: BrowserBlobCaptureStore? = null,
+        private val onBlobCaptured: ((ScrapedMediaItem) -> Unit)? = null
+    ) {
         @Keep
         @android.webkit.JavascriptInterface
         fun reportMedia(url: String?) {
-            if (!url.isNullOrBlank()) {
-                onMediaFound(url)
-            }
+            if (!url.isNullOrBlank()) onMediaFound(url, null)
+        }
+
+        @Keep
+        @android.webkit.JavascriptInterface
+        fun reportMediaWithMime(url: String?, mimeHint: String?) {
+            if (!url.isNullOrBlank()) onMediaFound(url, mimeHint)
+        }
+
+        @Keep
+        @android.webkit.JavascriptInterface
+        fun beginBlobCapture(captureId: String?, mimeType: String?, fileName: String?, expectedBytes: Long): Boolean {
+            return blobCaptureStore?.beginCapture(captureId, mimeType, fileName, expectedBytes) == true
+        }
+
+        @Keep
+        @android.webkit.JavascriptInterface
+        fun appendBlobChunk(captureId: String?, base64Chunk: String?): Boolean {
+            return blobCaptureStore?.appendChunk(captureId, base64Chunk) == true
+        }
+
+        @Keep
+        @android.webkit.JavascriptInterface
+        fun finishBlobCapture(captureId: String?, pageUrl: String?): Boolean {
+            val item = blobCaptureStore?.finishCapture(captureId, pageUrl) ?: return false
+            onBlobCaptured?.invoke(item)
+            return true
+        }
+
+        @Keep
+        @android.webkit.JavascriptInterface
+        fun abortBlobCapture(captureId: String?) {
+            blobCaptureStore?.abortCapture(captureId)
         }
     }
 

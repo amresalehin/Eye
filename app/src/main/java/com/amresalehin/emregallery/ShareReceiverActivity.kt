@@ -59,9 +59,6 @@ class ShareReceiverActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        window?.decorView?.post {
-            GalleryApplication.warmupChromium(this)
-        }
 
         val extracted = extractUrlFromIntent(intent)
         if (extracted == null) {

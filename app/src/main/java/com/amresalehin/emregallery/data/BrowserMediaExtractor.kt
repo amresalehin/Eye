@@ -153,6 +153,7 @@ class BrowserMediaExtractor(private val context: Context) {
                 var pageFinishedCount = 0
                 var detectedProtectionReason: String? = null
                 var pendingGracePeriodRunnable: Runnable? = null
+                var isWaitingForBlobCaptures = false
 
                 fun syncCookies() {
                     try {
@@ -175,11 +176,29 @@ class BrowserMediaExtractor(private val context: Context) {
                 }
 
                 fun safeComplete(reason: String? = null) {
-                    if (isExtractionCompleted) return
-                    isExtractionCompleted = true
-                    pendingGracePeriodRunnable?.let { mainHandler.removeCallbacks(it) }
-                    syncCookies()
-                    onFinished(reason)
+                    if (isExtractionCompleted || isCancelled || isWaitingForBlobCaptures) return
+                    isWaitingForBlobCaptures = true
+
+                    // Blob data is transferred asynchronously in bounded chunks. Give active
+                    // captures time to finish before destroying the renderer and its object URLs.
+                    val waitForBlobsScript = """
+                        (async function() {
+                            try {
+                                if (window.__emreWaitForBlobCaptures) {
+                                    await window.__emreWaitForBlobCaptures(12000);
+                                }
+                            } catch(e) {}
+                            return true;
+                        })();
+                    """.trimIndent()
+                    wv.evaluateJavascript(waitForBlobsScript) {
+                        if (isCancelled || isExtractionCompleted) return@evaluateJavascript
+                        isWaitingForBlobCaptures = false
+                        isExtractionCompleted = true
+                        pendingGracePeriodRunnable?.let { mainHandler.removeCallbacks(it) }
+                        syncCookies()
+                        onFinished(reason)
+                    }
                 }
 
                 fun dispatchMediaItem(

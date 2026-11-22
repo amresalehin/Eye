@@ -32,6 +32,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -60,6 +61,8 @@ class ViewerVideoState(
     var durationMs by mutableLongStateOf(0L)
     var isMuted by mutableStateOf(false)
     var isFullscreen by mutableStateOf(false)
+    var isSpeedBoostActive by mutableStateOf(false)
+    var gestureFeedbackText by mutableStateOf<String?>(null)
 
     fun togglePlayPause() {
         val targetPlay = !isPlaying
@@ -70,11 +73,28 @@ class ViewerVideoState(
         }
         isPlaying = targetPlay
         onPlayIntentChange(targetPlay)
+        gestureFeedbackText = if (targetPlay) "Play" else "Pause"
     }
 
     fun seekTo(position: Long) {
         positionMs = position
         player?.seekTo(position)
+    }
+
+    fun seekBy(deltaMs: Long) {
+        val activePlayer = player ?: return
+        val maxPosition = activePlayer.duration.takeIf { it > 0L }
+            ?: durationMs.takeIf { it > 0L }
+            ?: Long.MAX_VALUE
+        val target = (activePlayer.currentPosition + deltaMs).coerceIn(0L, maxPosition)
+        seekTo(target)
+        gestureFeedbackText = if (deltaMs < 0L) "−10s" else "+10s"
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val safeSpeed = speed.coerceIn(0.25f, 3f)
+        player?.setPlaybackParameters(PlaybackParameters(safeSpeed))
+        isSpeedBoostActive = safeSpeed > 1.01f
     }
 
     fun toggleMute() {
@@ -241,33 +261,67 @@ fun VideoPlayerSurface(
         android.graphics.Color.TRANSPARENT
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = videoState.player
-                useController = false
-                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                this.resizeMode = resizeMode
-                setShutterBackgroundColor(playerBackground)
-                setBackgroundColor(playerBackground)
-                isClickable = false
-                isFocusable = false
-            }
-        },
-        modifier = modifier
-            .fillMaxSize()
-            .alpha(surfaceAlpha),
-        update = { pv ->
-            if (pv.player != videoState.player) {
-                pv.player = videoState.player
-            }
-            pv.useController = false
-            pv.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-            pv.resizeMode = resizeMode
-            pv.setShutterBackgroundColor(playerBackground)
-            pv.setBackgroundColor(playerBackground)
+    LaunchedEffect(videoState.gestureFeedbackText) {
+        val message = videoState.gestureFeedbackText ?: return@LaunchedEffect
+        delay(700L)
+        if (videoState.gestureFeedbackText == message) {
+            videoState.gestureFeedbackText = null
         }
-    )
+    }
+
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = videoState.player
+                    useController = false
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                    this.resizeMode = resizeMode
+                    setShutterBackgroundColor(playerBackground)
+                    setBackgroundColor(playerBackground)
+                    isClickable = false
+                    isFocusable = false
+                }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(surfaceAlpha),
+            update = { pv ->
+                if (pv.player != videoState.player) {
+                    pv.player = videoState.player
+                }
+                pv.useController = false
+                pv.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                pv.resizeMode = resizeMode
+                pv.setShutterBackgroundColor(playerBackground)
+                pv.setBackgroundColor(playerBackground)
+            }
+        )
+
+        val feedback = if (videoState.isSpeedBoostActive) {
+            "2× speed"
+        } else {
+            videoState.gestureFeedbackText
+        }
+        if (feedback != null) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.58f),
+                contentColor = Color.White,
+                shape = RoundedCornerShape(18.dp),
+                tonalElevation = 0.dp
+            ) {
+                Text(
+                    text = feedback,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
+        }
+    }
 }
 
 /**

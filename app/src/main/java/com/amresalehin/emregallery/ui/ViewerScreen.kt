@@ -515,29 +515,39 @@ fun ViewerScreen(
                         }
                     },
                     onSwipeDownDelta = { deltaDown ->
-                        // Downward gesture on media is strictly for media closing when details are closed
-                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen && !isClosing) {
+                        if (!isCurrentZoomed && !showDetails && !isClosing) {
                             coroutineScope.launch {
                                 val next = (dismissOffsetY.value + deltaDown).coerceAtLeast(0f)
                                 dismissOffsetY.snapTo(next)
-                                val p = (1f - (next / (screenHeightPx * 0.45f)).coerceIn(0f, 0.40f))
-                                transitionProgress.snapTo(p)
+                                if (!videoState.isFullscreen) {
+                                    val p = (1f - (next / (screenHeightPx * 0.45f)).coerceIn(0f, 0.40f))
+                                    transitionProgress.snapTo(p)
+                                }
                             }
                         }
                     },
                     onSwipeDownRelease = { velocityDown ->
-                        // Media closer cannot activate while details are open
-                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen && !isClosing) {
+                        if (!isCurrentZoomed && !showDetails && !isClosing) {
                             val dismissDistanceThreshold = screenHeightPx * 0.12f
-                            if (dismissOffsetY.value > dismissDistanceThreshold || velocityDown > minFlingVelocity * 1.2f) {
+                            val shouldDismiss = dismissOffsetY.value > dismissDistanceThreshold ||
+                                velocityDown > minFlingVelocity * 1.2f
+                            if (videoState.isFullscreen) {
+                                // A downward swipe exits fullscreen, keeping the media open and playback alive.
+                                coroutineScope.launch {
+                                    if (shouldDismiss) {
+                                        videoState.isFullscreen = false
+                                    }
+                                    dismissOffsetY.animateTo(
+                                        targetValue = 0f,
+                                        initialVelocity = velocityDown,
+                                        animationSpec = ReturnSpringSpec
+                                    )
+                                }
+                            } else if (shouldDismiss) {
                                 coroutineScope.launch {
                                     isClosing = true
                                     ThumbnailBoundsTracker.activeViewerUri = item.uri
-                                    // The preparation drag has ended and the user committed the stroke.
-                                    // Do NOT animate dismissOffsetY back to 0 with a spring, which creates an
-                                    // opposing upward bounce that inhibits the closing stroke.
-                                    // Instead, allow transitionProgress to animate to 0f with the stroke velocity,
-                                    // seamlessly guiding the media directly into the target thumbnail.
+                                    // Keep the release velocity moving the viewer toward its source thumbnail.
                                     val progressVelocity = if (screenHeightPx > 0f) {
                                         -(velocityDown / (screenHeightPx * 0.45f)).coerceIn(0f, 15f)
                                     } else 0f
@@ -913,12 +923,18 @@ private fun ZoomableMediaItem(
                             var totalMovementX = 0f
                             var totalMovementY = 0f
                             var longPressTriggered = false
+                            var speedBoostStarted = false
 
                             val longPressJob = launch {
                                 delay(if (isStoryMode) 180L else 500L)
                                 if (!isDragging && !isPinching && scale <= 1.02f) {
                                     if (isStoryMode) {
                                         onStoryHoldingChanged(true)
+                                    } else if (isVideo && videoState != null) {
+                                        // Hold anywhere on the video for temporary 2× playback speed.
+                                        longPressTriggered = true
+                                        speedBoostStarted = true
+                                        videoState.setPlaybackSpeed(2f)
                                     } else {
                                         longPressTriggered = true
                                         onLongPress()
@@ -926,6 +942,7 @@ private fun ZoomableMediaItem(
                                 }
                             }
 
+                            try {
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val pointerCount = event.changes.size
@@ -1006,9 +1023,14 @@ private fun ZoomableMediaItem(
                                     break
                                 }
                             }
-
-                            longPressJob.cancel()
-                            if (isStoryMode) onStoryHoldingChanged(false)
+                            } finally {
+                                longPressJob.cancel()
+                                if (speedBoostStarted) {
+                                    // Always restore normal speed on release, cancellation, or gesture disposal.
+                                    videoState?.setPlaybackSpeed(1f)
+                                }
+                                if (isStoryMode) onStoryHoldingChanged(false)
+                            }
 
                             val velocityY = velocityTracker.calculateVelocity().y
                             if (isVerticalSwipe) {
@@ -1028,9 +1050,17 @@ private fun ZoomableMediaItem(
                                     }
                                 } else {
                                     val now = System.currentTimeMillis()
-                                    if (now - lastTapTime < 280L && (down.position - lastTapPos).getDistance() < touchSlop * 3f && !isVideo) {
+                                    val isDoubleTap = now - lastTapTime < 280L &&
+                                        (down.position - lastTapPos).getDistance() < touchSlop * 3f
+                                    if (isDoubleTap) {
                                         lastTapTime = 0L
-                                        if (scale > 1.2f) {
+                                        if (isVideo && videoState != null) {
+                                            when {
+                                                down.position.x < width * 0.34f -> videoState.seekBy(-10_000L)
+                                                down.position.x > width * 0.66f -> videoState.seekBy(10_000L)
+                                                else -> videoState.togglePlayPause()
+                                            }
+                                        } else if (scale > 1.2f) {
                                             launch {
                                                 val startScale = scale
                                                 val startX = offsetX

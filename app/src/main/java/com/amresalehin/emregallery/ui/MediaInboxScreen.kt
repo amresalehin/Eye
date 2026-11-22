@@ -2370,7 +2370,16 @@ fun FullScreenBrowserView(
                 initialUrl = initialUrl,
                 navigationRequestId = navigationRequestId,
                 onClose = onClose,
-                onUrlChange = { currentUrl = it },
+                onUrlChange = { newUrl ->
+                    if (newUrl != currentUrl) {
+                        currentUrl = newUrl
+                        pageTitle = ""
+                        discoveredItems = emptyList()
+                        selectedItemIds = emptySet()
+                        selectedFilter = null
+                        dynamicDurations.clear()
+                    }
+                },
                 onPageTitleChanged = { pageTitle = it },
                 discoveredCount = discoveredItems.size,
                 onMediaExtracted = { item ->

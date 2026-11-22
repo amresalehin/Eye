@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -762,23 +763,30 @@ fun DirectBrowserView(
                             }
                         }
 
-                    // Browser tabs: open the tab overview and show the number of open pages.
-                    BadgedBox(
-                        badge = {
-                            Badge { Text(browserTabs.size.toString()) }
-                        }
+                    // Chrome-style tab switcher: a rounded outlined tile with the tab count inside.
+                    IconButton(
+                        onClick = { showTabSwitcher = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("browser_tabs_button")
                     ) {
-                        IconButton(
-                            onClick = { showTabSwitcher = true },
+                        Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .testTag("browser_tabs_button")
+                                .size(22.dp)
+                                .border(
+                                    BorderStroke(1.6.dp, MaterialTheme.colorScheme.onSurface),
+                                    RoundedCornerShape(5.dp)
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Tab,
-                                contentDescription = "Open tabs",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
+                            Text(
+                                text = if (browserTabs.size > 99) "99+" else browserTabs.size.toString(),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = if (browserTabs.size > 99) 8.sp else 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                maxLines = 1
                             )
                         }
                     }

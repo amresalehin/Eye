@@ -231,6 +231,7 @@ fun SideNavigationDrawer(
     destination: Destination,
     albumFilter: String?,
     onNavigate: (Destination) -> Unit,
+    onOpenBrowser: () -> Unit,
     onClose: () -> Unit
 ) {
     AnimatedVisibility(
@@ -314,7 +315,7 @@ fun SideNavigationDrawer(
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     Spacer(Modifier.height(12.dp))
-                    val drawerSections = listOf(
+                    val drawerSections: List<List<Triple<Destination?, String, androidx.compose.ui.graphics.vector.ImageVector>>> = listOf(
                         listOf(
                             Triple(Destination.HOME, "Home", Icons.Default.Home),
                             Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
@@ -331,6 +332,7 @@ fun SideNavigationDrawer(
                         ),
                         listOf(
                             Triple(Destination.MEDIA_INBOX, "Inbox", Icons.Default.Inbox),
+                            Triple(null, "Browser", Icons.Default.Language),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings),
                             Triple(Destination.INDEXING_STATUS, "Indexing Status", Icons.Default.Storage)
                         )
@@ -343,15 +345,16 @@ fun SideNavigationDrawer(
                             Spacer(Modifier.height(6.dp))
                         }
                         group.forEach { (dest, label, icon) ->
-                            val selected = destination == dest && albumFilter == null
+                            val selected = dest != null && destination == dest && albumFilter == null
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                                     .clickable {
-                                        onNavigate(dest)
+                                        if (dest == null) onOpenBrowser() else onNavigate(dest)
                                     }
+                                    .testTag(if (dest == null) "side_panel_browser" else "side_panel_${dest.name.lowercase()}")
                                     .padding(horizontal = 14.dp, vertical = 11.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {

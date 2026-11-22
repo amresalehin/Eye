@@ -1681,6 +1681,11 @@ fun GalleryApp() {
                 }
                 showSidePanel = false
             },
+            onOpenBrowser = {
+                hasOpenedAlbumBrowser = true
+                isAlbumBrowserVisible = true
+                showSidePanel = false
+            },
             onClose = { showSidePanel = false }
         )
 

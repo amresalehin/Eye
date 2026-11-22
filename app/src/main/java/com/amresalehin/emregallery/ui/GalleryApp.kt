@@ -192,7 +192,6 @@ fun GalleryApp(
                         // Show the first usable batch immediately. An empty initial batch is not
                         // treated as proof that the complete library is empty.
                         media = initialResult.items
-                        loading = false
                         completedMediaQuery = true
                     }
                 }
@@ -248,7 +247,6 @@ fun GalleryApp(
             }
             if (!cachedMedia.isNullOrEmpty()) {
                 media = cachedMedia
-                loading = false
             }
             refreshMedia()
         }
@@ -797,16 +795,21 @@ fun GalleryApp(
         }
     }
 
+    val visibleMediaInputKey = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) { Any() }
+    var visibleMediaReadyKey by remember { mutableStateOf<Any?>(null) }
     var visibleMedia by remember {
         mutableStateOf(if (media.size <= 150) filterVisibleMedia() else emptyList())
     }
-    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
-        visibleMedia = if (media.size <= 150) {
+    LaunchedEffect(visibleMediaInputKey) {
+        val filteredMedia = if (media.size <= 150) {
             filterVisibleMedia()
         } else {
             withContext(Dispatchers.Default) { filterVisibleMedia() }
         }
+        visibleMedia = filteredMedia
+        visibleMediaReadyKey = visibleMediaInputKey
     }
+    val memoriesReady = !loading && visibleMediaReadyKey === visibleMediaInputKey
 
     var peopleMedia by remember {
         mutableStateOf(
@@ -1002,6 +1005,7 @@ fun GalleryApp(
                         listState = homeListState,
                         media = visibleMedia,
                         loading = loading,
+                        memoriesReady = memoriesReady,
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },

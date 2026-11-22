@@ -51,6 +51,8 @@ import coil.size.Size
 import coil.size.Precision
 import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -147,10 +149,31 @@ fun HomeFastScrollbar(
 @Composable
 fun MemoriesStrip(
     media: List<MediaItem>,
+    isReadyForMemories: Boolean,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
     listState: LazyListState
 ) {
-    val today = remember { Calendar.getInstance() }
+    fun currentMemoryDateKey(): Long {
+        val calendar = Calendar.getInstance()
+        return calendar.get(Calendar.YEAR).toLong() * 1000L + calendar.get(Calendar.DAY_OF_YEAR)
+    }
+
+    var memoryDateKey by remember { mutableLongStateOf(currentMemoryDateKey()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val nextMidnight = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            delay((nextMidnight - System.currentTimeMillis()).coerceAtLeast(1L))
+            memoryDateKey = currentMemoryDateKey()
+        }
+    }
+
+    val today = remember(memoryDateKey) { Calendar.getInstance() }
     val currentYear = today.get(Calendar.YEAR)
     val todayMonth = today.get(Calendar.MONTH)
     val todayDay = today.get(Calendar.DAY_OF_YEAR)
@@ -196,15 +219,17 @@ fun MemoriesStrip(
         return result.filter { it.second.isNotEmpty() }.take(10)
     }
 
-    var stories by remember {
-        mutableStateOf(if (media.size <= 150) computeStories(media) else emptyList())
-    }
-    LaunchedEffect(media, currentYear, todayMonth, todayDay) {
-        stories = if (media.size <= 150) {
-            computeStories(media)
-        } else {
-            withContext(Dispatchers.Default) { computeStories(media) }
-        }
+    var stories by remember { mutableStateOf(emptyList<Pair<String, List<MediaItem>>>()) }
+    val latestMediaState = rememberUpdatedState(media)
+    val latestReadyState = rememberUpdatedState(isReadyForMemories)
+
+    // Wait for the complete, filtered library once. After this first calculation,
+    // media-list changes do not regenerate stories; the local date key is the only trigger.
+    LaunchedEffect(memoryDateKey) {
+        val source = snapshotFlow { latestReadyState.value to latestMediaState.value }
+            .first { it.first }
+            .second
+        stories = withContext(Dispatchers.Default) { computeStories(source) }
     }
 
     if (stories.isEmpty()) return

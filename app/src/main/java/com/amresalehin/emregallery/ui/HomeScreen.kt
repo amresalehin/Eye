@@ -119,6 +119,7 @@ fun HomeScreen(
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     media: List<MediaItem>,
     loading: Boolean,
+    memoriesReady: Boolean = true,
     isRefreshing: Boolean = false,
     onRefresh: (() -> Unit)? = null,
     albumTitle: String? = null,
@@ -457,6 +458,7 @@ fun HomeScreen(
                     item(key = "home_memories_strip", contentType = "memories_strip") {
                         MemoriesStrip(
                             media = sortedMedia,
+                            isReadyForMemories = memoriesReady,
                             onOpenMemory = onOpenMemory,
                             listState = memoriesListState
                         )

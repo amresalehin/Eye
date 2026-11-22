@@ -249,6 +249,7 @@ object ThumbnailPrewarmManager {
     private val memoryLock = Any()
     private var appContext: Context? = null
     private var worker: Job? = null
+    private var prioritizeJob: Job? = null
     private var activeUris: List<String>? = null
     private var completedUris: List<String>? = null
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
@@ -267,26 +268,29 @@ object ThumbnailPrewarmManager {
         context: Context? = null
     ) {
         if (visibleItems.isEmpty() && lookAheadItems.isEmpty()) return
-        val visible = visibleItems.distinctBy { it.uri }
-        val visibleUris = visible.mapTo(HashSet(visible.size)) { it.uri }
-        val lookAhead = lookAheadItems.asSequence()
-            .filterNot { it.uri in visibleUris }
-            .distinctBy { it.uri }
-            .toList()
         val ctx = context?.applicationContext ?: appContext
-        if (ctx != null) {
-            warmMemoryCache(ctx, visible, lookAhead)
-        }
-        synchronized(lock) {
-            if (worker?.isActive != true || activeUris.isNullOrEmpty()) return
-            priorityQueue.clear()
-            queuedPriorityUris.clear()
-            (visible.asSequence() + lookAhead.asSequence())
+        prioritizeJob?.cancel()
+        prioritizeJob = scope.launch {
+            val visible = visibleItems.distinctBy { it.uri }
+            val visibleUris = visible.mapTo(HashSet(visible.size)) { it.uri }
+            val lookAhead = lookAheadItems.asSequence()
+                .filterNot { it.uri in visibleUris }
                 .distinctBy { it.uri }
-                // Preserve the complete visible range plus 100 predicted rows in the disk queue.
-                .forEach { item ->
-                    if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
-                }
+                .toList()
+            currentCoroutineContext().ensureActive()
+            if (ctx != null) {
+                warmMemoryCache(ctx, visible, lookAhead)
+            }
+            synchronized(lock) {
+                if (worker?.isActive != true || activeUris.isNullOrEmpty()) return@launch
+                priorityQueue.clear()
+                queuedPriorityUris.clear()
+                (visible.asSequence() + lookAhead.asSequence())
+                    .distinctBy { it.uri }
+                    .forEach { item ->
+                        if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
+                    }
+            }
         }
     }
 

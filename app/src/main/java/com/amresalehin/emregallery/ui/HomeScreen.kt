@@ -40,13 +40,68 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
-private const val PREFETCH_LOOK_AHEAD_ROWS = 100
+private const val PREFETCH_LOOK_AHEAD_ROWS = 24
+private const val SYNC_COMPUTE_THRESHOLD = 150
+
+@Immutable
+private data class HomeGridData(
+    val sortedMedia: List<MediaItem> = emptyList(),
+    val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>> = emptyList(),
+    val predictivePrefetchRows: List<Pair<String, List<MediaItem>>> = emptyList(),
+    val predictivePrefetchIndex: Map<String, Int> = emptyMap()
+)
+
+private fun buildHomeGridData(
+    media: List<MediaItem>,
+    sortOrder: String,
+    groupBy: String,
+    columns: Int
+): HomeGridData {
+    val sortedMedia = when (sortOrder) {
+        "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
+        "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
+        "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
+        "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
+        "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
+        "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
+        "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
+        else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+    }
+    val groups = when (groupBy) {
+        "day" -> groupMediaByDay(sortedMedia)
+        "month" -> groupMediaByMonth(sortedMedia)
+        "year" -> groupMediaByYear(sortedMedia)
+        "folder" -> groupMediaByFolder(sortedMedia)
+        "initial" -> groupMediaByInitial(sortedMedia)
+        "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+        else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+    }
+    val clampedCols = columns.coerceIn(1, 6)
+    val groupedRows = groups.map { group -> group to group.items.chunked(clampedCols) }
+    val predictivePrefetchRows = groupedRows.flatMap { (group, rowChunks) ->
+        rowChunks.map { row ->
+            "day_${group.dayKey}_row_${row.first().id}" to row
+        }
+    }
+    val predictivePrefetchIndex = HashMap<String, Int>(predictivePrefetchRows.size)
+    predictivePrefetchRows.forEachIndexed { index, row ->
+        predictivePrefetchIndex[row.first] = index
+    }
+    return HomeGridData(
+        sortedMedia = sortedMedia,
+        groupedRows = groupedRows,
+        predictivePrefetchRows = predictivePrefetchRows,
+        predictivePrefetchIndex = predictivePrefetchIndex
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,47 +167,28 @@ fun HomeScreen(
         return
     }
 
-    val sortedMedia = remember(media, sortOrder) {
-        when (sortOrder) {
-            "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
-            "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
-            "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
-            "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
-        }
+    var gridData by remember {
+        mutableStateOf(
+            if (media.size <= SYNC_COMPUTE_THRESHOLD) {
+                buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
+            } else {
+                HomeGridData()
+            }
+        )
     }
-
-    val groups = remember(sortedMedia, groupBy) {
-        when (groupBy) {
-            "day" -> groupMediaByDay(sortedMedia)
-            "month" -> groupMediaByMonth(sortedMedia)
-            "year" -> groupMediaByYear(sortedMedia)
-            "folder" -> groupMediaByFolder(sortedMedia)
-            "initial" -> groupMediaByInitial(sortedMedia)
-            "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-            else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-        }
-    }
-
-    val groupedRows = remember(groups, pinchGridColumns) {
-        groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
-    }
-
-    // Keep a stable map from LazyColumn row keys to compact media rows. Scroll prediction uses
-    // row indexes, not all photo cells, so fling planning stays cheap for very large libraries.
-    val predictivePrefetchRows = remember(groupedRows) {
-        groupedRows.flatMap { (group, rowChunks) ->
-            rowChunks.map { row ->
-                "day_${group.dayKey}_row_${row.first().id}" to row
+    LaunchedEffect(media, sortOrder, groupBy, pinchGridColumns) {
+        gridData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
+            buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
+        } else {
+            withContext(Dispatchers.Default) {
+                buildHomeGridData(media, sortOrder, groupBy, pinchGridColumns)
             }
         }
     }
-    val predictivePrefetchIndex = remember(predictivePrefetchRows) {
-        predictivePrefetchRows.mapIndexed { index, row -> row.first to index }.toMap()
-    }
+    val sortedMedia = gridData.sortedMedia
+    val groupedRows = gridData.groupedRows
+    val predictivePrefetchRows = gridData.predictivePrefetchRows
+    val predictivePrefetchIndex = gridData.predictivePrefetchIndex
     var observedScrollDirection by remember(listState) { mutableIntStateOf(1) }
 
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
@@ -160,93 +196,86 @@ fun HomeScreen(
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (predictivePrefetchRows.isEmpty()) return Velocity.Zero
 
-                // Use the direction observed during the drag rather than relying on platform-specific
-                // fling-velocity sign conventions. The velocity magnitude still estimates travel distance.
                 val forward = observedScrollDirection > 0
-                val visibleRowInfos = listState.layoutInfo.visibleItemsInfo.filter {
-                    predictivePrefetchIndex.containsKey(it.key.toString())
-                }
-                val visibleIndices = visibleRowInfos.mapNotNull {
+                val visibleIndices = listState.layoutInfo.visibleItemsInfo.mapNotNull {
                     predictivePrefetchIndex[it.key.toString()]
                 }
                 if (visibleIndices.isEmpty()) return Velocity.Zero
 
                 val anchor = (if (forward) visibleIndices.maxOrNull() else visibleIndices.minOrNull()) ?: return Velocity.Zero
-                // Keep a fixed 100-row look-ahead window; prefetch distance is independent of fling speed.
-                val predictedRows = PREFETCH_LOOK_AHEAD_ROWS
-                val lastIndex = predictivePrefetchRows.lastIndex
-                val targetIndices = if (forward) {
-                    (anchor + 1..(anchor + predictedRows).coerceAtMost(lastIndex)).toList()
-                } else {
-                    (anchor - 1 downTo (anchor - predictedRows).coerceAtLeast(0)).toList()
+                val rowsSnapshot = predictivePrefetchRows
+                val appCtx = context.applicationContext
+                homeScope.launch(Dispatchers.Default) {
+                    val lastIndex = rowsSnapshot.lastIndex
+                    val targetRange = if (forward) {
+                        (anchor + 1)..(anchor + PREFETCH_LOOK_AHEAD_ROWS).coerceAtMost(lastIndex)
+                    } else {
+                        (anchor - 1) downTo (anchor - PREFETCH_LOOK_AHEAD_ROWS).coerceAtLeast(0)
+                    }
+                    val visibleItems = visibleIndices.flatMap { rowsSnapshot[it].second }
+                    val lookAheadItems = targetRange.flatMap { rowsSnapshot[it].second }
+                    ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, appCtx)
                 }
-                val visibleItems = visibleIndices
-                    .flatMap { predictivePrefetchRows[it].second }
-                    .distinctBy { it.uri }
-                val lookAheadItems = targetIndices
-                    .flatMap { predictivePrefetchRows[it].second }
-                    .distinctBy { it.uri }
-                ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, context)
                 return Velocity.Zero
             }
         }
     }
 
-    // Also predict while the finger is dragging (not just when a fling starts). Update the priority
-    // window once per newly visible row, without scheduling work on every scroll frame.
+    // Track only visible item index range so scroll-offset pixel changes never trigger work.
     LaunchedEffect(isVisible, listState, predictivePrefetchRows, predictivePrefetchIndex) {
         if (!isVisible) return@LaunchedEffect
-        var previousPosition: Pair<Int, Int>? = null
+        var previousFirstItem = -1
         var previousAnchor = -1
         var previousDirection = 1
 
         snapshotFlow {
+            val info = listState.layoutInfo.visibleItemsInfo
+            if (info.isEmpty()) -1 to -1 else info.first().index to info.last().index
+        }.distinctUntilChanged().collect { (firstItemIdx, lastItemIdx) ->
+            if (firstItemIdx < 0 || predictivePrefetchRows.isEmpty()) {
+                previousFirstItem = firstItemIdx
+                return@collect
+            }
+
             val visibleRows = listState.layoutInfo.visibleItemsInfo
                 .mapNotNull { predictivePrefetchIndex[it.key.toString()] }
                 .distinct()
                 .sorted()
-            Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, visibleRows)
-        }.distinctUntilChanged().collect { (firstIndex, offset, visibleRows) ->
-            if (visibleRows.isEmpty() || predictivePrefetchRows.isEmpty()) {
-                previousPosition = firstIndex to offset
+            if (visibleRows.isEmpty()) {
+                previousFirstItem = firstItemIdx
                 return@collect
             }
 
-            val direction = previousPosition?.let { previous ->
-                when {
-                    firstIndex > previous.first -> 1
-                    firstIndex < previous.first -> -1
-                    offset > previous.second -> 1
-                    offset < previous.second -> -1
-                    else -> previousDirection
-                }
-            } ?: 1
+            val direction = when {
+                previousFirstItem < 0 -> 1
+                firstItemIdx > previousFirstItem -> 1
+                firstItemIdx < previousFirstItem -> -1
+                else -> previousDirection
+            }
             observedScrollDirection = direction
             val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
-            // Refresh after each row to maintain lead time during continuous scrolling.
             val movedEnough = previousAnchor < 0 || anchor != previousAnchor
             if (movedEnough || direction != previousDirection) {
-                val forwardCount = PREFETCH_LOOK_AHEAD_ROWS
-                val backwardCount = 4
-                val lastIndex = predictivePrefetchRows.lastIndex
-                val targetIndices = if (direction > 0) {
-                    (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
-                        (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
-                } else {
-                    (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
-                        (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
+                val rowsSnapshot = predictivePrefetchRows
+                val appCtx = context.applicationContext
+                withContext(Dispatchers.Default) {
+                    val lastIndex = rowsSnapshot.lastIndex
+                    val backwardCount = 4
+                    val targetIndices = if (direction > 0) {
+                        (anchor..(anchor + PREFETCH_LOOK_AHEAD_ROWS).coerceAtMost(lastIndex)).toList() +
+                            (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
+                    } else {
+                        (anchor downTo (anchor - PREFETCH_LOOK_AHEAD_ROWS).coerceAtLeast(0)).toList() +
+                            (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
+                    }
+                    val visibleItems = visibleRows.flatMap { rowsSnapshot[it].second }
+                    val lookAheadItems = targetIndices.flatMap { rowsSnapshot[it].second }
+                    ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, appCtx)
                 }
-                val visibleItems = visibleRows
-                    .flatMap { predictivePrefetchRows[it].second }
-                    .distinctBy { it.uri }
-                val lookAheadItems = targetIndices
-                    .flatMap { predictivePrefetchRows[it].second }
-                    .distinctBy { it.uri }
-                ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, context)
                 previousAnchor = anchor
                 previousDirection = direction
             }
-            previousPosition = firstIndex to offset
+            previousFirstItem = firstItemIdx
         }
     }
 

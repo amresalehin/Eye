@@ -1,11 +1,13 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.runtime.Immutable
 import com.amresalehin.emregallery.data.MediaItem
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+@Immutable
 data class DayGroup(
     val dayKey: Long,
     val dayLabel: String,

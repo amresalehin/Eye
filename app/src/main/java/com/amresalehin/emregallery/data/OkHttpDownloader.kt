@@ -41,17 +41,16 @@ object OkHttpDownloader {
                     currentList.removeAll { it.name == newCookie.name }
                     currentList.add(newCookie)
                 }
+            }
 
-                // Sync into Android WebView CookieManager if available
-                try {
-                    val cookieManager = CookieManager.getInstance()
-                    for (cookie in cookies) {
-                        cookieManager.setCookie(urlString, cookie.toString())
-                    }
-                    cookieManager.flush()
-                } catch (_: Throwable) {
-                    // Ignore in non-Android or JVM unit test environments
+            // Sync into Android WebView CookieManager outside cookieLock to avoid monitor contention
+            try {
+                val cookieManager = CookieManager.getInstance()
+                for (cookie in cookies) {
+                    cookieManager.setCookie(urlString, cookie.toString())
                 }
+            } catch (_: Throwable) {
+                // Ignore in non-Android or JVM unit test environments
             }
         }
 
@@ -60,38 +59,37 @@ object OkHttpDownloader {
             val urlString = url.toString()
             val now = System.currentTimeMillis()
 
-            synchronized(cookieLock) {
-                val result = mutableListOf<Cookie>()
-
-                // 1. Load from in-memory cache
+            val result = synchronized(cookieLock) {
+                val mem = mutableListOf<Cookie>()
                 inMemoryCookies[host]?.let { list ->
                     list.removeAll { it.expiresAt <= now }
-                    result.addAll(list)
+                    mem.addAll(list)
                 }
+                mem
+            }
 
-                // 2. Load from Android WebView CookieManager if available
-                try {
-                    val cookieManager = CookieManager.getInstance()
-                    val rawCookieStr = cookieManager.getCookie(urlString)
-                    if (!rawCookieStr.isNullOrBlank()) {
-                        val parsed = rawCookieStr.split(";").mapNotNull { part ->
-                            val trimmed = part.trim()
-                            if (trimmed.isNotEmpty()) {
-                                Cookie.parse(url, trimmed)
-                            } else null
-                        }
-                        for (c in parsed) {
-                            if (result.none { it.name == c.name }) {
-                                result.add(c)
-                            }
+            // Load from Android WebView CookieManager outside cookieLock to avoid monitor contention
+            try {
+                val cookieManager = CookieManager.getInstance()
+                val rawCookieStr = cookieManager.getCookie(urlString)
+                if (!rawCookieStr.isNullOrBlank()) {
+                    val parsed = rawCookieStr.split(";").mapNotNull { part ->
+                        val trimmed = part.trim()
+                        if (trimmed.isNotEmpty()) {
+                            Cookie.parse(url, trimmed)
+                        } else null
+                    }
+                    for (c in parsed) {
+                        if (result.none { it.name == c.name }) {
+                            result.add(c)
                         }
                     }
-                } catch (_: Throwable) {
-                    // Ignore in unit test environments
                 }
-
-                return result
+            } catch (_: Throwable) {
+                // Ignore in unit test environments
             }
+
+            return result
         }
 
         fun getCookieString(url: String): String {

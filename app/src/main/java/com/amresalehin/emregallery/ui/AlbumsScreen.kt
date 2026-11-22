@@ -82,7 +82,7 @@ fun AlbumsScreen(
 ) {
     val context = LocalContext.current
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
-    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
+    val isBusy = isProcessingActive
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     val inboxRepo = remember(context) { com.amresalehin.emregallery.data.MediaInboxRepository.getInstance(context) }

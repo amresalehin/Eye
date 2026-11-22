@@ -50,7 +50,9 @@ import coil.request.ImageRequest
 import coil.size.Size
 import coil.size.Precision
 import com.amresalehin.emregallery.data.MediaItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -153,17 +155,15 @@ fun MemoriesStrip(
     val todayMonth = today.get(Calendar.MONTH)
     val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
-    val stories = remember(media, currentYear, todayMonth, todayDay) {
-        if (media.isEmpty()) return@remember emptyList()
+    fun computeStories(source: List<MediaItem>): List<Pair<String, List<MediaItem>>> {
+        if (source.isEmpty()) return emptyList()
         val cal = Calendar.getInstance()
-        val eligible = ArrayList<Pair<MediaItem, Long>>(media.size)
         val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
         val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
 
-        for (item in media) {
+        for (item in source) {
             val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
             if (timestamp <= 0L) continue
-            eligible.add(item to timestamp)
             cal.timeInMillis = timestamp
             val y = cal.get(Calendar.YEAR)
             val m = cal.get(Calendar.MONTH)
@@ -177,13 +177,10 @@ fun MemoriesStrip(
         }
 
         val result = mutableListOf<Pair<String, List<MediaItem>>>()
-
-        // Google Photos-style "On this day" stories: real photos from this calendar date in prior years.
         onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
             result += "On this day · $year" to entries
         }
 
-        // Real date-based trip/story groups from the library
         val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
         tripsMap.entries
             .filter { it.value.size >= 4 }
@@ -196,7 +193,18 @@ fun MemoriesStrip(
                 }
             }
 
-        result.filter { it.second.isNotEmpty() }.take(10)
+        return result.filter { it.second.isNotEmpty() }.take(10)
+    }
+
+    var stories by remember {
+        mutableStateOf(if (media.size <= 150) computeStories(media) else emptyList())
+    }
+    LaunchedEffect(media, currentYear, todayMonth, todayDay) {
+        stories = if (media.size <= 150) {
+            computeStories(media)
+        } else {
+            withContext(Dispatchers.Default) { computeStories(media) }
+        }
     }
 
     if (stories.isEmpty()) return
@@ -338,16 +346,10 @@ fun MosaicMediaItem(
     }
 
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val itemScale = if (isPressed) 0.95f else 1f
 
     Box(
         modifier = modifier
             .trackThumbnailBounds(item.uri)
-            .graphicsLayer {
-                scaleX = itemScale
-                scaleY = itemScale
-            }
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(

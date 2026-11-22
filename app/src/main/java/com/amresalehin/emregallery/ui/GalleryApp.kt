@@ -135,6 +135,7 @@ fun GalleryApp() {
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
     var hasOpenedPeopleScreen by remember { mutableStateOf(false) }
+    var hasOpenedAlbumsScreen by remember { mutableStateOf(false) }
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
@@ -508,6 +509,9 @@ fun GalleryApp() {
         if (dest == Destination.PEOPLE) {
             hasOpenedPeopleScreen = true
         }
+        if (dest == Destination.ALBUMS) {
+            hasOpenedAlbumsScreen = true
+        }
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
         }
@@ -708,8 +712,9 @@ fun GalleryApp() {
         }
     }
 
-    val visibleMedia = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
-        media.filter { item ->
+    fun filterVisibleMedia(): List<MediaItem> {
+        val nowCutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        return media.filter { item ->
             val isItemBinned = item.isTrashed || item.uri in inBin
             val inScope = when (albumFilter) {
                 "Hidden" -> item.uri in hidden && !isItemBinned
@@ -721,7 +726,7 @@ fun GalleryApp() {
                 null, "Hidden", "Bin", "Archive", "People", "Places", "Map", "Albums", "Folders" -> true
                 "Favourites" -> item.uri in favourites
                 "Videos" -> item.isVideo
-                "Recently added" -> item.dateAddedSeconds * 1000L > System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+                "Recently added" -> item.dateAddedSeconds * 1000L > nowCutoff
                 else -> {
                     val albumMatch = customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter }
                     if (albumMatch != null) {
@@ -734,8 +739,33 @@ fun GalleryApp() {
             inScope && matchesCategory
         }
     }
-    val peopleMedia = remember(media, hidden, inBin, archive) {
-        media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+
+    var visibleMedia by remember {
+        mutableStateOf(if (media.size <= 150) filterVisibleMedia() else emptyList())
+    }
+    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
+        visibleMedia = if (media.size <= 150) {
+            filterVisibleMedia()
+        } else {
+            withContext(Dispatchers.Default) { filterVisibleMedia() }
+        }
+    }
+
+    var peopleMedia by remember {
+        mutableStateOf(
+            if (media.size <= 150) {
+                media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+            } else emptyList()
+        )
+    }
+    LaunchedEffect(media, hidden, inBin, archive) {
+        peopleMedia = if (media.size <= 150) {
+            media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+        } else {
+            withContext(Dispatchers.Default) {
+                media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+            }
+        }
     }
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -832,6 +862,7 @@ fun GalleryApp() {
                     // Keep the album screen mounted while other destinations are active.
                     // Moving the inactive host off-screen preserves its scroll position and
                     // remembered UI state instead of recreating the screen on every visit.
+                    if (hasOpenedAlbumsScreen || baseDestination == Destination.ALBUMS) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -872,6 +903,7 @@ fun GalleryApp() {
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
+                    }
                     }
 
                     // Retain face-index and People UI state after the first visit.
@@ -1514,7 +1546,6 @@ fun GalleryApp() {
                             )
                         )
                     )
-                    .blur(6.dp)
             )
 
             Box(
@@ -1535,7 +1566,6 @@ fun GalleryApp() {
                             )
                         )
                     )
-                    .blur(6.dp)
             )
         }
 

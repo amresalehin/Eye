@@ -22,7 +22,7 @@ class GalleryApplication : Application() {
         // Unconstrained memory caching: Allocate up to 45% (30% on low-RAM) of JVM heap to Coil.
         // With largeHeap enabled, this unlocks hundreds of megabytes for raw pre-decoded bitmaps,
         // avoiding recurring decompression bottlenecks during 120Hz continuous scrolling.
-        val cachePercent = if (isLowRam) 0.30 else 0.45
+        val cachePercent = if (isLowRam) 0.15 else 0.25
 
         // Unconstrained concurrency: Utilize full Dispatchers without artificial core-capping
         // so that multi-core processors decode thumbnails at maximum throughput.

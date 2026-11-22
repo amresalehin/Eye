@@ -1334,7 +1334,11 @@ fun DirectBrowserView(
                                         isLoading = true
                                         coroutineScope.launch {
                                             delay(450L)
-                                            if (webViewInstance == null && rendererCrashUrl == crashedUrl) {
+                                            if (
+                                                webViewInstance == null &&
+                                                rendererCrashUrl == crashedUrl &&
+                                                currentUrl == crashedUrl
+                                            ) {
                                                 webViewGeneration += 1
                                             }
                                         }

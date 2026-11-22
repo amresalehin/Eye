@@ -352,18 +352,18 @@ fun DirectBrowserView(
                             }
                         }
 
-                        // URL and search input are integrated directly into the same pill.
-                        val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
-                        Icon(
-                            imageVector = if (isSecure) Icons.Default.Lock
-                            else if (currentUrl.isNotBlank()) Icons.Default.Language
-                            else Icons.Default.Search,
-                            contentDescription = null,
-                            tint = if (isSecure) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(7.dp))
+                        // Show the site/security indicator only after navigating; keep the home field clean.
+                        if (currentUrl.isNotBlank()) {
+                            val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
+                            Icon(
+                                imageVector = if (isSecure) Icons.Default.Lock else Icons.Default.Language,
+                                contentDescription = null,
+                                tint = if (isSecure) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(7.dp))
+                        }
 
                         Box(
                             modifier = Modifier
@@ -405,7 +405,7 @@ fun DirectBrowserView(
                             )
                         }
 
-                        if (addressInput.isNotEmpty()) {
+                        if (isAddressBarFocused && addressInput.isNotEmpty()) {
                             IconButton(
                                 onClick = { addressInput = "" },
                                 modifier = Modifier
@@ -431,23 +431,6 @@ fun DirectBrowserView(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = "Go",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                if (isLoading) webViewInstance?.stopLoading()
-                                else webViewInstance?.reload()
-                            },
-                            modifier = Modifier
-                                .size(32.dp)
-                                .testTag("browser_refresh_btn")
-                        ) {
-                            Icon(
-                                imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
-                                contentDescription = if (isLoading) "Stop" else "Reload",
-                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -535,6 +518,24 @@ fun DirectBrowserView(
                                     webViewInstance?.goForward()
                                 },
                                 modifier = Modifier.testTag("browser_menu_forward")
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text(if (isLoading) "Stop loading" else "Reload") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                enabled = currentUrl.isNotBlank() || isLoading,
+                                onClick = {
+                                    browserMenuExpanded = false
+                                    if (isLoading) webViewInstance?.stopLoading()
+                                    else webViewInstance?.reload()
+                                },
+                                modifier = Modifier.testTag("browser_menu_reload")
                             )
 
                             HorizontalDivider()

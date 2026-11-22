@@ -220,5 +220,5 @@ private fun ShareReceiverScreen(
             }
         }
 
-    } }
+    }
 }

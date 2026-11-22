@@ -3,8 +3,6 @@ package com.amresalehin.emregallery
 import android.content.Context
 import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
-import com.amresalehin.emregallery.BrowserTabIntent
-import com.amresalehin.emregallery.MainActivity
 import com.amresalehin.emregallery.data.ContentAwareMediaFilter
 import com.amresalehin.emregallery.data.DualMediaExtractor
 import com.amresalehin.emregallery.data.MediaCategory

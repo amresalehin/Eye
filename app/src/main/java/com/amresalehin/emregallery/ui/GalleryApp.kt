@@ -821,8 +821,875 @@ fun GalleryApp() {
                                 }
                             }
                         }
+package com.amresalehin.emregallery.ui
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.data.CustomAlbum
+import com.amresalehin.emregallery.data.LockedVaultManager
+import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
+import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.ocr.TesseractOcr
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceEngineRegistry
+import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.data.StoryGroup
+
+data class NavBackStackEntry(
+    val destination: Destination,
+    val selectedMedia: MediaItem? = null,
+    val viewerMediaList: List<MediaItem> = emptyList(),
+    val viewerStoryTitle: String? = null,
+    val viewerStories: List<StoryGroup> = emptyList(),
+    val currentStoryIndex: Int = 0,
+    val mapFocusItem: MediaItem? = null,
+    val albumFilter: String? = null,
+    val albumFilterReturnDestination: Destination = Destination.ALBUMS,
+    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
+)
+
+val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GalleryApp() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { PreferencesRepository(context.applicationContext) }
+    val mediaRepository = remember { MediaRepository(context.contentResolver) }
+    val lockedVaultManager = remember { LockedVaultManager(context.applicationContext) }
+    var destination by remember { mutableStateOf(Destination.HOME) }
+    var previousDestination by remember { mutableStateOf(Destination.HOME) }
+    var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
+    var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var lockedVaultItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(hasMediaPermission(context)) }
+    var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
+    var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var viewerStoryTitle by remember { mutableStateOf<String?>(null) }
+    var viewerStories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
+    var currentStoryIndex by remember { mutableIntStateOf(0) }
+    var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
+    val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
+    val viewerTransitionProgress = remember { Animatable(0f) }
+    var showViewerControls by remember { mutableStateOf(false) }
+    var showDetails by remember { mutableStateOf(false) }
+    var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
+    var searchQuery by remember { mutableStateOf("") }
+    var submittedQuery by remember { mutableStateOf("") }
+    var searchVideosOnly by remember { mutableStateOf(false) }
+    var albumFilter by remember { mutableStateOf<String?>(null) }
+    val favourites by prefs.favourites.collectAsStateWithLifecycle(initialValue = emptySet())
+    val hidden by prefs.hidden.collectAsStateWithLifecycle(initialValue = emptySet())
+    val inBin by prefs.bin.collectAsStateWithLifecycle(initialValue = emptySet())
+    val archive by prefs.archive.collectAsStateWithLifecycle(initialValue = emptySet())
+    val recentSearches by prefs.recentSearches.collectAsStateWithLifecycle(initialValue = emptyList())
+    val themePref by prefs.theme.collectAsStateWithLifecycle(initialValue = "system")
+    val customAlbums by prefs.customAlbums.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sortOrderPref by prefs.sortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
+    val groupByPref by prefs.groupBy.collectAsStateWithLifecycle(initialValue = "day")
+    val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
+    val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
+    val mlKitLanguagesPref by prefs.mlKitLanguages.collectAsStateWithLifecycle(initialValue = setOf("latin"))
+    val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
+    val ocrEnginePref by prefs.ocrEngine.collectAsStateWithLifecycle(initialValue = "tesseract")
+    val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
+    var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
+    var showSidePanel by remember { mutableStateOf(false) }
+    val lockedFolderPinHash by prefs.lockedFolderPinHash.collectAsStateWithLifecycle(initialValue = null)
+    var isLockedFolderUnlocked by remember { mutableStateOf(false) }
+    var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    val isWelcomeCompletedInit = remember { prefs.isWelcomeCompletedSync() }
+    val hasCompletedWelcomeFlow by prefs.hasCompletedWelcome.collectAsStateWithLifecycle(initialValue = isWelcomeCompletedInit)
+    val hasCompletedWelcome = hasCompletedWelcomeFlow || isWelcomeCompletedInit
+    var homeSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
+    var activePersonId by remember { mutableStateOf<String?>(null) }
+    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
+    var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var hasOpenedAlbumBrowser by remember { mutableStateOf(false) }
+    var isAlbumBrowserVisible by remember { mutableStateOf(false) }
+    var albumBrowserInitialUrl by remember { mutableStateOf("") }
+    var albumBrowserNavigationRequestId by remember { mutableStateOf(0) }
+
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    fun refreshMedia(userInitiated: Boolean = false) {
+        scope.launch {
+            if (userInitiated) {
+                isRefreshing = true
+            } else if (media.isEmpty()) {
+                loading = true
+            }
+            val startTime = System.currentTimeMillis()
+            // Refresh locked vault items concurrently so disk scanning never delays the home grid.
+            scope.launch {
+                lockedVaultItems = withContext(Dispatchers.IO) {
+                    runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
+                }
+            }
+            if (hasMediaPermission(context)) {
+                if (!userInitiated && media.isEmpty()) {
+                    val initialBatch = withContext(Dispatchers.IO) {
+                        runCatching { mediaRepository.loadMediaInitial() }.getOrDefault(emptyList())
+                    }
+                    if (initialBatch.isNotEmpty()) {
+                        media = initialBatch
+                        loading = false
+                        scope.launch(Dispatchers.Default) {
+                            ThumbnailPrewarmManager.start(context.applicationContext, initialBatch)
+                        }
+                    }
+                }
+                val loadedMedia = withContext(Dispatchers.IO) {
+                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
+                }
+                media = loadedMedia
+
+                // Start disk-backed preparation after permissions and the MediaStore list are ready.
+                // This worker is independent of composition and never holds the whole library in RAM.
+                scope.launch(Dispatchers.Default) {
+                    // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
+                    ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                }
+            }
+            if (userInitiated) {
+                val elapsed = System.currentTimeMillis() - startTime
+                if (elapsed < 400L) {
+                    delay(400L - elapsed)
+                }
+                isRefreshing = false
+            } else {
+                loading = false
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        scope.launch(Dispatchers.IO) {
+            lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
+        }
+        if (hasMediaPermission(context)) refreshMedia()
+    }
+    LaunchedEffect(media, hidden, inBin) {
+        if (media.isNotEmpty()) {
+            // Delay background scanning so initial app launch, first layout, and scrolling are 100% smooth
+            delay(3000)
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val locationCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
+                    val safeMedia = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin }
+                    locationCache.scanMediaBatch(context, safeMedia)
+                }
+            }
+        }
+    }
+
+    val permanentDeleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val deletedUris = pendingPermanentDeleteUris
+        pendingPermanentDeleteUris = emptyList()
+        if (result.resultCode == android.app.Activity.RESULT_OK && deletedUris.isNotEmpty()) {
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    FaceClusterStore(context).deleteMediaCompletely(deletedUris)
+                }
+                prefs.removePermanently(deletedUris)
+                refreshMedia()
+                snackbarHostState.showSnackbar(
+                    message = "${deletedUris.size} ${if (deletedUris.size == 1) "item" else "items"} permanently deleted",
+                    duration = SnackbarDuration.Short
+                )
+            }
+        } else if (result.resultCode != android.app.Activity.RESULT_OK) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Deletion cancelled")
+            }
+        }
+    }
+
+    fun permanentlyDelete(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val itemUris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                val deleted = withContext(Dispatchers.IO) {
+                    itemUris.filter { uri ->
+                        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) > 0 }.getOrDefault(false)
+                    }
+                }
+                if (deleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        FaceClusterStore(context).deleteMediaCompletely(deleted)
+                    }
+                    prefs.removePermanently(deleted)
+                    refreshMedia()
+                    snackbarHostState.showSnackbar(
+                        message = "${deleted.size} ${if (deleted.size == 1) "item" else "items"} permanently deleted",
+                        duration = SnackbarDuration.Short
+                    )
+                } else {
+                    snackbarHostState.showSnackbar("Permission denied: could not delete files")
+                }
+            }
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val requestLaunched = runCatching {
+                val request = android.provider.MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    itemUris.map { Uri.parse(it) }
+                )
+                pendingPermanentDeleteUris = itemUris
+                permanentDeleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                true
+            }.getOrDefault(false)
+
+            if (!requestLaunched) {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Permission denied: could not request deletion")
+                }
+            }
+        } else {
+            scope.launch {
+                val deleted = withContext(Dispatchers.IO) {
+                    itemUris.filter { uri ->
+                        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) > 0 }.getOrDefault(false)
+                    }
+                }
+                if (deleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        FaceClusterStore(context).deleteMediaCompletely(deleted)
+                    }
+                    prefs.removePermanently(deleted)
+                    refreshMedia()
+                    snackbarHostState.showSnackbar(
+                        message = "${deleted.size} ${if (deleted.size == 1) "item" else "items"} deleted",
+                        duration = SnackbarDuration.Short
+                    )
+                } else {
+                    snackbarHostState.showSnackbar("Permission denied: could not delete file")
+                }
+            }
+        }
+    }
+
+    var pendingRestoreUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val uris = pendingRestoreUris
+        pendingRestoreUris = emptyList()
+        if (result.resultCode == android.app.Activity.RESULT_OK && uris.isNotEmpty()) {
+            scope.launch {
+                prefs.setInBinBatch(uris.toSet(), false)
+                refreshMedia()
+                snackbarHostState.showSnackbar("Restored to gallery", duration = SnackbarDuration.Short)
+            }
+        }
+    }
+
+    fun restoreFromDeviceTrash(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val uris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cv = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 0)
+                    }
+                    withContext(Dispatchers.IO) {
+                        uris.forEach { u ->
+                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
+                        }
+                    }
+                }
+                prefs.setInBinBatch(uris.toSet(), false)
+                refreshMedia()
+            }
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val requestLaunched = runCatching {
+                val request = android.provider.MediaStore.createTrashRequest(
+                    context.contentResolver,
+                    uris.map { Uri.parse(it) },
+                    false
+                )
+                pendingRestoreUris = uris
+                restoreLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                true
+            }.getOrDefault(false)
+
+            if (!requestLaunched) {
+                scope.launch {
+                    prefs.setInBinBatch(uris.toSet(), false)
+                    refreshMedia()
+                }
+            }
+        } else {
+            scope.launch {
+                prefs.setInBinBatch(uris.toSet(), false)
+                refreshMedia()
+            }
+        }
+    }
+
+    var pendingTrashUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    val trashLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val uris = pendingTrashUris
+        pendingTrashUris = emptyList()
+        if (result.resultCode == android.app.Activity.RESULT_OK && uris.isNotEmpty()) {
+            scope.launch {
+                prefs.setInBinBatch(uris.toSet(), true)
+                prefs.setHiddenBatch(uris.toSet(), false)
+                refreshMedia()
+                val res = snackbarHostState.showSnackbar(
+                    message = if (uris.size == 1) "Moved to Bin" else "${uris.size} items moved to Bin",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    restoreFromDeviceTrash(media.filter { it.uri in uris })
+                }
+            }
+        }
+    }
+
+    fun moveToDeviceTrash(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val uris = items.map { it.uri }.distinct()
+        if (hasAllFilesAccess()) {
+            scope.launch {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cv = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.IS_TRASHED, 1)
+                    }
+                    withContext(Dispatchers.IO) {
+                        uris.forEach { u ->
+                            runCatching { context.contentResolver.update(Uri.parse(u), cv, null, null) }
+                        }
+                    }
+                }
+                prefs.setInBinBatch(uris.toSet(), true)
+                prefs.setHiddenBatch(uris.toSet(), false)
+                refreshMedia()
+                val res = snackbarHostState.showSnackbar(
+                    message = if (uris.size == 1) "Moved to Bin" else "${uris.size} items moved to Bin",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    restoreFromDeviceTrash(items)
+                }
+            }
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val requestLaunched = runCatching {
+                val request = android.provider.MediaStore.createTrashRequest(
+                    context.contentResolver,
+                    uris.map { Uri.parse(it) },
+                    true
+                )
+                pendingTrashUris = uris
+                trashLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                true
+            }.getOrDefault(false)
+
+            if (!requestLaunched) {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Cannot move to Bin: permission required")
+                }
+            }
+        } else {
+            scope.launch {
+                prefs.setInBinBatch(uris.toSet(), true)
+                prefs.setHiddenBatch(uris.toSet(), false)
+                refreshMedia()
+                val res = snackbarHostState.showSnackbar(
+                    message = if (uris.size == 1) "Moved to Bin" else "${uris.size} items moved to Bin",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    restoreFromDeviceTrash(items)
+                }
+            }
+        }
+    }
+
+    fun moveItemsToLocked(uris: Set<String>) {
+        if (uris.isEmpty()) return
+        if (lockedFolderPinHash.isNullOrBlank()) {
+            showLockedFolderSetupPrompt = true
+        } else {
+            scope.launch {
+                val itemsToLock = media.filter { it.uri in uris }
+                if (itemsToLock.isNotEmpty()) {
+                    val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(itemsToLock) }
+                    lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                    prefs.setHiddenBatch(uris, true)
+                    refreshMedia()
+                    val res = snackbarHostState.showSnackbar(
+                        message = if (uris.size == 1) "Moved to Locked folder" else "${uris.size} items moved to Locked folder",
+                        actionLabel = "Undo",
+                        duration = SnackbarDuration.Short
+                    )
+                    if (res == SnackbarResult.ActionPerformed) {
+                        withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(lockedList) }
+                        lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                        prefs.setHiddenBatch(uris, false)
+                        refreshMedia()
+                    }
+                }
+            }
+        }
+    }
+
+    var showCreateAlbumDialog by remember { mutableStateOf(false) }
+    var createAlbumPresetParent by remember { mutableStateOf("") }
+    var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    var mediaForAddToAlbum by remember { mutableStateOf<MediaItem?>(null) }
+    var showAddPhotosPickerForAlbum by remember { mutableStateOf<CustomAlbum?>(null) }
+
+    var isNavigatingBack by remember { mutableStateOf(false) }
+    var isPredictiveBackActive by remember { mutableStateOf(false) }
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+    var predictiveBackEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
+
+    fun navigateTo(
+        dest: Destination,
+        rememberPrevious: Boolean = true,
+        newSelectedMedia: MediaItem? = selectedMedia,
+        newMapFocusItem: MediaItem? = mapFocusItem,
+        newViewerMediaList: List<MediaItem> = viewerMediaList,
+        newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
+        newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
+        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
+        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
+    ) {
+        if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
+            isLockedFolderUnlocked = false
+        }
+        homeSelectedUris = emptySet()
+        isNavigatingBack = false
+        if (rememberPrevious && destination != dest) {
+            backStack.add(
+                NavBackStackEntry(
+                    destination = destination,
+                    selectedMedia = selectedMedia,
+                    viewerMediaList = viewerMediaList,
+                    viewerStoryTitle = viewerStoryTitle,
+                    viewerStories = viewerStories,
+                    currentStoryIndex = currentStoryIndex,
+                    mapFocusItem = mapFocusItem,
+                    albumFilter = albumFilter,
+                    albumFilterReturnDestination = albumFilterReturnDestination,
+                    inboxInitialViewMode = inboxInitialViewMode,
+                    inboxInitialStack = inboxInitialStack
+                )
+            )
+            previousDestination = destination
+        }
+        destination = dest
+        selectedMedia = newSelectedMedia
+        mapFocusItem = newMapFocusItem
+        viewerMediaList = newViewerMediaList
+        viewerStoryTitle = newViewerStoryTitle
+        viewerStories = newViewerStories
+        currentStoryIndex = newCurrentStoryIndex
+        inboxInitialViewMode = newInboxInitialViewMode
+        inboxInitialStack = newInboxInitialStack
+    }
+
+    fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
+        val safeList = if (list.any { it.uri == item.uri }) list else listOf(item)
+        selectedMedia = item
+        viewerMediaList = safeList
+        viewerStoryTitle = null
+        viewerStories = emptyList()
+        currentStoryIndex = 0
+        showViewerControls = false
+        showDetails = false
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
+        navigateTo(
+            dest = Destination.VIEWER,
+            rememberPrevious = true,
+            newSelectedMedia = item,
+            newViewerMediaList = safeList,
+            newViewerStoryTitle = null,
+            newViewerStories = emptyList(),
+            newCurrentStoryIndex = 0
+        )
+    }
+
+    fun openMemoriesInViewer(stories: List<StoryGroup>, startIndex: Int) {
+        if (stories.isEmpty()) return
+        val initialStory = stories.getOrNull(startIndex) ?: stories.first()
+        if (initialStory.items.isEmpty()) return
+        val cover = initialStory.items.first()
+        selectedMedia = cover
+        viewerMediaList = initialStory.items
+        viewerStoryTitle = initialStory.title
+        viewerStories = stories
+        currentStoryIndex = startIndex
+        showViewerControls = true
+        showDetails = false
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
+        navigateTo(
+            dest = Destination.VIEWER,
+            rememberPrevious = true,
+            newSelectedMedia = cover,
+            newViewerMediaList = initialStory.items,
+            newViewerStoryTitle = initialStory.title,
+            newViewerStories = stories,
+            newCurrentStoryIndex = startIndex
+        )
+    }
+
+
+    fun performBackNavigation() {
+        if (homeSelectedUris.isNotEmpty()) {
+            homeSelectedUris = emptySet()
+            return
+        }
+        isNavigatingBack = true
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
+        if (destination == Destination.LOCKED_FOLDER) {
+            isLockedFolderUnlocked = false
+        }
+        when {
+            showSidePanel -> {
+                showSidePanel = false
+            }
+            destination == Destination.VIEWER && showDetails -> {
+                showDetails = false
+            }
+            backStack.isNotEmpty() -> {
+                val entry = backStack.removeAt(backStack.size - 1)
+                destination = entry.destination
+                selectedMedia = entry.selectedMedia
+                viewerMediaList = entry.viewerMediaList
+                viewerStoryTitle = entry.viewerStoryTitle
+                viewerStories = entry.viewerStories
+                currentStoryIndex = entry.currentStoryIndex
+                mapFocusItem = entry.mapFocusItem
+                albumFilter = entry.albumFilter
+                albumFilterReturnDestination = entry.albumFilterReturnDestination
+                inboxInitialViewMode = entry.inboxInitialViewMode
+                inboxInitialStack = entry.inboxInitialStack
+                previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
+            }
+            albumFilter != null -> {
+                albumFilter = null
+                destination = albumFilterReturnDestination
+                viewerStoryTitle = null
+            }
+            destination in listOf(
+                Destination.DEVICE_FOLDERS,
+                Destination.ALBUM_CATALOG,
+                Destination.FAVOURITES,
+                Destination.BIN,
+                Destination.VIDEOS,
+                Destination.RECENTLY_ADDED,
+                Destination.LOCKED_FOLDER,
+                Destination.ARCHIVE,
+                Destination.PEOPLE,
+                Destination.MAP
+            ) -> {
+                destination = Destination.ALBUMS
+                mapFocusItem = null
+                viewerStoryTitle = null
+            }
+            destination in listOf(
+                Destination.LIBRARY_OVERVIEW,
+                Destination.INDEXING_STATUS,
+                Destination.OCR_SETTINGS,
+                Destination.ABOUT
+            ) -> {
+                destination = Destination.SETTINGS
+                viewerStoryTitle = null
+            }
+            destination == Destination.MEDIA_INBOX -> {
+                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
+                viewerStoryTitle = null
+            }
+            destination == Destination.VIEWER -> {
+                val targetDest = previousDestination.takeIf { it != Destination.VIEWER } ?: Destination.HOME
+                destination = targetDest
+                selectedMedia = null
+                viewerMediaList = emptyList()
+                viewerStoryTitle = null
+            }
+            else -> {
+                destination = Destination.HOME
+                mapFocusItem = null
+                selectedMedia = null
+                viewerStoryTitle = null
+            }
+        }
+    }
+
+    val canGoBack = homeSelectedUris.isNotEmpty() || backStack.isNotEmpty() || destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
+
+    PredictiveBackHandler(enabled = canGoBack && !isAlbumBrowserVisible) { progress: Flow<BackEventCompat> ->
+        try {
+            isPredictiveBackActive = true
+            progress.collect { backEvent ->
+                predictiveBackProgress = backEvent.progress
+                predictiveBackEdge = backEvent.swipeEdge
+            }
+            performBackNavigation()
+        } catch (e: CancellationException) {
+            predictiveBackProgress = 0f
+            throw e
+        } finally {
+            isPredictiveBackActive = false
+            predictiveBackProgress = 0f
+        }
+    }
+
+    val activeCustomAlbum = remember(albumFilter, customAlbums) {
+        customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter }
+    }
+    val activeAlbumTitle = remember(albumFilter, activeCustomAlbum) {
+        activeCustomAlbum?.fullPath ?: when (albumFilter) {
+            "Hidden" -> "Locked folder"
+            "Bin" -> "Bin"
+            "Archive" -> "Archive"
+            "Favourites" -> "Favourites"
+            "Videos" -> "Videos"
+            "Recently added" -> "Recently added"
+            "People" -> "People & pets"
+            "Places", "Map" -> "Map & Places"
+            "Albums" -> "Albums"
+            "Folders" -> "Device folders"
+            else -> albumFilter
+        }
+    }
+
+    val visibleMedia = remember(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums) {
+        media.filter { item ->
+            val isItemBinned = item.isTrashed || item.uri in inBin
+            val inScope = when (albumFilter) {
+                "Hidden" -> item.uri in hidden && !isItemBinned
+                "Bin" -> isItemBinned
+                "Archive" -> item.uri in archive && !isItemBinned
+                else -> item.uri !in hidden && !isItemBinned && item.uri !in archive
+            }
+            val matchesCategory = when (albumFilter) {
+                null, "Hidden", "Bin", "Archive", "People", "Places", "Map", "Albums", "Folders" -> true
+                "Favourites" -> item.uri in favourites
+                "Videos" -> item.isVideo
+                "Recently added" -> item.dateAddedSeconds * 1000L > System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+                else -> {
+                    val albumMatch = customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter }
+                    if (albumMatch != null) {
+                        item.uri in albumMatch.mediaUris
+                    } else {
+                        item.relativePath.contains(albumFilter.orEmpty(), true)
+                    }
+                }
+            }
+            inScope && matchesCategory
+        }
+    }
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val topContentPadding = statusBarTop + 68.dp
+    val bottomContentPadding = navBarBottom + 88.dp
+
+    LaunchedEffect(Unit) {
+        prefs.clearHomeScrollPosition()
+    }
+
+    val hasMediaPerm = hasMediaPermission(context)
+    val hasNotifPerm = hasNotificationPermission(context)
+    val hasAllFilesPerm = hasAllFilesAccess()
+    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
+    if (!hasCompletedWelcome || !allRequiredPermissions) {
+        WelcomeScreen(
+            initialStep = if (hasCompletedWelcome) 2 else 0,
+            onComplete = {
+                scope.launch {
+                    prefs.setCompletedWelcome(true)
+                    refreshMedia()
+                }
+            }
+        )
+        return
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (isPredictiveBackActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                )
+            }
+
+            val baseDestination = if (destination == Destination.VIEWER) previousDestination else destination
+            val returnDestination = if (destination == Destination.VIEWER) previousDestination else destination
+
+            CompositionLocalProvider(LocalViewerCoordinatedProgress provides { if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            if (isPredictiveBackActive && predictiveBackProgress > 0f) {
+                                val p = predictiveBackProgress
+                                val scale = 1f - (p * 0.12f)
+                                scaleX = scale
+                                scaleY = scale
+                                val maxShift = 48.dp.toPx()
+                                translationX = if (predictiveBackEdge == BackEventCompat.EDGE_LEFT) {
+                                    p * maxShift
+                                } else {
+                                    -p * maxShift
+                                }
+                                shape = RoundedCornerShape((p * 28).dp)
+                                clip = true
+                                shadowElevation = (p * 20).dp.toPx()
+                            }
+                        }
+                        .pointerInput(destination, showSidePanel, albumFilter) {
+                            // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
+                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
+                                val edgeWidth = 32.dp.toPx()
+                                val slop = viewConfiguration.touchSlop * 1.5f
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    if (down.position.x <= edgeWidth) {
+                                        var totalDragX = 0f
+                                        var totalDragY = 0f
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                            if (change != null) {
+                                                totalDragX += change.position.x - change.previousPosition.x
+                                                totalDragY += change.position.y - change.previousPosition.y
+                                                if (totalDragX > slop && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY) * 1.5f) {
+                                                    showSidePanel = true
+                                                    change.consume()
+                                                    break
+                                                }
+                                            }
+                                        } while (event.changes.any { it.pressed })
+                                    }
+                                }
+                            }
+                        }
                 ) {
-                    when (baseDestination) {
+                    when (baseDestination) {                    // Keep the album screen mounted while other destinations are active.
+                    // Moving the inactive host off-screen preserves its scroll position and
+                    // remembered UI state instead of recreating the screen on every visit.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val albumsVisible = baseDestination == Destination.ALBUMS
+                                alpha = if (albumsVisible) 1f else 0f
+                                translationX = if (albumsVisible) 0f else size.width * 2f
+                            }
+                            .zIndex(if (baseDestination == Destination.ALBUMS) 1f else -1f)
+                    ) {
+                        AlbumsScreen(
+                        media = media,
+                        favourites = favourites,
+                        hidden = hidden,
+                        inBin = remember(media, inBin) { (inBin + media.filter { it.isTrashed }.map { it.uri }).toSet() },
+                        archive = archive,
+                        customAlbums = customAlbums,
+                        topContentPadding = topContentPadding,
+                        bottomContentPadding = bottomContentPadding,
+                        isRefreshing = isRefreshing,
+                        onRefresh = { refreshMedia(userInitiated = true) },
+                        onFilter = { when (it) { "Map" -> {
+                            navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onOpen = { openMediaInViewer(it, visibleMedia) },
+                        onOpenPerson = { personId ->
+                            activePersonId = personId
+                            navigateTo(Destination.PEOPLE)
+                        },
+                        onOpenBrowser = {
+                            hasOpenedAlbumBrowser = true
+                            isAlbumBrowserVisible = true
+                        },
+                        onCreateAlbumClick = { parentPreset ->
+                            createAlbumPresetParent = parentPreset
+                            showCreateAlbumDialog = true
+                        },
+                        onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
+                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
+                    )
+                    }
+
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
                         media = visibleMedia,
@@ -860,36 +1727,7 @@ fun GalleryApp() {
                         onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
-                    Destination.ALBUMS -> AlbumsScreen(
-                        media = media,
-                        favourites = favourites,
-                        hidden = hidden,
-                        inBin = remember(media, inBin) { (inBin + media.filter { it.isTrashed }.map { it.uri }).toSet() },
-                        archive = archive,
-                        customAlbums = customAlbums,
-                        topContentPadding = topContentPadding,
-                        bottomContentPadding = bottomContentPadding,
-                        isRefreshing = isRefreshing,
-                        onRefresh = { refreshMedia(userInitiated = true) },
-                        onFilter = { when (it) { "Map" -> {
-                            navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
-                        onOpen = { openMediaInViewer(it, visibleMedia) },
-                        onOpenPerson = { personId ->
-                            activePersonId = personId
-                            navigateTo(Destination.PEOPLE)
-                        },
-                        onOpenBrowser = {
-                            hasOpenedAlbumBrowser = true
-                            isAlbumBrowserVisible = true
-                        },
-                        onCreateAlbumClick = { parentPreset ->
-                            createAlbumPresetParent = parentPreset
-                            showCreateAlbumDialog = true
-                        },
-                        onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
-                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
-                    )
+                    Destination.ALBUMS -> Unit
                     Destination.FAVOURITES -> {
                         val favouriteItems = remember(media, favourites, hidden, inBin, archive) {
                             media.filter { it.uri in favourites && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }

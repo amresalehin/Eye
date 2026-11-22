@@ -1223,6 +1223,18 @@ fun GalleryApp() {
                             isAlbumBrowserVisible = true
                         },
                         onBack = { performBackNavigation() },
+                        onHomeBack = {
+                            // The Inbox home search-bar arrow is a shortcut back to Settings,
+                            // not a request to pop whichever page happened to open the Inbox.
+                            backStack.clear()
+                            albumFilter = null
+                            navigateTo(
+                                dest = Destination.SETTINGS,
+                                rememberPrevious = false,
+                                newSelectedMedia = null,
+                                newMapFocusItem = null
+                            )
+                        },
                         onOpenMediaItem = { uri ->
                             val file = java.io.File(uri.removePrefix("file://"))
                             val fallbackName = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }

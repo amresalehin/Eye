@@ -189,6 +189,7 @@ private fun DownloaderBottomNavigationBar(
 @Composable
 fun MediaInboxScreen(
     onBack: () -> Unit,
+    onHomeBack: () -> Unit = onBack,
     initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
     onOpenMediaItem: ((String) -> Unit)? = null,
@@ -520,7 +521,7 @@ fun MediaInboxScreen(
                             onOpenActivity = {
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
-                            onBack = onBack,
+                            onBack = onHomeBack,
                             savedStacks = stacks,
                             onSelectStack = { stack ->
                                 selectedStackForDetail = stack

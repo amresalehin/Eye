@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amresalehin.emregallery.data.AdBlockEngine
+import com.amresalehin.emregallery.data.BrowserBlobCaptureStore
 import com.amresalehin.emregallery.data.BrowserHistoryManager
 import com.amresalehin.emregallery.data.BrowserSearchEngine
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
@@ -85,7 +86,8 @@ import java.util.concurrent.atomic.AtomicReference
 private data class PendingBrowserMediaCandidate(
     val rawUrl: String,
     val baseUrl: String,
-    val source: ExtractionSource
+    val source: ExtractionSource,
+    val mimeHint: String? = null
 )
 
 private data class BrowserRendererRecoverySnapshot(
@@ -242,6 +244,7 @@ fun DirectBrowserView(
     val currentSiteIsSaved = savedSites.any { it.domain.equals(currentSiteDomain, ignoreCase = true) }
 
     val seenRawUrls = remember { ConcurrentHashMap.newKeySet<String>() }
+    val blobCaptureStore = remember(context) { BrowserBlobCaptureStore(context) }
     val pendingCandidateChannel = remember { Channel<PendingBrowserMediaCandidate>(capacity = 512) }
     val activeBaseUrlRef = remember { AtomicReference(startUrl) }
     val pageTitleRef = remember { AtomicReference("") }
@@ -291,6 +294,7 @@ fun DirectBrowserView(
                         rawUrl = cand.rawUrl,
                         source = cand.source,
                         baseUrl = cand.baseUrl,
+                        mimeHint = cand.mimeHint,
                         indexHint = idx,
                         precomputedCookieHeader = cookieHeader
                     )
@@ -314,6 +318,7 @@ fun DirectBrowserView(
         onDispose {
             pendingDomScanJob?.cancel()
             pendingCandidateChannel.close()
+            blobCaptureStore.abortAll()
             webViewInstance?.let { wv ->
                 releaseBrowserWebView(wv)
                 webViewInstance = null
@@ -1240,20 +1245,36 @@ fun DirectBrowserView(
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, browserThirdPartyCookies)
 
                             addJavascriptInterface(
-                                BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
-                                    if (seenRawUrls.size < 2500 && seenRawUrls.add(rawUrl)) {
-                                        val base = activeBaseUrlRef.get()
-                                        if (base.isNotBlank()) {
-                                            pendingCandidateChannel.trySend(
-                                                PendingBrowserMediaCandidate(
-                                                    rawUrl = rawUrl,
-                                                    baseUrl = base,
-                                                    source = ExtractionSource.DOM_SCRAPE
+                                BrowserMediaExtractor.EmreMediaBridge(
+                                    onMediaFound = { rawUrl, mimeHint ->
+                                        if (seenRawUrls.size < 2500 && seenRawUrls.add(rawUrl)) {
+                                            val base = activeBaseUrlRef.get()
+                                            if (base.isNotBlank()) {
+                                                pendingCandidateChannel.trySend(
+                                                    PendingBrowserMediaCandidate(
+                                                        rawUrl = rawUrl,
+                                                        baseUrl = base,
+                                                        source = ExtractionSource.DOM_SCRAPE,
+                                                        mimeHint = mimeHint
+                                                    )
                                                 )
-                                            )
+                                            }
+                                        }
+                                    },
+                                    blobCaptureStore = blobCaptureStore,
+                                    onBlobCaptured = { item ->
+                                        coroutineScope.launch {
+                                            val pageUrl = item.provenance.pageUrl
+                                            val base = activeBaseUrlRef.get()
+                                            if (base.isNotBlank() && pageUrl == base) {
+                                                val title = pageTitleRef.get().ifBlank { null }
+                                                val domain = runCatching { URL(base).host }.getOrDefault("")
+                                                DownloaderSession.addDiscoveredItems(listOf(item), title)
+                                                latestOnBatchExtracted(listOf(item), title, domain)
+                                            }
                                         }
                                     }
-                                },
+                                ),
                                 "EmreBridge"
                             )
 
@@ -1383,6 +1404,7 @@ fun DirectBrowserView(
                                     return handleExternalNavigation(view, url)
                                 }
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    view?.evaluateJavascript(MediaCaptureEngine.getDynamicMediaCaptureScript(), null)
                                     if (!isLoading) isLoading = true
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
@@ -1461,7 +1483,8 @@ fun DirectBrowserView(
                                                     historyManager.recordVisit(it, recordedTitle)
                                                 }
                                             }
-                                            // Setup live MutationObserver and defer DOM scan slightly so first paint stays snappy
+                                            // Install dynamic media hooks before the live observer and DOM scan.
+                                            view?.evaluateJavascript(MediaCaptureEngine.getDynamicMediaCaptureScript(), null)
                                             view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
                                             if (it != lastScannedDomUrl) {
                                                 lastScannedDomUrl = it

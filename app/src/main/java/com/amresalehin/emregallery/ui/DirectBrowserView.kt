@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import coil.compose.AsyncImage
@@ -172,8 +173,14 @@ fun DirectBrowserView(
         mutableStateOf(browserDesktopSiteByDefault)
     }
     var isAddressBarFocused by remember { mutableStateOf(false) }
+    var browserToolbarFirstFrameReady by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        browserToolbarFirstFrameReady = true
+    }
 
     val clipboardManager = LocalClipboardManager.current
     val historyManager = remember { BrowserHistoryManager(context) }
@@ -373,13 +380,13 @@ fun DirectBrowserView(
             .background(MaterialTheme.colorScheme.surface)
             .testTag("direct_browser_view")
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
             // Full-width browser search pill, matching the app's standard top-bar treatment.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .zIndex(1f)
             ) {
                 Surface(
                     shape = CircleShape,
@@ -875,13 +882,21 @@ fun DirectBrowserView(
                 }
             }
 
-            // Loading Progress Bar (isolated so progress updates do not recompose the toolbar or WebView)
-            BrowserLoadingProgressBar(
-                isLoading = isLoading,
-                progressState = loadingProgressState
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 68.dp
+                )
+        ) {
+            if (browserToolbarFirstFrameReady) {
+                // Loading Progress Bar (isolated so progress updates do not recompose the toolbar or WebView)
+                BrowserLoadingProgressBar(
+                    isLoading = isLoading,
+                    progressState = loadingProgressState
+                )
 
-            // 2. Interactive WebView and Home Page Container
+                // 2. Interactive WebView and Home Page Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1258,6 +1273,7 @@ fun DirectBrowserView(
                             .testTag("browser_empty_home_page")
                     )
                 }
+            }
             }
         }
 

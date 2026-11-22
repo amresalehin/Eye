@@ -14,11 +14,13 @@ import java.io.File
 
 class LockedVaultManager(private val context: Context) {
 
-    private val vaultDir: File = File(context.filesDir, "locked_vault").apply {
-        if (!exists()) mkdirs()
-    }
-
+    // Keep construction side-effect free: this manager is created from Compose on the
+    // main thread, while directory creation belongs in the existing IO write paths.
+    private val vaultDir: File = File(context.filesDir, "locked_vault")
     private val metaFile: File = File(vaultDir, "vault_metadata.json")
+
+    private fun ensureVaultDirectory(): Boolean =
+        vaultDir.isDirectory || vaultDir.mkdirs()
 
     fun getVaultItems(): List<MediaItem> {
         if (!metaFile.exists()) return emptyList()
@@ -57,6 +59,7 @@ class LockedVaultManager(private val context: Context) {
     }
 
     private fun saveVaultItems(items: List<MediaItem>) {
+        if (!ensureVaultDirectory()) return
         val array = JSONArray()
         for (item in items) {
             val obj = JSONObject().apply {
@@ -81,6 +84,7 @@ class LockedVaultManager(private val context: Context) {
      * and deletes the original file from mainline storage (MediaStore).
      */
     suspend fun lockItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
+        if (!ensureVaultDirectory()) return@withContext emptyList()
         val currentVaultItems = getVaultItems().toMutableList()
         val lockedList = mutableListOf<MediaItem>()
 

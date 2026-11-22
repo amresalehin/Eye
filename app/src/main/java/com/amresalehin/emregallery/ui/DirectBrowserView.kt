@@ -152,6 +152,7 @@ fun DirectBrowserView(
     val loadingProgressState = remember { mutableFloatStateOf(0f) }
     var browserMenuExpanded by remember { mutableStateOf(false) }
     var showBrowserSettings by remember { mutableStateOf(false) }
+    var pageZoomPercent by remember { mutableIntStateOf(100) }
     var isDesktopMode by remember(browserDesktopSiteByDefault) {
         mutableStateOf(browserDesktopSiteByDefault)
     }
@@ -579,6 +580,82 @@ fun DirectBrowserView(
                                 modifier = Modifier.testTag("browser_menu_reload")
                             )
 
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .testTag("browser_menu_zoom_controls"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Zoom",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val view = webViewInstance ?: return@IconButton
+                                        val currentScale = view.scale.takeIf { it > 0f } ?: 1f
+                                        val targetScale = (currentScale * 0.9f).coerceAtLeast(0.5f)
+                                        if (targetScale < currentScale) {
+                                            view.zoomBy(targetScale / currentScale)
+                                            pageZoomPercent = Math.round(targetScale * 100f)
+                                        }
+                                    },
+                                    enabled = currentUrl.isNotBlank() && webViewInstance != null && pageZoomPercent > 50,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("browser_menu_zoom_out")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Remove,
+                                        contentDescription = "Zoom out",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Text(
+                                    text = pageZoomPercent.toString() + "%",
+                                    modifier = Modifier
+                                        .widthIn(min = 48.dp)
+                                        .clickable(enabled = currentUrl.isNotBlank() && pageZoomPercent != 100) {
+                                            val view = webViewInstance
+                                            if (view != null) {
+                                                val currentScale = view.scale.takeIf { it > 0f } ?: 1f
+                                                view.zoomBy(1f / currentScale)
+                                                pageZoomPercent = 100
+                                            }
+                                        }
+                                        .testTag("browser_menu_zoom_reset")
+                                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val view = webViewInstance ?: return@IconButton
+                                        val currentScale = view.scale.takeIf { it > 0f } ?: 1f
+                                        val targetScale = (currentScale * 1.1f).coerceAtMost(3f)
+                                        if (targetScale > currentScale) {
+                                            view.zoomBy(targetScale / currentScale)
+                                            pageZoomPercent = Math.round(targetScale * 100f)
+                                        }
+                                    },
+                                    enabled = currentUrl.isNotBlank() && webViewInstance != null && pageZoomPercent < 300,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("browser_menu_zoom_in")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Zoom in",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
                             HorizontalDivider()
 
                             DropdownMenuItem(
@@ -867,6 +944,11 @@ fun DirectBrowserView(
                             }
 
                             webViewClient = object : WebViewClient() {
+                                override fun onScaleChanged(view: WebView?, oldScale: Float, newScale: Float) {
+                                    super.onScaleChanged(view, oldScale, newScale)
+                                    pageZoomPercent = Math.round(newScale * 100f).coerceIn(1, 500)
+                                }
+
                                 private fun handleExternalNavigation(view: WebView?, urlString: String): Boolean {
                                     if (urlString.isBlank()) return false
                                     val lower = urlString.trim().lowercase()

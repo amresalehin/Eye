@@ -171,7 +171,7 @@ class BrowserBlobCaptureStore(context: Context) {
     }
 
     companion object {
-        private const val MAX_CONCURRENT_CAPTURES = 4
+        private const val MAX_CONCURRENT_CAPTURES = 2
         private const val MAX_CAPTURE_BYTES = 512L * 1024L * 1024L
         private const val IO_BUFFER_BYTES = 64 * 1024
         private const val MAX_ENCODED_CHUNK_CHARS = 96 * 1024

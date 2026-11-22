@@ -52,7 +52,7 @@ object LiveBrowserWebViewRegistry {
         override fun close() {
             if (closed) return
             closed = true
-            unregister(token)
+            LiveBrowserWebViewRegistry.unregister(token)
         }
     }
 

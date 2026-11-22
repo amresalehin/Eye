@@ -82,6 +82,7 @@ fun GalleryApp(
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context.applicationContext) }
     val mediaRepository = remember { MediaRepository(context.contentResolver) }
+    val mediaSnapshotContext = remember(context) { context.applicationContext }
     val lockedVaultManager = remember { LockedVaultManager(context.applicationContext) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
@@ -177,27 +178,50 @@ fun GalleryApp(
                 }
             }
             if (hasMediaPermission(context)) {
-                if (!userInitiated && media.isEmpty()) {
-                    val initialBatch = withContext(Dispatchers.IO) {
-                        runCatching { mediaRepository.loadMediaInitial() }.getOrDefault(emptyList())
-                    }
-                    if (initialBatch.isNotEmpty()) {
-                        // Render the first batch immediately. Visible cells load their own images;
-                        // start library prewarming only once the complete media list is available.
-                        media = initialBatch
-                        loading = false
-                    }
-                }
-                val loadedMedia = withContext(Dispatchers.IO) {
-                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
-                }
-                media = loadedMedia
+                var completedMediaQuery = false
 
-                // Start disk-backed preparation after permissions and the MediaStore list are ready.
-                // This worker is independent of composition and never holds the whole library in RAM.
-                scope.launch(Dispatchers.Default) {
-                    // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
-                    ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                if (!userInitiated && media.isEmpty()) {
+                    val initialResult = withContext(Dispatchers.IO) {
+                        runCatching { mediaRepository.loadMediaInitialResult() }.getOrNull()
+                    }
+                    if (initialResult != null &&
+                        initialResult.successfulCollections > 0 &&
+                        initialResult.items.isNotEmpty()
+                    ) {
+                        // Show the first usable batch immediately. An empty initial batch is not
+                        // treated as proof that the complete library is empty.
+                        media = initialResult.items
+                        loading = false
+                        completedMediaQuery = true
+                    }
+                }
+
+                val loadedResult = withContext(Dispatchers.IO) {
+                    runCatching { mediaRepository.loadMediaResult() }.getOrNull()
+                }
+                if (loadedResult != null && loadedResult.successfulCollections > 0) {
+                    val loadedMedia = loadedResult.items
+                    media = loadedMedia
+                    loading = false
+                    completedMediaQuery = true
+
+                    // Persist a small metadata-only first-page snapshot for instant next launch.
+                    withContext(Dispatchers.IO) {
+                        MediaSnapshotCache.write(mediaSnapshotContext, loadedMedia)
+                    }
+
+                    // Existing prepared thumbnails are reused; the prewarmer skips disk hits.
+                    scope.launch(Dispatchers.Default) {
+                        ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                    }
+                } else if (media.isNotEmpty()) {
+                    // Transient or permission-limited failures must not replace valid media with an
+                    // empty list or flash the empty-library message.
+                    loading = false
+                }
+
+                if (completedMediaQuery && media.isEmpty()) {
+                    loading = false
                 }
             }
             if (userInitiated) {
@@ -215,7 +239,18 @@ fun GalleryApp(
         scope.launch(Dispatchers.IO) {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
         }
-        if (hasMediaPermission(context)) refreshMedia()
+        if (hasMediaPermission(context)) {
+            // Restore recent metadata immediately, then reconcile against the live MediaStore.
+            // Thumbnail bytes continue to come from the existing Coil/prepared disk caches.
+            val cachedMedia = withContext(Dispatchers.IO) {
+                MediaSnapshotCache.read(mediaSnapshotContext)
+            }
+            if (!cachedMedia.isNullOrEmpty()) {
+                media = cachedMedia
+                loading = false
+            }
+            refreshMedia()
+        }
     }
     LaunchedEffect(media, hidden, inBin) {
         if (media.isNotEmpty()) {

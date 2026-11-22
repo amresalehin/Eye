@@ -486,6 +486,87 @@ object GalleryDlEngine {
     }
 
     /**
+     * Copies a browser-captured Blob from app-private staging into the user's download directory.
+     * The source path is constrained to the dedicated capture directory; arbitrary file:// URLs
+     * from page content are never accepted as local download sources.
+     */
+    private fun copyCapturedBlobMedia(
+        context: Context,
+        mediaUrl: String,
+        fileName: String,
+        downloadId: String?,
+        subfolder: String?
+    ): GalleryDlDownloadResult {
+        return try {
+            val source = File(java.net.URI(mediaUrl)).canonicalFile
+            val captureRoot = File(context.applicationContext.filesDir, "browser_blob_captures").canonicalFile
+            val permittedPrefix = captureRoot.path + File.separator
+            if (!source.path.startsWith(permittedPrefix) || !source.isFile || source.length() <= 0L) {
+                return GalleryDlDownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = 400,
+                    errorMessage = "Captured browser media is missing or outside the app capture directory"
+                )
+            }
+
+            val targetDir = OkHttpDownloader.getTargetStorageDir(context, subfolder)
+            val safeName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "captured_media" }
+            val extension = safeName.substringAfterLast('.', "")
+            val cleanId = downloadId?.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val targetName = if (!cleanId.isNullOrBlank()) {
+                if (extension.isNotBlank() && !cleanId.endsWith(".$extension", ignoreCase = true)) "$cleanId.$extension" else cleanId
+            } else safeName
+            val target = File(targetDir, targetName)
+            if (source.canonicalPath == target.canonicalPath) {
+                return GalleryDlDownloadResult(
+                    file = target,
+                    isSuccessful = true,
+                    statusCode = 200,
+                    bytesDownloaded = target.length(),
+                    mimeType = android.webkit.MimeTypeMap.getSingleton()
+                        .getMimeTypeFromExtension(target.extension.lowercase(Locale.ROOT)),
+                    engineUsed = "browser-blob"
+                )
+            }
+
+            source.copyTo(target, overwrite = true)
+            if (!target.exists() || target.length() <= 0L) {
+                return GalleryDlDownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = 500,
+                    errorMessage = "Captured browser media could not be copied to download storage"
+                )
+            }
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(target.extension.lowercase(Locale.ROOT))
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(target.absolutePath),
+                arrayOf(mimeType),
+                null
+            )
+            GalleryDlDownloadResult(
+                file = target,
+                isSuccessful = true,
+                statusCode = 200,
+                bytesDownloaded = target.length(),
+                mimeType = mimeType,
+                engineUsed = "browser-blob"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to finalize browser-captured Blob", e)
+            GalleryDlDownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = 500,
+                errorMessage = e.localizedMessage ?: "Failed to copy browser-captured media"
+            )
+        }
+    }
+
+    /**
      * Ensures a downloaded Reddit `v.redd.it` video file contains its companion audio track,
      * probing and muxing the separate DASH audio stream via yt-dlp / gallery-dl if needed.
      */
@@ -565,6 +646,16 @@ object GalleryDlEngine {
         isStream: Boolean = false,
         onProgress: ((bytesRead: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit)? = null
     ): GalleryDlDownloadResult = withContext(Dispatchers.IO) {
+        if (mediaUrl.startsWith("file:", ignoreCase = true)) {
+            return@withContext copyCapturedBlobMedia(
+                context = context,
+                mediaUrl = mediaUrl,
+                fileName = fileName,
+                downloadId = downloadId,
+                subfolder = subfolder
+            )
+        }
+
         if (mediaUrl.startsWith("data:image/", ignoreCase = true)) {
             return@withContext downloadDataUriMedia(
                 context = context,

@@ -120,7 +120,11 @@ fun SettingsScreen(
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            if (theme == "dark") Icons.Default.DarkMode else Icons.Default.LightMode,
+                                            when (theme) {
+                                                "dark" -> Icons.Default.DarkMode
+                                                "light" -> Icons.Default.LightMode
+                                                else -> Icons.Default.BrightnessAuto
+                                            },
                                             contentDescription = null,
                                             modifier = Modifier.size(24.dp),
                                             tint = MaterialTheme.colorScheme.primary
@@ -142,7 +146,7 @@ fun SettingsScreen(
                                 }
                             }
 
-                            // Compact, icon-only Light/Dark toggle using sun and moon icons
+                            // Three-way theme selector: follow the device, or choose a fixed palette.
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -155,12 +159,31 @@ fun SettingsScreen(
                                 ) {
                                     val isLight = theme == "light"
                                     val isDark = theme == "dark"
+                                    val isAuto = !isLight && !isDark
+
+                                    Surface(
+                                        onClick = { onTheme("system") },
+                                        shape = CircleShape,
+                                        color = if (isAuto) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                        modifier = Modifier.size(34.dp).testTag("settings_theme_auto")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.BrightnessAuto,
+                                                contentDescription = "Auto theme",
+                                                tint = if (isAuto) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(2.dp))
 
                                     Surface(
                                         onClick = { onTheme("light") },
                                         shape = CircleShape,
                                         color = if (isLight) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
-                                        modifier = Modifier.size(34.dp)
+                                        modifier = Modifier.size(34.dp).testTag("settings_theme_light")
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
@@ -178,7 +201,7 @@ fun SettingsScreen(
                                         onClick = { onTheme("dark") },
                                         shape = CircleShape,
                                         color = if (isDark) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
-                                        modifier = Modifier.size(34.dp)
+                                        modifier = Modifier.size(34.dp).testTag("settings_theme_dark")
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(

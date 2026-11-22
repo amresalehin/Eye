@@ -53,6 +53,18 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
+
+    // Robolectric downloads Android framework jars at test runtime. Use the
+    // Google-hosted Maven Central mirror instead of repo1.maven.org, which
+    // is intermittently unreachable from hosted CI runners.
+    testOptions {
+        unitTests.all {
+            it.systemProperty(
+                "robolectric.dependency.repo.url",
+                "https://maven-central.storage-download.googleapis.com/maven2"
+            )
+        }
+    }
 }
 
 dependencies {

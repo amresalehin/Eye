@@ -21,8 +21,6 @@ import kotlinx.coroutines.delay
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,7 +34,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.zIndex
@@ -851,33 +848,6 @@ fun GalleryApp(
                                 shape = RoundedCornerShape((p * 28).dp)
                                 clip = true
                                 shadowElevation = (p * 20).dp.toPx()
-                            }
-                        }
-                        .pointerInput(destination, showSidePanel, albumFilter) {
-                            // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
-                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
-                                val edgeWidth = 32.dp.toPx()
-                                val slop = viewConfiguration.touchSlop * 1.5f
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    if (down.position.x <= edgeWidth) {
-                                        var totalDragX = 0f
-                                        var totalDragY = 0f
-                                        do {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == down.id }
-                                            if (change != null) {
-                                                totalDragX += change.position.x - change.previousPosition.x
-                                                totalDragY += change.position.y - change.previousPosition.y
-                                                if (totalDragX > slop && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY) * 1.5f) {
-                                                    showSidePanel = true
-                                                    change.consume()
-                                                    break
-                                                }
-                                            }
-                                        } while (event.changes.any { it.pressed })
-                                    }
-                                }
                             }
                         }
                 ) {

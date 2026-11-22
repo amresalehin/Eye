@@ -310,6 +310,20 @@ class DualMediaExtractor(private val context: Context) {
     private val _state = MutableStateFlow(ExtractionState())
     val state: StateFlow<ExtractionState> = _state.asStateFlow()
 
+    companion object {
+        /**
+         * Kept for source and test compatibility. Browser extraction must never be suppressed
+         * because yt-dlp or gallery-dl already discovered media.
+         */
+        @Deprecated("Browser discovery now always runs alongside structured extractors")
+        fun shouldSkipHeadlessBrowser(
+            targetUrl: String,
+            isStructuredApplicable: Boolean,
+            gdlResult: MediaExtractionResult?,
+            ytdlpResult: MediaExtractionResult?
+        ): Boolean = false
+    }
+
     // Every applicable discovery engine is allowed to contribute results.
     // A successful structured extractor must never suppress browser discovery.
 

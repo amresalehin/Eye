@@ -46,6 +46,7 @@ import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.data.MediaSnapshotCache
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr

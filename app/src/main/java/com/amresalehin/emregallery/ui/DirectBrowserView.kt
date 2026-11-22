@@ -1442,6 +1442,8 @@ fun DirectBrowserView(
                                     } ?: return
                                     if (navigatedUrl == lastNotifiedUrl) return
 
+                                    blobCaptureStore.abortAll()
+                                    activeBaseUrlRef.set(navigatedUrl)
                                     pendingDomScanJob?.cancel()
                                     seenRawUrls.clear()
                                     lastScannedDomUrl = ""

@@ -212,11 +212,26 @@ object MediaCaptureEngine {
                     } catch(e) {}
                 }
 
-                async function captureBlobUrl(rawUrl, mimeHint, nameHint) {
+                var pendingBlobCaptures = window.__emrePendingBlobCaptures || [];
+                var queuedBlobUrls = window.__emreQueuedBlobUrls || new Set();
+                window.__emrePendingBlobCaptures = pendingBlobCaptures;
+                window.__emreQueuedBlobUrls = queuedBlobUrls;
+
+                function captureBlobUrl(rawUrl, mimeHint, nameHint) {
                     if (typeof rawUrl !== 'string' || rawUrl.indexOf('blob:') !== 0) return;
-                    if (seenBlobUrls.has(rawUrl) || activeBlobUrls.size >= 2) return;
-                    seenBlobUrls.add(rawUrl);
-                    activeBlobUrls.add(rawUrl);
+                    if (seenBlobUrls.has(rawUrl) || activeBlobUrls.has(rawUrl) || queuedBlobUrls.has(rawUrl)) return;
+                    if (pendingBlobCaptures.length >= 128) return;
+                    queuedBlobUrls.add(rawUrl);
+                    pendingBlobCaptures.push({
+                        url: rawUrl,
+                        mimeHint: mimeHint || '',
+                        nameHint: nameHint || ''
+                    });
+                    pumpBlobCaptureQueue();
+                }
+
+                async function transferBlobCapture(request) {
+                    var rawUrl = request.url;
                     var captureId = 'blob_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
                     var started = false;
                     try {
@@ -226,11 +241,11 @@ object MediaCaptureEngine {
                         if (!response || !response.ok || !response.body || !response.body.getReader) return;
 
                         var responseMime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-                        if (!isMediaMime(responseMime)) responseMime = mimeHint || responseMime;
+                        if (!isMediaMime(responseMime)) responseMime = request.mimeHint || responseMime;
                         if (!isMediaMime(responseMime)) return;
 
                         var contentLength = Number(response.headers.get('content-length') || 0);
-                        var fileName = nameHint || 'captured_media';
+                        var fileName = request.nameHint || 'captured_media';
                         started = window.EmreBridge.beginBlobCapture(captureId, responseMime, fileName, contentLength);
                         if (!started) return;
 
@@ -252,12 +267,24 @@ object MediaCaptureEngine {
                             throw new Error('Native Blob capture could not finalize the file');
                         }
                         started = false;
+                        seenBlobUrls.add(rawUrl);
                     } catch(e) {
                         if (started && window.EmreBridge && window.EmreBridge.abortBlobCapture) {
                             try { window.EmreBridge.abortBlobCapture(captureId); } catch(ignore) {}
                         }
                     } finally {
                         activeBlobUrls.delete(rawUrl);
+                        pumpBlobCaptureQueue();
+                    }
+                }
+
+                function pumpBlobCaptureQueue() {
+                    while (activeBlobUrls.size < 2 && pendingBlobCaptures.length > 0) {
+                        var request = pendingBlobCaptures.shift();
+                        queuedBlobUrls.delete(request.url);
+                        if (seenBlobUrls.has(request.url) || activeBlobUrls.has(request.url)) continue;
+                        activeBlobUrls.add(request.url);
+                        transferBlobCapture(request);
                     }
                 }
 
@@ -267,8 +294,10 @@ object MediaCaptureEngine {
                     return new Promise(function(resolve) {
                         var startedAt = Date.now();
                         function poll() {
-                            if (activeBlobUrls.size === 0 || Date.now() - startedAt >= timeout) {
-                                resolve(activeBlobUrls.size === 0);
+                            if (activeBlobUrls.size === 0 && pendingBlobCaptures.length === 0) {
+                                resolve(true);
+                            } else if (Date.now() - startedAt >= timeout) {
+                                resolve(false);
                             } else {
                                 setTimeout(poll, 100);
                             }

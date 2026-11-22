@@ -404,7 +404,7 @@ fun DirectBrowserView(
         }.getOrDefault(false)
         browserRecoverySnapshot = BrowserRendererRecoverySnapshot(
             url = url,
-            webViewState = state.takeIf { stateSaved }?.let(::Bundle),
+            webViewState = if (stateSaved) Bundle(state) else null,
             scrollX = activeView.scrollX,
             scrollY = activeView.scrollY
         )
@@ -1245,9 +1245,11 @@ fun DirectBrowserView(
                                     }
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
-                                    view?.post {
-                                        if (webViewInstance === view && view.url == url) {
-                                            captureBrowserRecoverySnapshot(view)
+                                    view?.let { finishedView ->
+                                        finishedView.post {
+                                            if (webViewInstance === finishedView && finishedView.url == url) {
+                                                captureBrowserRecoverySnapshot(finishedView)
+                                            }
                                         }
                                     }
                                 }
@@ -1339,18 +1341,17 @@ fun DirectBrowserView(
                                 }
                             }
 
-                            val restoredHistory = if (
-                                webViewGeneration > 0 &&
-                                recoverySnapshot?.webViewState != null
-                            ) {
-                                runCatching {
-                                    restoreState(Bundle(recoverySnapshot.webViewState))
-                                }.onFailure {
-                                    Log.w("DirectBrowserView", "Failed to restore WebView navigation state", it)
-                                }.getOrNull()
+                            val restoredHistory = if (webViewGeneration > 0) {
+                                recoverySnapshot?.webViewState?.let { savedState ->
+                                    runCatching {
+                                        restoreState(Bundle(savedState))
+                                    }.onFailure {
+                                        Log.w("DirectBrowserView", "Failed to restore WebView navigation state", it)
+                                    }.getOrNull()
+                                }
                             } else null
 
-                            if (restoredHistory != null) {
+                            if (restoredHistory != null && recoverySnapshot != null) {
                                 val restoredUrl = url?.takeIf {
                                     it.startsWith("http://", ignoreCase = true) ||
                                         it.startsWith("https://", ignoreCase = true)

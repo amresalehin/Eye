@@ -61,6 +61,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.amresalehin.emregallery.data.AdBlockEngine
 import com.amresalehin.emregallery.data.BrowserBlobCaptureStore
 import com.amresalehin.emregallery.data.BrowserHistoryManager
+import com.amresalehin.emregallery.data.LiveBrowserWebViewRegistry
 import com.amresalehin.emregallery.data.BrowserSearchEngine
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.BrowserMediaExtractor
@@ -215,6 +216,7 @@ fun DirectBrowserView(
 
     fun releaseBrowserWebView(view: WebView) {
         if (!destroyedWebViews.add(view)) return
+        LiveBrowserWebViewRegistry.unregister(view)
         runCatching { (view.parent as? android.view.ViewGroup)?.removeView(view) }
         runCatching { view.stopLoading() }
         runCatching { view.removeJavascriptInterface("EmreBridge") }
@@ -309,6 +311,9 @@ fun DirectBrowserView(
                 val title = pageTitleRef.get().ifBlank { null }
                 val domain = runCatching { URL(activePageUrl).host }.getOrDefault("")
                 DownloaderSession.addDiscoveredItems(builtItems, title)
+                webViewInstance?.let { liveView ->
+                    LiveBrowserWebViewRegistry.publish(liveView, activePageUrl, builtItems)
+                }
                 latestOnBatchExtracted(builtItems, title, domain)
             }
         }
@@ -613,6 +618,7 @@ fun DirectBrowserView(
                     val domain = runCatching { URL(current).host }.getOrDefault("")
                     val title = pageTitleRef.get()
                     DownloaderSession.addDiscoveredItems(discovered, title)
+                    LiveBrowserWebViewRegistry.publish(wv, current, discovered)
                     latestOnBatchExtracted(discovered, title, domain)
                 }
             }
@@ -1186,6 +1192,16 @@ fun DirectBrowserView(
                         WebView(ctx).apply {
                             setBackgroundColor(browserSurfaceColor)
                             webViewInstance = this
+                            LiveBrowserWebViewRegistry.register(
+                                webView = this,
+                                currentUrl = { activeBaseUrlRef.get() },
+                                pageTitle = { pageTitleRef.get() },
+                                requestScan = {
+                                    if (webViewInstance === this && this.url == activeBaseUrlRef.get()) {
+                                        scanCurrentPageDOM(this)
+                                    }
+                                }
+                            )
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -1270,6 +1286,7 @@ fun DirectBrowserView(
                                                 val title = pageTitleRef.get().ifBlank { null }
                                                 val domain = runCatching { URL(base).host }.getOrDefault("")
                                                 DownloaderSession.addDiscoveredItems(listOf(item), title)
+                                                LiveBrowserWebViewRegistry.publish(webViewInstance, pageUrl, listOf(item))
                                                 latestOnBatchExtracted(listOf(item), title, domain)
                                             }
                                         }

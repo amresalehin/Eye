@@ -170,6 +170,11 @@ fun AlbumsScreen(
     val hapticFeedback = LocalHapticFeedback.current
     val pullRefreshState = rememberPullToRefreshState()
 
+    // Keep the native osmdroid view alive at screen scope. LazyColumn may dispose
+    // the map card when it scrolls out of composition, but the Albums screen itself
+    // remains mounted across navigation, so this reference survives both cases.
+    var mapPreviewView by remember(context) { mutableStateOf<MapView?>(null) }
+
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
@@ -738,17 +743,12 @@ fun AlbumsScreen(
                         .fillMaxWidth()
                         .height(180.dp)
                 ) {
-                    var mapPreviewReady by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) {
-                        kotlinx.coroutines.delay(160)
-                        mapPreviewReady = true
-                    }
-                    if (mapPreviewReady) {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { ctx ->
-                                Configuration.getInstance().userAgentValue = ctx.packageName
-                                MapView(ctx).apply {
+                    if (mapPreviewView == null) {
+                        LaunchedEffect(Unit) {
+                            kotlinx.coroutines.delay(160)
+                            if (mapPreviewView == null) {
+                                Configuration.getInstance().userAgentValue = context.packageName
+                                mapPreviewView = MapView(context).apply {
                                     setTileSource(TileSourceFactory.MAPNIK)
                                     setMultiTouchControls(false)
                                     setBuiltInZoomControls(false)
@@ -756,12 +756,16 @@ fun AlbumsScreen(
                                     controller.setCenter(GeoPoint(22.5, 79.0))
                                     isClickable = false
                                     isFocusable = false
+                                    setOnTouchListener { _, _ -> false }
                                 }
-                            },
-                            update = { preview ->
-                                preview.setOnTouchListener { _, _ -> false }
-                                preview.invalidate()
                             }
+                        }
+                    }
+                    val previewView = mapPreviewView
+                    if (previewView != null) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { previewView }
                         )
                     } else {
                         Box(

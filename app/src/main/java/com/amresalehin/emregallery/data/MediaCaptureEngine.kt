@@ -305,8 +305,12 @@ object MediaCaptureEngine {
                 var list = [];
                 var seen = Object.create(null);
                 var baseHref = document.baseURI || window.location.href;
-                function resolveAbs(u) {
-                    if (!u || u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return null;
+                function resolveAbs(u, mimeHint, nameHint) {
+                    if (!u || u.indexOf('data:') === 0) return null;
+                    if (u.indexOf('blob:') === 0) {
+                        if (window.__emreCaptureBlobUrl) window.__emreCaptureBlobUrl(u, mimeHint || '', nameHint || '');
+                        return null;
+                    }
                     try {
                         return new URL(u, baseHref).href;
                     } catch(e) {
@@ -354,7 +358,7 @@ object MediaCaptureEngine {
                                 var splitBits = trimmed.split(/\s+/);
                                 var u = splitBits[0];
                                 var descriptor = splitBits[1] || '';
-                                var absSrcset = resolveAbs(u);
+                                var absSrcset = resolveAbs(u, 'image/jpeg', img.getAttribute('alt') || '');
                                 if (absSrcset) {
                                     pushCandidate({u: absSrcset, s: 'SRCSET', r: descriptor});
                                 }
@@ -367,12 +371,12 @@ object MediaCaptureEngine {
                                   img.getAttribute('data-lazy-src') || img.getAttribute('data-large-file') ||
                                   img.getAttribute('data-hi-res-src') || img.getAttribute('data-zoom-image');
                     if (dataSrc) {
-                        var absData = resolveAbs(dataSrc);
+                        var absData = resolveAbs(dataSrc, 'image/jpeg', img.getAttribute('alt') || '');
                         if (absData) pushCandidate({u: absData, s: 'DATA_SRC'});
                     }
                     var rawSrc = img.src || img.getAttribute('src');
                     if (rawSrc) {
-                        var absRaw = resolveAbs(rawSrc);
+                        var absRaw = resolveAbs(rawSrc, 'image/jpeg', img.getAttribute('alt') || '');
                         if (absRaw) pushCandidate({u: absRaw, s: 'DOM'});
                     }
                 }
@@ -381,15 +385,15 @@ object MediaCaptureEngine {
                 var videos = document.querySelectorAll('video');
                 for (var v = 0; v < videos.length; v++) {
                     var vid = videos[v];
-                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster);
+                    var poster = resolveAbs(vid.getAttribute('poster') || vid.poster, 'image/jpeg', vid.getAttribute('title') || '');
                     var vDur = (typeof vid.duration === 'number' && isFinite(vid.duration) && vid.duration > 0)
                         ? vid.duration
                         : (vid.getAttribute('duration') || vid.getAttribute('data-duration') || null);
-                    var chosenVideo = resolveAbs(vid.src);
+                    var chosenVideo = resolveAbs(vid.src, vid.getAttribute('type') || 'video/mp4', vid.getAttribute('title') || vid.getAttribute('download') || '');
                     if (!chosenVideo) {
                         var vsources = vid.querySelectorAll('source');
                         for (var j = 0; j < vsources.length; j++) {
-                            chosenVideo = resolveAbs(vsources[j].src);
+                            chosenVideo = resolveAbs(vsources[j].src, vsources[j].type || 'video/mp4', vid.getAttribute('title') || '');
                             if (chosenVideo) break;
                         }
                     }
@@ -407,11 +411,11 @@ object MediaCaptureEngine {
                     var aDur = (typeof au.duration === 'number' && isFinite(au.duration) && au.duration > 0)
                         ? au.duration
                         : (au.getAttribute('duration') || au.getAttribute('data-duration') || null);
-                    var chosenAudio = resolveAbs(au.src);
+                    var chosenAudio = resolveAbs(au.src, au.getAttribute('type') || 'audio/mpeg', au.getAttribute('title') || au.getAttribute('download') || '');
                     if (!chosenAudio) {
                         var asources = au.querySelectorAll('source');
                         for (var k = 0; k < asources.length; k++) {
-                            chosenAudio = resolveAbs(asources[k].src);
+                            chosenAudio = resolveAbs(asources[k].src, asources[k].type || 'audio/mpeg', au.getAttribute('title') || '');
                             if (chosenAudio) break;
                         }
                     }
@@ -457,7 +461,7 @@ object MediaCaptureEngine {
                         if (bg && bg.indexOf('url(') !== -1) {
                             var match = bg.match(/url\(['"]?(.*?)['"]?\)/);
                             if (match && match[1]) {
-                                var bgu = resolveAbs(match[1]);
+                                var bgu = resolveAbs(match[1], 'image/jpeg', bEl.getAttribute('title') || '');
                                 if (bgu) pushCandidate({u: bgu, s: 'CSS', r: 'background'});
                             }
                         }
@@ -484,14 +488,21 @@ object MediaCaptureEngine {
     fun getMutationObserverScript(): String {
         return """
             (function() {
-                if (window.__emreObserverInstalled) return;
+                if (window.__emreObserverInstalled) {
+                    if (window.__emreScanBlobElements) window.__emreScanBlobElements();
+                    return;
+                }
                 window.__emreObserverInstalled = true;
                 var seenUrls = new Set();
                 var pendingNodes = new Set();
                 var flushTimer = null;
 
-                function report(u) {
-                    if (!u || u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return;
+                function report(u, mimeHint, nameHint) {
+                    if (!u || u.indexOf('data:') === 0) return;
+                    if (u.indexOf('blob:') === 0) {
+                        if (window.__emreCaptureBlobUrl) window.__emreCaptureBlobUrl(u, mimeHint || '', nameHint || '');
+                        return;
+                    }
                     if (seenUrls.has(u)) return;
                     try {
                         var abs = new URL(u, document.baseURI || window.location.href).href;
@@ -509,12 +520,13 @@ object MediaCaptureEngine {
                     if (!node || node.nodeType !== 1) return false;
                     var tag = node.tagName ? node.tagName.toUpperCase() : '';
                     if (tag === 'IMG') {
-                        report(node.src);
-                        report(node.getAttribute('data-src'));
-                        report(node.getAttribute('data-original'));
-                        report(node.getAttribute('data-lazy-src'));
-                        report(node.getAttribute('data-large-file'));
-                        report(node.getAttribute('data-hi-res-src'));
+                        var imageName = node.getAttribute('alt') || node.getAttribute('title') || '';
+                        report(node.src, 'image/jpeg', imageName);
+                        report(node.getAttribute('data-src'), 'image/jpeg', imageName);
+                        report(node.getAttribute('data-original'), 'image/jpeg', imageName);
+                        report(node.getAttribute('data-lazy-src'), 'image/jpeg', imageName);
+                        report(node.getAttribute('data-large-file'), 'image/jpeg', imageName);
+                        report(node.getAttribute('data-hi-res-src'), 'image/jpeg', imageName);
                         var srcset = node.getAttribute('srcset') || node.getAttribute('data-srcset');
                         if (srcset) {
                             var parts = srcset.split(',');
@@ -525,29 +537,31 @@ object MediaCaptureEngine {
                         }
                         return true;
                     } else if (tag === 'VIDEO') {
-                        if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
-                            report(node.src);
+                        var videoName = node.getAttribute('title') || node.getAttribute('download') || '';
+                        if (node.src && node.src.indexOf('data:') !== 0) {
+                            report(node.src, node.getAttribute('type') || 'video/mp4', videoName);
                         } else if (node.querySelectorAll) {
                             var vSources = node.querySelectorAll('source');
                             for (var vs = 0; vs < vSources.length; vs++) {
                                 var vsSrc = vSources[vs].src;
-                                if (vsSrc && vsSrc.indexOf('blob:') !== 0 && vsSrc.indexOf('data:') !== 0) {
-                                    report(vsSrc);
+                                if (vsSrc && vsSrc.indexOf('data:') !== 0) {
+                                    report(vsSrc, vSources[vs].type || 'video/mp4', videoName);
                                     break;
                                 }
                             }
                         }
-                        report(node.getAttribute('poster'));
+                        report(node.getAttribute('poster'), 'image/jpeg', videoName);
                         return true;
                     } else if (tag === 'AUDIO') {
-                        if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
-                            report(node.src);
+                        var audioName = node.getAttribute('title') || node.getAttribute('download') || '';
+                        if (node.src && node.src.indexOf('data:') !== 0) {
+                            report(node.src, node.getAttribute('type') || 'audio/mpeg', audioName);
                         } else if (node.querySelectorAll) {
                             var aSources = node.querySelectorAll('source');
                             for (var as = 0; as < aSources.length; as++) {
                                 var asSrc = aSources[as].src;
-                                if (asSrc && asSrc.indexOf('blob:') !== 0 && asSrc.indexOf('data:') !== 0) {
-                                    report(asSrc);
+                                if (asSrc && asSrc.indexOf('data:') !== 0) {
+                                    report(asSrc, aSources[as].type || 'audio/mpeg', audioName);
                                     break;
                                 }
                             }
@@ -556,7 +570,7 @@ object MediaCaptureEngine {
                     } else if (tag === 'SOURCE') {
                         var parentTag = node.parentNode ? (node.parentNode.tagName || '').toUpperCase() : '';
                         if (parentTag !== 'VIDEO' && parentTag !== 'AUDIO') {
-                            report(node.src);
+                            report(node.src, node.getAttribute('type') || 'image/jpeg', node.getAttribute('title') || '');
                             var sSrcset = node.getAttribute('srcset');
                             if (sSrcset) {
                                 var sParts = sSrcset.split(',');
@@ -606,6 +620,7 @@ object MediaCaptureEngine {
                     }
                 });
 
+                if (window.__emreScanBlobElements) window.__emreScanBlobElements();
                 observer.observe(document.body || document.documentElement, {
                     childList: true,
                     subtree: true,

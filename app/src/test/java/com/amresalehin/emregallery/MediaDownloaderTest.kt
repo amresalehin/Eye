@@ -1524,17 +1524,29 @@ class MediaDownloaderTest {
         assertTrue(redditAudioCandidates.contains("https://v.redd.it/k8m9n0p/DASH_audio.mp4"))
         assertTrue(redditAudioCandidates.contains("https://v.redd.it/k8m9n0p/CMAF_AUDIO_128.mp4"))
 
-        // 4. DualMediaExtractor gates headless BrowserProvider when structured extractor succeeds
+        // 4. Browser extraction must not be skipped when either structured extractor succeeds.
         val ytdlpSuccess = com.amresalehin.emregallery.data.MediaExtractionResult(
             items = listOf(parsedItems[0]),
             pageTitle = "Reddit Video Post"
         )
-        assertTrue(
+        val galleryDlSuccess = com.amresalehin.emregallery.data.MediaExtractionResult(
+            items = listOf(parsedItems[0]),
+            pageTitle = "Reddit Gallery"
+        )
+        assertFalse(
             com.amresalehin.emregallery.data.DualMediaExtractor.shouldSkipHeadlessBrowser(
                 targetUrl = "https://www.reddit.com/r/videos/comments/123/clip/",
                 isStructuredApplicable = true,
                 gdlResult = null,
                 ytdlpResult = ytdlpSuccess
+            )
+        )
+        assertFalse(
+            com.amresalehin.emregallery.data.DualMediaExtractor.shouldSkipHeadlessBrowser(
+                targetUrl = "https://www.reddit.com/r/videos/comments/123/clip/",
+                isStructuredApplicable = true,
+                gdlResult = galleryDlSuccess,
+                ytdlpResult = null
             )
         )
         assertFalse(

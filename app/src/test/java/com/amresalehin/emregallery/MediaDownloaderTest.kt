@@ -1618,13 +1618,26 @@ class MediaDownloaderTest {
         assertEquals("yt-dlp", parsedItems[0].provenance.extractorEngine)
         assertEquals("gallery-dl", parsedItems[1].provenance.extractorEngine)
 
-        // 2. YtDlpProvider.matchesSupportedHost covers Reddit, X/Twitter, and fb.watch
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://www.reddit.com/r/funny/comments/abc/vid/"))
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://v.redd.it/xyz987/DASH_720.mp4"))
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://redd.it/xyz987"))
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://x.com/user/status/123456"))
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://twitter.com/user/status/123456"))
-        assertTrue(com.amresalehin.emregallery.data.YtDlpProvider.matchesSupportedHost("https://fb.watch/abc123/"))
+        // 2. Web URL validation must not be limited to a curated host list.
+        // Native yt-dlp / gallery-dl extractor registries decide actual support at runtime.
+        val candidateUrls = listOf(
+            "https://www.reddit.com/r/funny/comments/abc/vid/",
+            "https://v.redd.it/xyz987/DASH_720.mp4",
+            "https://redd.it/xyz987",
+            "https://x.com/user/status/123456",
+            "https://twitter.com/user/status/123456",
+            "https://fb.watch/abc123/",
+            "https://an-unlisted-extractor-domain.example/gallery/item",
+            "https://another-unknown-site.example/media"
+        )
+        candidateUrls.forEach { candidate ->
+            assertTrue(
+                "Valid HTTP(S) URL should reach native extractor discovery: $candidate",
+                MediaClassifier.isValidWebUrl(candidate)
+            )
+        }
+        assertFalse(MediaClassifier.isValidWebUrl("file:///sdcard/private.jpg"))
+        assertFalse(MediaClassifier.isValidWebUrl("javascript:alert(1)"))
 
         // 3. AndroidMediaMuxer resolves Reddit companion DASH audio URLs
         val redditAudioCandidates = com.amresalehin.emregallery.data.AndroidMediaMuxer.tryResolveRedditAudioUrls(

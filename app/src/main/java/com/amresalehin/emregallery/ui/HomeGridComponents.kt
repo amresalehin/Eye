@@ -270,7 +270,7 @@ fun MemoriesStrip(
                     val context = LocalContext.current
                     AsyncImage(
                         model = remember(cover.uri, context) {
-                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 264, 368)
+                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri)
                         },
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize().graphicsLayer {

@@ -133,6 +133,11 @@ fun DirectBrowserView(
         initial = DownloaderPreferencesManager.getBrowserDesktopSiteByDefaultSync(context)
     )
     val browserTextZoom by downloaderPreferences.browserTextZoom.collectAsState(initial = 100)
+    val browserSafeBrowsingEnabled by downloaderPreferences.browserSafeBrowsingEnabled.collectAsState(initial = true)
+    val browserBlockPopups by downloaderPreferences.browserBlockPopups.collectAsState(initial = true)
+    val browserBlockMixedContent by downloaderPreferences.browserBlockMixedContent.collectAsState(initial = true)
+    val browserAllowAutoplay by downloaderPreferences.browserAllowAutoplay.collectAsState(initial = true)
+    val browserPinchZoomEnabled by downloaderPreferences.browserPinchZoomEnabled.collectAsState(initial = true)
     val latestAdBlockingEnabled by rememberUpdatedState(browserAdBlockingEnabled)
     val latestSaveHistoryEnabled by rememberUpdatedState(browserSaveHistory)
     val coroutineScope = rememberCoroutineScope()
@@ -310,6 +315,11 @@ fun DirectBrowserView(
         browserAdBlockingEnabled,
         browserLoadImages,
         browserThirdPartyCookies,
+        browserSafeBrowsingEnabled,
+        browserBlockPopups,
+        browserBlockMixedContent,
+        browserAllowAutoplay,
+        browserPinchZoomEnabled,
         isDesktopMode
     ).joinToString("|")
 
@@ -913,12 +923,19 @@ fun DirectBrowserView(
                                 domStorageEnabled = true
                                 databaseEnabled = true
                                 cacheMode = WebSettings.LOAD_DEFAULT
-                                builtInZoomControls = true
+                                builtInZoomControls = browserPinchZoomEnabled
                                 displayZoomControls = false
+                                setSupportZoom(browserPinchZoomEnabled)
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
-                                mediaPlaybackRequiresUserGesture = false
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
+                                safeBrowsingEnabled = browserSafeBrowsingEnabled
+                                javaScriptCanOpenWindowsAutomatically = !browserBlockPopups
+                                mixedContentMode = if (browserBlockMixedContent) {
+                                    WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                } else {
+                                    WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                }
                                 userAgentString = if (isDesktopMode) {
                                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                                 } else {
@@ -1206,6 +1223,16 @@ fun DirectBrowserView(
                         wv.settings.javaScriptEnabled = browserJavaScriptEnabled
                         wv.settings.blockNetworkImage = !browserLoadImages
                         wv.settings.textZoom = browserTextZoom.coerceIn(50, 200)
+                        wv.settings.safeBrowsingEnabled = browserSafeBrowsingEnabled
+                        wv.settings.javaScriptCanOpenWindowsAutomatically = !browserBlockPopups
+                        wv.settings.mixedContentMode = if (browserBlockMixedContent) {
+                            WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        } else {
+                            WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        }
+                        wv.settings.mediaPlaybackRequiresUserGesture = !browserAllowAutoplay
+                        wv.settings.setSupportZoom(browserPinchZoomEnabled)
+                        wv.settings.builtInZoomControls = browserPinchZoomEnabled
                         wv.settings.userAgentString = if (isDesktopMode) {
                             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                         } else {
@@ -1255,6 +1282,11 @@ fun DirectBrowserView(
                 saveHistory = browserSaveHistory,
                 desktopSiteByDefault = browserDesktopSiteByDefault,
                 textZoom = browserTextZoom,
+                safeBrowsingEnabled = browserSafeBrowsingEnabled,
+                blockPopups = browserBlockPopups,
+                blockMixedContent = browserBlockMixedContent,
+                allowAutoplay = browserAllowAutoplay,
+                pinchZoomEnabled = browserPinchZoomEnabled,
                 onSearchEngineChange = { engine ->
                     coroutineScope.launch { downloaderPreferences.setSearchEngine(engine) }
                 },
@@ -1279,6 +1311,21 @@ fun DirectBrowserView(
                 },
                 onTextZoomChange = { zoom ->
                     coroutineScope.launch { downloaderPreferences.setBrowserTextZoom(zoom) }
+                },
+                onSafeBrowsingChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserSafeBrowsingEnabled(enabled) }
+                },
+                onBlockPopupsChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserBlockPopups(enabled) }
+                },
+                onBlockMixedContentChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserBlockMixedContent(enabled) }
+                },
+                onAllowAutoplayChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserAllowAutoplay(enabled) }
+                },
+                onPinchZoomChange = { enabled ->
+                    coroutineScope.launch { downloaderPreferences.setBrowserPinchZoomEnabled(enabled) }
                 },
                 onClearBrowsingData = {
                     coroutineScope.launch { historyManager.clearHistory() }
@@ -1315,6 +1362,11 @@ private fun BrowserSettingsScreen(
     saveHistory: Boolean,
     desktopSiteByDefault: Boolean,
     textZoom: Int,
+    safeBrowsingEnabled: Boolean,
+    blockPopups: Boolean,
+    blockMixedContent: Boolean,
+    allowAutoplay: Boolean,
+    pinchZoomEnabled: Boolean,
     onSearchEngineChange: (BrowserSearchEngine) -> Unit,
     onJavaScriptChange: (Boolean) -> Unit,
     onAdBlockingChange: (Boolean) -> Unit,
@@ -1323,6 +1375,11 @@ private fun BrowserSettingsScreen(
     onSaveHistoryChange: (Boolean) -> Unit,
     onDesktopSiteByDefaultChange: (Boolean) -> Unit,
     onTextZoomChange: (Int) -> Unit,
+    onSafeBrowsingChange: (Boolean) -> Unit,
+    onBlockPopupsChange: (Boolean) -> Unit,
+    onBlockMixedContentChange: (Boolean) -> Unit,
+    onAllowAutoplayChange: (Boolean) -> Unit,
+    onPinchZoomChange: (Boolean) -> Unit,
     onClearBrowsingData: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -1423,6 +1480,18 @@ private fun BrowserSettingsScreen(
                 checked = thirdPartyCookies,
                 onCheckedChange = onThirdPartyCookiesChange
             )
+            BrowserSettingsSwitchRow(
+                title = "Safe Browsing",
+                description = "Warn before loading websites flagged for malware or phishing",
+                checked = safeBrowsingEnabled,
+                onCheckedChange = onSafeBrowsingChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Block pop-ups",
+                description = "Prevent websites from opening unsolicited windows",
+                checked = blockPopups,
+                onCheckedChange = onBlockPopupsChange
+            )
             OutlinedButton(
                 onClick = { showClearDataConfirmation = true },
                 modifier = Modifier.fillMaxWidth(),
@@ -1447,6 +1516,18 @@ private fun BrowserSettingsScreen(
                 checked = loadImages,
                 onCheckedChange = onLoadImagesChange
             )
+            BrowserSettingsSwitchRow(
+                title = "Block insecure content",
+                description = "Prevent HTTP resources from loading inside HTTPS pages",
+                checked = blockMixedContent,
+                onCheckedChange = onBlockMixedContentChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Allow media autoplay",
+                description = "Let websites play audio and video without a tap",
+                checked = allowAutoplay,
+                onCheckedChange = onAllowAutoplayChange
+            )
 
             HorizontalDivider()
             BrowserSettingsSectionTitle("Appearance")
@@ -1455,6 +1536,12 @@ private fun BrowserSettingsScreen(
                 description = "Request desktop versions of websites when possible",
                 checked = desktopSiteByDefault,
                 onCheckedChange = onDesktopSiteByDefaultChange
+            )
+            BrowserSettingsSwitchRow(
+                title = "Pinch to zoom",
+                description = "Allow two-finger zoom gestures and browser zoom controls",
+                checked = pinchZoomEnabled,
+                onCheckedChange = onPinchZoomChange
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(

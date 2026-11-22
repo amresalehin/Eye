@@ -132,6 +132,26 @@ class DownloaderPreferencesManager(private val context: Context) {
         (prefs[KEY_BROWSER_TEXT_ZOOM] ?: syncPrefs.getInt(PREF_BROWSER_TEXT_ZOOM, 100)).coerceIn(50, 200)
     }.distinctUntilChanged()
 
+    val browserSafeBrowsingEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_SAFE_BROWSING] ?: syncPrefs.getBoolean(PREF_BROWSER_SAFE_BROWSING, true)
+    }.distinctUntilChanged()
+
+    val browserBlockPopups: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_BLOCK_POPUPS] ?: syncPrefs.getBoolean(PREF_BROWSER_BLOCK_POPUPS, true)
+    }.distinctUntilChanged()
+
+    val browserBlockMixedContent: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_BLOCK_MIXED_CONTENT] ?: syncPrefs.getBoolean(PREF_BROWSER_BLOCK_MIXED_CONTENT, true)
+    }.distinctUntilChanged()
+
+    val browserAllowAutoplay: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_ALLOW_AUTOPLAY] ?: syncPrefs.getBoolean(PREF_BROWSER_ALLOW_AUTOPLAY, true)
+    }.distinctUntilChanged()
+
+    val browserPinchZoomEnabled: Flow<Boolean> = appContext.galleryDataStore.data.map { prefs ->
+        prefs[KEY_BROWSER_PINCH_ZOOM] ?: syncPrefs.getBoolean(PREF_BROWSER_PINCH_ZOOM, true)
+    }.distinctUntilChanged()
+
     suspend fun setVideoQualityCap(quality: DownloaderVideoQuality) {
         syncPrefs.edit().putString(PREF_VIDEO_QUALITY, quality.id).apply()
         appContext.galleryDataStore.edit { it[KEY_VIDEO_QUALITY] = quality.id }
@@ -239,6 +259,31 @@ class DownloaderPreferencesManager(private val context: Context) {
         appContext.galleryDataStore.edit { it[KEY_BROWSER_TEXT_ZOOM] = clamped }
     }
 
+    suspend fun setBrowserSafeBrowsingEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_SAFE_BROWSING, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_SAFE_BROWSING] = enabled }
+    }
+
+    suspend fun setBrowserBlockPopups(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_BLOCK_POPUPS, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_BLOCK_POPUPS] = enabled }
+    }
+
+    suspend fun setBrowserBlockMixedContent(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_BLOCK_MIXED_CONTENT, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_BLOCK_MIXED_CONTENT] = enabled }
+    }
+
+    suspend fun setBrowserAllowAutoplay(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_ALLOW_AUTOPLAY, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_ALLOW_AUTOPLAY] = enabled }
+    }
+
+    suspend fun setBrowserPinchZoomEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_BROWSER_PINCH_ZOOM, enabled).apply()
+        appContext.galleryDataStore.edit { it[KEY_BROWSER_PINCH_ZOOM] = enabled }
+    }
+
     companion object {
         const val SYNC_PREFS_NAME = "emre_downloader_prefs"
         const val DEFAULT_FILENAME_TEMPLATE = "{title}_{hash}"
@@ -263,6 +308,11 @@ class DownloaderPreferencesManager(private val context: Context) {
         private const val PREF_BROWSER_SAVE_HISTORY = "browser_save_history"
         private const val PREF_BROWSER_DESKTOP_BY_DEFAULT = "browser_desktop_site_by_default"
         private const val PREF_BROWSER_TEXT_ZOOM = "browser_text_zoom"
+        private const val PREF_BROWSER_SAFE_BROWSING = "browser_safe_browsing"
+        private const val PREF_BROWSER_BLOCK_POPUPS = "browser_block_popups"
+        private const val PREF_BROWSER_BLOCK_MIXED_CONTENT = "browser_block_mixed_content"
+        private const val PREF_BROWSER_ALLOW_AUTOPLAY = "browser_allow_autoplay"
+        private const val PREF_BROWSER_PINCH_ZOOM = "browser_pinch_zoom"
 
         private val KEY_VIDEO_QUALITY = stringPreferencesKey(PREF_VIDEO_QUALITY)
         private val KEY_AUDIO_ONLY = booleanPreferencesKey(PREF_AUDIO_ONLY)
@@ -284,6 +334,11 @@ class DownloaderPreferencesManager(private val context: Context) {
         private val KEY_BROWSER_SAVE_HISTORY = booleanPreferencesKey(PREF_BROWSER_SAVE_HISTORY)
         private val KEY_BROWSER_DESKTOP_BY_DEFAULT = booleanPreferencesKey(PREF_BROWSER_DESKTOP_BY_DEFAULT)
         private val KEY_BROWSER_TEXT_ZOOM = intPreferencesKey(PREF_BROWSER_TEXT_ZOOM)
+        private val KEY_BROWSER_SAFE_BROWSING = booleanPreferencesKey(PREF_BROWSER_SAFE_BROWSING)
+        private val KEY_BROWSER_BLOCK_POPUPS = booleanPreferencesKey(PREF_BROWSER_BLOCK_POPUPS)
+        private val KEY_BROWSER_BLOCK_MIXED_CONTENT = booleanPreferencesKey(PREF_BROWSER_BLOCK_MIXED_CONTENT)
+        private val KEY_BROWSER_ALLOW_AUTOPLAY = booleanPreferencesKey(PREF_BROWSER_ALLOW_AUTOPLAY)
+        private val KEY_BROWSER_PINCH_ZOOM = booleanPreferencesKey(PREF_BROWSER_PINCH_ZOOM)
 
         fun isWifiOnlySync(context: Context): Boolean {
             return context.applicationContext

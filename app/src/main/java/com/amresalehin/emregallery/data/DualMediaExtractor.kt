@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.URL
@@ -540,7 +541,13 @@ class DualMediaExtractor(private val context: Context) {
                 val galleryDlProvider = GalleryDlProvider()
                 val ytDlpProvider = YtDlpProvider()
                 val staticHtmlProvider = StaticHtmlProvider()
-                val isStructuredApplicable = galleryDlProvider.isApplicable(requestContext) || ytDlpProvider.isApplicable(requestContext)
+                // Python is only needed for the downloader. Start it off the UI thread when this
+                // URL is actually extracted, then run its provider checks on IO as well.
+                val (galleryDlApplicable, ytDlpApplicable) = withContext(Dispatchers.IO) {
+                    GalleryDlEngine.init(context.applicationContext)
+                    galleryDlProvider.isApplicable(requestContext) to ytDlpProvider.isApplicable(requestContext)
+                }
+                val isStructuredApplicable = galleryDlApplicable || ytDlpApplicable
 
                 var gdlResult: MediaExtractionResult? = null
                 var ytdlpResult: MediaExtractionResult? = null

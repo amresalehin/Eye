@@ -339,10 +339,9 @@ object ThumbnailPrewarmManager {
         appContext = ctx
         val uris = media.map { it.uri }
 
-        if (media.isNotEmpty()) {
-            warmMemoryCache(ctx, emptyList(), media)
-        }
-
+        // Do not decode the first 48 library items before the grid has reported its visible rows.
+        // HomeScreen calls prioritize() after layout, so visible AsyncImage requests go first and
+        // only the actual look-ahead window is prefetched into memory.
         synchronized(lock) {
             if (uris.isEmpty()) {
                 worker?.cancel()

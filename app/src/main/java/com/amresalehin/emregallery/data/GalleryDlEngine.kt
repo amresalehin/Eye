@@ -95,16 +95,24 @@ class PythonProgressBridge(
  */
 object GalleryDlEngine {
     private const val TAG = "GalleryDlEngine"
+    @Volatile
     private var isInitialized = false
 
+    /**
+     * Initialize only when a download/extraction actually needs Python. Call from an IO context;
+     * synchronization also protects against an extraction and a resumed download starting together.
+     */
+    @Synchronized
     fun init(context: Context) {
         if (isInitialized) return
         try {
             if (!Python.isStarted()) {
                 Python.start(AndroidPlatform(context.applicationContext))
             }
-            isInitialized = true
-            Log.d(TAG, "Chaquopy Python SDK and gallery-dl runtime initialized successfully")
+            isInitialized = Python.isStarted()
+            if (isInitialized) {
+                Log.d(TAG, "Chaquopy Python SDK and gallery-dl runtime initialized successfully")
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
         }
@@ -567,6 +575,8 @@ object GalleryDlEngine {
             )
         }
 
+        // A resumed download may run in a fresh process before any page extraction has started.
+        init(context.applicationContext)
         if (!isAvailable()) {
             return@withContext GalleryDlDownloadResult(
                 file = null,

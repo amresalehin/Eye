@@ -63,9 +63,8 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
 
-        // Initialize Chaquopy Python SDK and gallery-dl media engine
-        com.amresalehin.emregallery.data.GalleryDlEngine.init(this)
-
+        // Chaquopy is initialized lazily on the downloader's IO path. Starting the Python
+        // runtime here blocks Application.onCreate and delays the first gallery frame.
         // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
         com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
 

@@ -623,7 +623,6 @@ fun ViewerScreen(
                         .align(Alignment.TopStart)
                         .padding(16.dp)
                         .size(44.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ArrowBack,

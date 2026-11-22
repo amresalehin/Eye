@@ -5,10 +5,7 @@ package com.amresalehin.emregallery.ui
 import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
@@ -298,13 +295,9 @@ fun VideoPlayerControlsBar(
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 4.dp),
         shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 4.dp,
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-        )
+        color = Color.Transparent,
+        contentColor = Color.White,
+        tonalElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
@@ -316,9 +309,7 @@ fun VideoPlayerControlsBar(
             // Play / Pause button with generous touch target
             IconButton(
                 onClick = { videoState.togglePlayPause() },
-                modifier = Modifier
-                    .size(42.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f), CircleShape)
+                modifier = Modifier.size(42.dp)
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -335,7 +326,7 @@ fun VideoPlayerControlsBar(
                     fontFeatureSettings = "tnum",
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Color.White,
                 maxLines = 1
             )
 
@@ -346,9 +337,9 @@ fun VideoPlayerControlsBar(
                 onValueChangeFinished = { videoState.seekTo(videoState.positionMs) },
                 valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
                 colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.38f)
                 ),
                 modifier = Modifier
                     .weight(1f, fill = true)
@@ -362,7 +353,7 @@ fun VideoPlayerControlsBar(
                     fontFeatureSettings = "tnum",
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.82f),
                 maxLines = 1
             )
 
@@ -374,9 +365,7 @@ fun VideoPlayerControlsBar(
                 // Mute toggle
                 IconButton(
                     onClick = { videoState.toggleMute() },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
@@ -389,9 +378,7 @@ fun VideoPlayerControlsBar(
                 // Fullscreen toggle
                 IconButton(
                     onClick = { videoState.toggleFullscreen() },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,

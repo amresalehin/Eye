@@ -3,7 +3,6 @@ package com.amresalehin.emregallery.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,10 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -45,7 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.DownloadActivityItem
 import com.amresalehin.emregallery.data.DownloadActivityManager
 import com.amresalehin.emregallery.data.DownloadActivityStatus
@@ -110,39 +104,8 @@ fun filterDownloadActivityItems(
 }
 
 /**
- * Custom heartbeat/pulse icon matching image_4fd87912.png
- */
-@Composable
-fun ActivityPulseIcon(
-    modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.onSurface
-) {
-    Canvas(modifier = modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val path = Path().apply {
-            moveTo(0f, h * 0.5f)
-            lineTo(w * 0.22f, h * 0.5f)
-            lineTo(w * 0.35f, h * 0.15f)
-            lineTo(w * 0.55f, h * 0.88f)
-            lineTo(w * 0.72f, h * 0.35f)
-            lineTo(w * 0.82f, h * 0.5f)
-            lineTo(w, h * 0.5f)
-        }
-        drawPath(
-            path = path,
-            color = color,
-            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-    }
-}
-
-/**
- * Prominent Activity Card container on the download inbox main page,
- * exactly matching the layout of image_4fd87912.png:
- * - Rounded card container with heartbeat icon, "Activity" bold title, and status pill ("1 failed") + chevron
- * - Horizontal thumbnails: downloading items (with progress bar), failed items (with ! badge), divider, finished items (with ✓ badge)
- * - Tapping opens the Activity Page
+ * Headerless Inbox activity preview. Reuses the full Activity page rows, including thumbnails,
+ * progress, pause/resume, retry, delete, and finished-media actions. Shows at most five items.
  */
 @Composable
 fun ActivityPreviewCard(
@@ -251,157 +214,6 @@ fun ActivityPreviewCard(
         }
     }
 }
-/**
- * Thumbnail item for the Activity Preview Card
- */
-@Composable
-private fun ActivityThumbnailBox(
-    item: DownloadActivityItem,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .size(width = 68.dp, height = 64.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-    ) {
-        val previewModel = item.localUri ?: item.thumbnailUrl ?: item.mediaUrl
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(previewModel)
-                .crossfade(true)
-                .build(),
-            contentDescription = item.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Top-left format tag (e.g. JPG, PNG, MP4)
-        val formatBadge = getDisplayFormatBadge(item)
-        if (formatBadge.isNotBlank()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.75f),
-                modifier = Modifier
-                    .padding(top = 4.dp, start = 4.dp)
-                    .align(Alignment.TopStart)
-            ) {
-                Text(
-                    text = formatBadge,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
-            }
-        }
-
-        when {
-            item.isDownloading -> {
-                // Center play overlay if video
-                if (item.isVideo) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        modifier = Modifier
-                            .size(24.dp)
-                            .align(Alignment.Center)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Bottom linear progress bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(Color.Black.copy(alpha = 0.4f))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(fraction = item.progress.coerceIn(0.08f, 1f))
-                            .background(Color.White)
-                    )
-                }
-            }
-            item.isRetrying -> {
-                // Bottom-right circular amber retry badge
-                Surface(
-                    shape = CircleShape,
-                    color = Color(0xFFFFB74D),
-                    shadowElevation = 2.dp,
-                    modifier = Modifier
-                        .padding(bottom = 4.dp, end = 4.dp)
-                        .size(18.dp)
-                        .align(Alignment.BottomEnd)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Retrying",
-                            tint = Color.Black,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-            item.isFailed -> {
-                // Bottom-right circular white exclamation mark badge
-                Surface(
-                    shape = CircleShape,
-                    color = Color.White,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier
-                        .padding(bottom = 4.dp, end = 4.dp)
-                        .size(18.dp)
-                        .align(Alignment.BottomEnd)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.PriorityHigh,
-                            contentDescription = "Failed",
-                            tint = Color.Black,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-            item.isFinished -> {
-                // Bottom-right circular green checkmark badge
-                Surface(
-                    shape = CircleShape,
-                    color = Color(0xFF2E7D32),
-                    shadowElevation = 2.dp,
-                    modifier = Modifier
-                        .padding(bottom = 4.dp, end = 4.dp)
-                        .size(18.dp)
-                        .align(Alignment.BottomEnd)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Finished",
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 /**
  * Activity page with an integrated search/controls bar, status filters, download history,
  * and a modal sheet for global actions (retry all, cancel all, clear history).

@@ -464,10 +464,20 @@ fun HomeScreen(
             val preparingMedia = loading || (media.isNotEmpty() && sortedMedia.isEmpty())
             if (preparingMedia) {
                 if (albumTitle == null) {
-                    item(key = "home_memories_skeleton", contentType = "memories_skeleton") {
-                        MemoriesStripSkeleton()
+                    item(key = "home_memories_strip", contentType = "memories_strip") {
+                        if (media.isEmpty()) {
+                            MemoriesStripSkeleton()
+                        } else {
+                            MemoriesStrip(
+                                media = media,
+                                customPeopleMap = customPeopleMap,
+                                customTagsMap = customTagsMap,
+                                onOpenMemory = onOpenMemory,
+                                listState = memoriesListState
+                            )
+                        }
                     }
-                    item(key = "home_memories_skeleton_divider", contentType = "divider") {
+                    item(key = "home_memories_divider", contentType = "divider") {
                         HorizontalDivider(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),

@@ -465,8 +465,8 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // Recent searches are displayed as standard full-width rows, one site per line.
-        if (pills.isNotEmpty()) {
+        // Inbox search history is rendered as the exact query the user entered.
+        if (recentInboxSearches.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -479,83 +479,39 @@ fun DownloaderSearchMainPage(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(6.dp))
-
-                pills.forEachIndexed { index, pill ->
+                recentInboxSearches.forEachIndexed { index, query ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
-                                urlInput = pill.url
-                                submitSearch(pill.url)
+                                urlInput = query
+                                submitSearch(query)
                             }
-                            .heightIn(min = 60.dp)
+                            .heightIn(min = 56.dp)
                             .padding(horizontal = 4.dp, vertical = 8.dp)
                             .testTag("downloader_recent_row_$index"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!iconFailed) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(pill.faviconUrl)
-                                        .crossfade(true)
-                                        .listener(onError = { _, _ -> iconFailed = true })
-                                        .build(),
-                                    contentDescription = pill.name,
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape),
-                                    contentScale = ContentScale.Fit
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = pill.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = pill.domain,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
                         Icon(
                             imageVector = Icons.Default.History,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(9.dp)
+                        )
+                        Text(
+                            text = query,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    if (index < pills.lastIndex) {
+                    if (index < recentInboxSearches.lastIndex) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()

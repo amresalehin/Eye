@@ -2722,8 +2722,8 @@ internal fun buildDownloaderPreviewHeaders(item: ScrapedMediaItem): Map<String, 
 }
 
 /**
- * Loads a discovered thumbnail with its page context. If the chosen thumbnail fails, retry the
- * original media URL (where it is a decodable image/video) rather than leaving a blank tile.
+ * Loads a still-image preview with the original page context. Video streams are never sent to
+ * Coil as image URLs: a remote MP4 is not a poster image and usually cannot be decoded by Coil.
  */
 @Composable
 private fun DownloaderMediaThumbnail(
@@ -2731,10 +2731,31 @@ private fun DownloaderMediaThumbnail(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val candidates = remember(item.id, item.thumbnailUrl, item.url, item.isStream, item.isAudio) {
+    val youtubeId = remember(item.url, item.provenance.pageUrl) {
+        MediaClassifier.extractYouTubeVideoId(item.url)
+            ?: MediaClassifier.extractYouTubeVideoId(item.provenance.pageUrl)
+    }
+    val candidates = remember(
+        item.id,
+        item.thumbnailUrl,
+        item.url,
+        item.isVideo,
+        item.isStream,
+        item.isAudio,
+        item.metadata,
+        youtubeId
+    ) {
         buildList {
             item.thumbnailUrl?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
-            if (!item.isStream && !item.isAudio) {
+            listOf("thumbnail_url", "thumbnail", "poster_url", "poster", "preview_url").forEach { key ->
+                item.metadata[key]?.trim()?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let(::add)
+            }
+            if (item.isVideo && !item.isStream && youtubeId != null) {
+                add("https://i.ytimg.com/vi/$youtubeId/hqdefault.jpg")
+            }
+            // Still images can be previewed from their media URL. Video/audio/stream
+            // URLs must not be tried here because Coil's image decoder cannot render them.
+            if (!item.isVideo && !item.isStream && !item.isAudio) {
                 item.url.trim().takeIf { it.isNotEmpty() }?.let(::add)
             }
         }.distinct()

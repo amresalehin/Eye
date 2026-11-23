@@ -102,7 +102,7 @@ internal fun normalizeMediaInboxSearchEntry(rawQuery: String): String {
             uri.port < 0 -> ""
             scheme == "https" && uri.port == 443 -> ""
             scheme == "http" && uri.port == 80 -> ""
-            else -> ":\${uri.port}"
+            else -> ":${uri.port}"
         }
         val path = uri.rawPath.orEmpty().ifBlank { "/" }
         val query = uri.rawQuery?.let { "?$it" }.orEmpty()

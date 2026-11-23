@@ -42,7 +42,7 @@ class MediaStoreThumbnailFetcher(
         val preparedFile = PreparedThumbnailCache.loadOrCreateFile(context, uri, widthPx, heightPx)
         if (preparedFile != null) {
             return@withContext SourceResult(
-                source = ImageSource(preparedFile.toOkioPath(), context),
+                source = ImageSource(file = preparedFile.toOkioPath()),
                 mimeType = "image/webp",
                 dataSource = DataSource.DISK
             )

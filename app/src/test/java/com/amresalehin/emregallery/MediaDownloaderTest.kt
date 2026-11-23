@@ -390,6 +390,26 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun deriveFileNameUsesExtensionlessMediaUrlMetadata() {
+        assertEquals(
+            "clip_42.mp4",
+            com.amresalehin.emregallery.data.MediaClassifier.deriveFileName(
+                "https://cdn.example.com/stream/playback?id=clip_42&token=private",
+                "MP4",
+                0
+            )
+        )
+        assertEquals(
+            "summer-road-trip.mp4",
+            com.amresalehin.emregallery.data.MediaClassifier.deriveFileName(
+                "https://cdn.example.com/watch/summer-road-trip?token=private",
+                "MP4",
+                0
+            )
+        )
+    }
+
+    @Test
     fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
         val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
         val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)

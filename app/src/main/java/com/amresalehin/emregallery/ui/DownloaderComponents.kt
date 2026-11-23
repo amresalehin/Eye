@@ -550,14 +550,27 @@ fun DownloaderSearchMainPage(
 
         // Reuse the established Activity preview with thumbnail and status overlays.
         if (activities.isNotEmpty()) {
-            ActivityPreviewCard(
-                activities = activities,
-                onOpenActivity = onOpenActivity,
-                onOpenMedia = onOpenMedia,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("downloader_recent_activity")
-            )
+                    .testTag("downloader_recent_activity_section")
+            ) {
+                Text(
+                    text = "Recent Activities",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(6.dp))
+                ActivityPreviewCard(
+                    activities = activities,
+                    onOpenActivity = onOpenActivity,
+                    onOpenMedia = onOpenMedia,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("downloader_recent_activity")
+                )
+            }
         }
 
     }

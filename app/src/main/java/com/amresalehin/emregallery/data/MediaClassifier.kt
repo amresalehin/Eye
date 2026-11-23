@@ -1080,7 +1080,7 @@ object MediaClassifier {
         fun isPlaceholderTitle(value: String): Boolean {
             val normalized = value.trim()
             return normalized.isBlank() ||
-                Regex("""(?i)^(?:media|video|file|item)_\\d+(?:\\.[a-z0-9]+)?$""").matches(normalized)
+                Regex("""(?i)^(?:media|video|file|item)_\d+(?:\.[a-z0-9]+)?$""").matches(normalized)
         }
         val mergedTitle = if (
             isPlaceholderTitle(preferred.title) && !isPlaceholderTitle(secondary.title)

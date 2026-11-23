@@ -260,12 +260,21 @@ object GalleryDlEngine {
             // category over an image-only extension so the UI and downstream download
             // metadata cannot label that video as GIF.
             val rawFormat = obj.optString("format", "IMAGE").trim()
+            val rawMimeType = obj.optString("mimeType", "").trim()
+            val mimeVideoFormat = rawMimeType.substringAfter("video/", "")
+                .substringBefore(";").uppercase(Locale.ROOT)
+            val fallbackVideoFormat = when (mimeVideoFormat) {
+                "WEBM" -> "WEBM"
+                "QUICKTIME" -> "MOV"
+                "X-MATROSKA" -> "MKV"
+                "X-MSVIDEO" -> "AVI"
+                else -> "MP4"
+            }
             val normalizedFormat = if (
                 isVideo && !isStream && rawFormat.uppercase(Locale.ROOT) in setOf(
                     "GIF", "JPG", "JPEG", "PNG", "WEBP", "AVIF", "BMP", "SVG", "IMAGE"
                 )
-            ) "MP4" else rawFormat
-            val rawMimeType = obj.optString("mimeType", "").trim()
+            ) fallbackVideoFormat else rawFormat
             val normalizedMimeType = when {
                 isStream && !rawMimeType.contains("mpegurl", ignoreCase = true) &&
                     !rawMimeType.contains("dash", ignoreCase = true) -> "application/x-mpegURL"
@@ -277,6 +286,13 @@ object GalleryDlEngine {
                 isAudio -> "audio/mpeg"
                 else -> "image/jpeg"
             }
+            val rawTitle = obj.optString("title", "media_" + (i + 1))
+            val titleExtension = rawTitle.substringAfterLast('.', "").uppercase(Locale.ROOT)
+            val normalizedTitle = if (
+                isVideo && !isStream && titleExtension in setOf(
+                    "GIF", "JPG", "JPEG", "PNG", "WEBP", "AVIF", "BMP"
+                )
+            ) "${rawTitle.substringBeforeLast('.')}.${normalizedFormat.lowercase(Locale.ROOT)}" else rawTitle
 
             val durationMillis = if (obj.has("durationMillis") && !obj.isNull("durationMillis")) {
                 obj.optLong("durationMillis", 0L).takeIf { it > 0L }
@@ -300,7 +316,7 @@ object GalleryDlEngine {
             val item = ScrapedMediaItem(
                 id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
-                title = obj.optString("title", "media_${i + 1}"),
+                title = normalizedTitle,
                 isVideo = isVideo,
                 isAudio = isAudio,
                 isStream = isStream,

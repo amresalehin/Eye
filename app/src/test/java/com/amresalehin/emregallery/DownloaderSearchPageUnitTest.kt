@@ -26,8 +26,9 @@ class DownloaderSearchPageUnitTest {
         assertTrue(modes.contains("DOWNLOADER_PAGE"))
         assertTrue(modes.contains("SAVED_LIBRARY"))
         assertTrue(modes.contains("ACTIVITY_PAGE"))
+        assertTrue(modes.contains("SEARCH_HISTORY_PAGE"))
         assertFalse(modes.contains("BROWSER_PAGE"))
-        assertEquals(4, modes.size)
+        assertEquals(5, modes.size)
     }
 
     @Test

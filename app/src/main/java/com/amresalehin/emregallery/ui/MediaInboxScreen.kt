@@ -456,10 +456,6 @@ fun MediaInboxScreen(
                                 currentViewMode = DownloaderViewMode.SEARCH_HISTORY_PAGE
                             },
                             onOpenMenu = onOpenMenu,
-                            savedStacks = stacks,
-                            onSelectStack = { stack ->
-                                selectedStackForDetail = stack
-                            },
                             activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED },
                             savedStacksCount = stacks.size,
                             modifier = Modifier.fillMaxSize()
@@ -484,11 +480,13 @@ fun MediaInboxScreen(
                                 onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
                                 onOpenSearch = { query ->
                                     scope.launch {
-                                        com.amresalehin.emregallery.data.MediaInboxSearchHistory(context)
-                                            .recordSearch(query)
+                                        runCatching {
+                                            com.amresalehin.emregallery.data.MediaInboxSearchHistory(context)
+                                                .recordSearch(query)
+                                        }
+                                        activeFetchUrl = query
+                                        currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
                                     }
-                                    activeFetchUrl = query
-                                    currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )

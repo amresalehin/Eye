@@ -169,8 +169,8 @@ fun DownloaderSearchMainPage(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    val historyManager = remember { BrowserHistoryManager(context) }
-    val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
+    val inboxSearchHistory = remember { com.amresalehin.emregallery.data.MediaInboxSearchHistory(context) }
+    val recentInboxSearches by inboxSearchHistory.recentSearches.collectAsState(initial = emptyList())
     val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
     var showDownloaderSettings by remember { mutableStateOf(false) }
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
@@ -196,30 +196,25 @@ fun DownloaderSearchMainPage(
         focusManager.clearFocus()
         val normalized = normalizeDownloaderTargetUrl(trimmed)
         scope.launch {
-            historyManager.recordVisit(normalized)
+            inboxSearchHistory.recordSearch(normalized)
         }
         onFetchUrl(normalized)
     }
 
-    // Dynamic pills derived solely from user visit/saved history - no hardcoded sites
-    val pills = remember(allHistorySites) {
-        val seenDomains = mutableSetOf<String>()
-        val result = mutableListOf<DownloaderPill>()
-        for (site in allHistorySites) {
-            val domain = site.domain.removePrefix("www.").lowercase().trim()
-            if (domain.isNotBlank() && seenDomains.add(domain)) {
-                val displayName = site.title.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("http") }
-                    ?: domain.substringBefore('.').replaceFirstChar { it.uppercase() }
-                result.add(
-                    DownloaderPill(
-                        domain = domain,
-                        name = displayName,
-                        url = site.url
-                    )
-                )
+    // Inbox-only recent searches: never sourced from browser navigation history.
+    val pills = remember(recentInboxSearches) {
+        recentInboxSearches.mapNotNull { query ->
+            val domain = runCatching {
+                java.net.URL(query).host.removePrefix("www.").lowercase()
+            }.getOrDefault("").ifBlank {
+                query.substringAfter("://", query).substringBefore("/").removePrefix("www.")
             }
+            if (domain.isBlank()) null else DownloaderPill(
+                domain = domain,
+                name = domain.substringBefore('.').replaceFirstChar { it.uppercase() },
+                url = query
+            )
         }
-        result.take(12)
     }
 
     Column(

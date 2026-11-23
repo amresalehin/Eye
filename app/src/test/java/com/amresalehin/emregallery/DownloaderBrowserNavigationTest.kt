@@ -29,7 +29,7 @@ class DownloaderBrowserNavigationTest {
     @Test
     fun canonicalizesHistoryUrlsWithoutChangingCaseSensitivePaths() {
         assertEquals(
-            "https://example.com/video?id=1",
+            "https://example.com/video?id=1#section",
             normalizeMediaInboxSearchEntry(" HTTPS://Example.COM:443/a/../video?id=1#section ")
         )
         assertEquals(
@@ -46,13 +46,13 @@ class DownloaderBrowserNavigationTest {
     fun deduplicatesEquivalentHistoryEntriesAndKeepsNewestFirst() {
         assertEquals(
             listOf(
-                "https://example.com/video?id=1",
+                "https://example.com/video?id=1#top",
                 "https://example.com/other"
             ),
             normalizeAndDeduplicateMediaInboxSearches(
                 listOf(
                     "HTTPS://EXAMPLE.COM:443/video?id=1#top",
-                    "https://example.com/video?id=1",
+                    "https://example.com/video?id=1#top",
                     "https://example.com/other"
                 )
             )

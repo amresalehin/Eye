@@ -148,173 +148,109 @@ fun ActivityPulseIcon(
 fun ActivityPreviewCard(
     activities: List<DownloadActivityItem>,
     onOpenActivity: () -> Unit,
+    onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
-    val containerShape = RoundedCornerShape(26.dp)
+    val context = LocalContext.current
+    val previewActivities = remember(activities) {
+        val active = activities.filter { it.isDownloading || it.isPaused || it.isRetrying }
+        val failed = activities.filter { it.isFailed }
+        val finished = activities.filter { it.isFinished }
+        (active + failed + finished).distinctBy { it.id }.take(5)
+    }
 
-    val downloading = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
-    val failed = remember(activities) { activities.filter { it.isFailed } }
-    val finished = remember(activities) { activities.filter { it.isFinished } }
-
-    val failedCount = activities.count { it.isFailed }
-    val retryingCount = activities.count { it.isRetrying }
-    val downloadingCount = activities.count { it.isDownloading || it.isPaused || it.isRetrying }
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(previewActivities) {
+        if (previewActivities.any { it.isRetrying }) {
+            while (true) {
+                delay(500L)
+                currentTimeMillis = System.currentTimeMillis()
+            }
+        }
+    }
 
     Surface(
-        onClick = onOpenActivity,
-        shape = containerShape,
-        color = if (isDark) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp),
+        color = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
         shadowElevation = 6.dp,
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.65f else 0.75f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(
+                alpha = if (isSystemInDarkTheme()) 0.65f else 0.75f
+            )
         ),
         modifier = modifier
             .shadow(
                 elevation = 6.dp,
-                shape = containerShape,
-                ambientColor = if (isDark) Color.Black.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.12f),
-                spotColor = if (isDark) Color.Black.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.18f)
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = if (isSystemInDarkTheme()) Color.Black.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.12f),
+                spotColor = if (isSystemInDarkTheme()) Color.Black.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.18f)
             )
             .testTag("downloader_activity_preview_card")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 18.dp, horizontal = 18.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header Row: [Pulse Icon] Activity         [X failed pill] [>]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ActivityPulseIcon(
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Text(
-                        text = "Activity",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+            previewActivities.forEachIndexed { index, item ->
+                when {
+                    item.isDownloading || item.isPaused || item.isRetrying -> {
+                        ActiveDownloadRow(
+                            item = item,
+                            currentTimeMillis = currentTimeMillis,
+                            onPauseResume = {
+                                if (item.isPaused) {
+                                    DownloadActivityManager.resumeDownload(context, item.id)
+                                } else {
+                                    DownloadActivityManager.pauseDownload(context, item.id)
+                                }
+                            },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
+                    item.isFailed -> {
+                        FailedDownloadRow(
+                            item = item,
+                            currentTimeMillis = currentTimeMillis,
+                            onRetry = { DownloadActivityManager.retryDownload(context, item.id) },
+                            onDelete = { DownloadActivityManager.deleteActivity(item.id) },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
+                    item.isFinished -> {
+                        FinishedDownloadRow(
+                            item = item,
+                            onClick = {
+                                if (onOpenMedia != null) onOpenMedia(item) else onOpenActivity()
+                            },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (failedCount > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF3B1212) else Color(0xFFFDE8E8),
-                            modifier = Modifier.testTag("activity_failed_badge")
-                        ) {
-                            Text(
-                                text = "$failedCount failed",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isDark) Color(0xFFF87171) else Color(0xFF9B1C1C),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    } else if (downloadingCount > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF1E293B) else Color(0xFFE1EFFE),
-                            modifier = Modifier.testTag("activity_downloading_badge")
-                        ) {
-                            Text(
-                                text = "$downloadingCount downloading",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isDark) Color(0xFF60A5FA) else Color(0xFF1E429F),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Open Activity",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
+                if (index < previewActivities.lastIndex) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                     )
                 }
             }
 
-            // Thumbnail Row matching image_4fd87912.png
-            if (activities.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    val activeOrFailedList = (downloading.take(2) + failed.take(2)).take(2)
-                    val finishedList = finished.take(3)
-
-                    // Active or Failed Thumbnails
-                    for (item in activeOrFailedList) {
-                        ActivityThumbnailBox(item = item)
-                    }
-
-                    // Vertical Divider if both active/failed and finished items exist
-                    if (activeOrFailedList.isNotEmpty() && finishedList.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(54.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        )
-                    }
-
-                    // Finished Thumbnails (with green checkmark badge)
-                    for (item in finishedList) {
-                        ActivityThumbnailBox(item = item)
-                    }
-                }
-            } else {
-                // Empty state when no downloads have occurred yet
-                Row(
+            if (activities.size > 5) {
+                TextButton(
+                    onClick = onOpenActivity,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .align(Alignment.End)
+                        .testTag("downloader_activity_see_all")
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "No active downloads • Activity appears here",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    Text("See all")
                 }
             }
         }
     }
 }
-
 /**
  * Thumbnail item for the Activity Preview Card
  */

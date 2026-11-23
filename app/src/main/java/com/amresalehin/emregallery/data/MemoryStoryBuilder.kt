@@ -26,8 +26,7 @@ object MemoryStoryBuilder {
         locations: Map<String, StoryLocation>,
         peopleByUri: Map<String, Set<String>> = emptyMap(),
         tagsByUri: Map<String, Set<String>> = emptyMap(),
-        cachedPlaceNames: Map<String, String> = emptyMap(),
-        resolvePlace: ((latitude: Double, longitude: Double) -> String?)? = null
+        cachedPlaceNames: Map<String, String> = emptyMap()
     ): List<StoryGroup> {
         if (source.isEmpty()) return emptyList()
 
@@ -95,15 +94,14 @@ object MemoryStoryBuilder {
                 ?.key
 
             val centroid = if (hasLocationStory) centroidOf(gpsItems) else null
-            val place = knownPlace ?: centroid?.let { center ->
-                runCatching { resolvePlace?.invoke(center.latitude, center.longitude) }.getOrNull()
-            }?.trim()?.takeIf(String::isNotBlank)
+            val place = knownPlace
 
             val duration = cluster.last().second - cluster.first().second
             val title = when {
                 person != null -> "With $person"
                 place != null && duration >= 24L * 60L * 60L * 1000L -> "Trip to $place"
                 place != null -> "At $place"
+                hasLocationStory -> "Location story"
                 tag != null -> displayTag(tag)
                 duration >= 24L * 60L * 60L * 1000L -> "Out and about"
                 else -> "A day out"

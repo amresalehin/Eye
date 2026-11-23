@@ -157,6 +157,7 @@ fun DownloaderSearchMainPage(
     onOpenBrowser: ((String) -> Unit)? = null,
     onViewSavedLibrary: () -> Unit,
     onOpenActivity: () -> Unit = {},
+    onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
     onOpenSearchHistory: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
     savedStacks: List<MediaInboxStack> = emptyList(),
@@ -529,6 +530,7 @@ fun DownloaderSearchMainPage(
             ActivityPreviewCard(
                 activities = activities,
                 onOpenActivity = onOpenActivity,
+                onOpenMedia = onOpenMedia,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("downloader_recent_activity")

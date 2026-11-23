@@ -226,7 +226,8 @@ fun HomeScreen(
     }
 
     var groupedData by remember { mutableStateOf(HomeGroupedData()) }
-    LaunchedEffect(media, sortOrder, groupBy) {
+    val mediaSnapshotKey = System.identityHashCode(media)
+    LaunchedEffect(mediaSnapshotKey, sortOrder, groupBy) {
         // Sorting, grouping and row preparation never run on the UI thread, even for small
         // libraries. This avoids cold-start frame spikes as the library grows.
         groupedData = withContext(Dispatchers.Default) {

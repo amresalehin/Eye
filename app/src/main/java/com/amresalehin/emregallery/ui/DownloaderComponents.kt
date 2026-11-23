@@ -392,7 +392,7 @@ fun DownloaderSearchMainPage(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.History,
+                        imageVector = Icons.Default.Download,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(22.dp)

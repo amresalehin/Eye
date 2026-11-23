@@ -34,7 +34,6 @@ class MediaInboxSearchHistory(private val context: Context) {
                 .filterNot { it.equals(query, ignoreCase = true) }
                 .toMutableList()
                 .apply { add(0, query) }
-                .take(MAX_ENTRIES)
             preferences[searchesKey] = JSONArray(updated).toString()
         }
     }
@@ -56,11 +55,8 @@ class MediaInboxSearchHistory(private val context: Context) {
                         add(value)
                     }
                 }
-            }.take(MAX_ENTRIES)
+            }
         }.getOrDefault(emptyList())
     }
 
-    private companion object {
-        const val MAX_ENTRIES = 20
-    }
 }

@@ -179,6 +179,11 @@ fun DownloaderSearchMainPage(
     val effectiveStacks = remember(savedStacks, repoStacks) {
         if (savedStacks.isNotEmpty()) savedStacks else repoStacks
     }
+    val recentSavedStacks = remember(effectiveStacks) {
+        filterSavedMediaStacks(effectiveStacks, "")
+            .sortedByDescending { it.timestampMillis }
+            .take(5)
+    }
 
     val activities by DownloadActivityManager.activities.collectAsState()
     LaunchedEffect(Unit) {
@@ -522,6 +527,16 @@ fun DownloaderSearchMainPage(
                     }
                 }
             }
+        }
+
+        // Compact preview of the five newest saved library stacks.
+        if (recentSavedStacks.isNotEmpty()) {
+            SavedPreviewSection(
+                stacks = recentSavedStacks,
+                onViewSavedLibrary = onViewSavedLibrary,
+                onSelectStack = onSelectStack,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // Compact preview of the five newest download activities.
@@ -933,30 +948,32 @@ fun SavedPreviewSection(
                     )
                 }
 
-                Surface(
-                    onClick = onViewSavedLibrary,
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    modifier = Modifier.testTag("downloader_saved_see_all_btn")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                if (stacks.size > 5) {
+                    Surface(
+                        onClick = onViewSavedLibrary,
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier.testTag("downloader_saved_see_all_btn")
                     ) {
-                        Text(
-                            text = "See All",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "See all",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }

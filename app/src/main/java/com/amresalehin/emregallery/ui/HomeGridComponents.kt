@@ -145,6 +145,55 @@ fun HomeFastScrollbar(
 }
 
 @Composable
+fun MemoriesStripSkeleton() {
+    val transition = rememberInfiniteTransition(label = "memories_skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.38f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "memories_skeleton_alpha"
+    )
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(vertical = 4.dp)
+    ) {
+        items(4) {
+            Box(
+                Modifier
+                    .width(132.dp)
+                    .height(184.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(placeholderColor)
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.66f)
+                        .height(10.dp)
+                        .padding(start = 10.dp)
+                        .align(Alignment.BottomStart)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.42f)
+                        .height(7.dp)
+                        .padding(start = 10.dp, bottom = 10.dp)
+                        .align(Alignment.BottomStart)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun MemoriesStrip(
     media: List<MediaItem>,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
@@ -196,17 +245,18 @@ fun MemoriesStrip(
         return result.filter { it.second.isNotEmpty() }.take(10)
     }
 
-    var stories by remember {
-        mutableStateOf(if (media.size <= 150) computeStories(media) else emptyList())
-    }
+    var stories by remember { mutableStateOf<List<Pair<String, List<MediaItem>>>>(emptyList()) }
+    var storiesReady by remember { mutableStateOf(false) }
     LaunchedEffect(media, currentYear, todayMonth, todayDay) {
-        stories = if (media.size <= 150) {
-            computeStories(media)
-        } else {
-            withContext(Dispatchers.Default) { computeStories(media) }
-        }
+        storiesReady = false
+        stories = withContext(Dispatchers.Default) { computeStories(media) }
+        storiesReady = true
     }
 
+    if (!storiesReady) {
+        MemoriesStripSkeleton()
+        return
+    }
     if (stories.isEmpty()) return
 
     Column {

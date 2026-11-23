@@ -8,6 +8,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -113,6 +118,45 @@ private fun buildHomeGridData(grouped: HomeGroupedData, columns: Int): HomeGridD
         predictivePrefetchIndex = predictivePrefetchIndex
     )
 }
+@Composable
+private fun HomeMediaLoadingSkeleton(columns: Int) {
+    val transition = rememberInfiniteTransition(label = "home_media_skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.34f,
+        targetValue = 0.72f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "home_media_skeleton_alpha"
+    )
+    val columnCount = columns.coerceIn(1, 6)
+    val heights = listOf(148, 190, 126, 174, 210, 138, 166, 198, 132, 182, 154, 204)
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        repeat(5) { rowIndex ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                repeat(columnCount) { columnIndex ->
+                    val height = heights[(rowIndex * columnCount + columnIndex) % heights.size]
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(height.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -423,7 +467,24 @@ fun HomeScreen(
                 }
             }
 
-            if (!loading && sortedMedia.isEmpty()) {
+            val preparingMedia = loading || (media.isNotEmpty() && sortedMedia.isEmpty())
+            if (preparingMedia) {
+                if (albumTitle == null) {
+                    item(key = "home_memories_skeleton", contentType = "memories_skeleton") {
+                        MemoriesStripSkeleton()
+                    }
+                    item(key = "home_memories_skeleton_divider", contentType = "divider") {
+                        HorizontalDivider(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            thickness = 1.dp
+                        )
+                    }
+                }
+                item(key = "home_media_skeleton", contentType = "media_skeleton") {
+                    HomeMediaLoadingSkeleton(columns = pinchGridColumns)
+                }
+            } else if (sortedMedia.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier

@@ -231,8 +231,6 @@ fun GalleryApp(
                     delay(400L - elapsed)
                 }
                 isRefreshing = false
-            } else {
-                loading = false
             }
         }
     }

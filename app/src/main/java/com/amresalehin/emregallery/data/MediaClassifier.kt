@@ -1437,6 +1437,10 @@ object MediaClassifier {
                     "MP4" -> "mp4"
                     "WEBM" -> "webm"
                     "MOV" -> "mov"
+                    "MKV" -> "mkv"
+                    "AVI" -> "avi"
+                    "FLV" -> "flv"
+                    "3GP" -> "3gp"
                     "MP3" -> "mp3"
                     "M4A" -> "m4a"
                     "AAC" -> "aac"
@@ -1449,7 +1453,64 @@ object MediaClassifier {
                     "AVIF" -> "avif"
                     else -> "jpg"
                 }
-                "media_${fallbackIndex + 1}.$ext"
+
+                val parsedUrl = runCatching { URL(url) }.getOrNull()
+                fun decodeName(value: String): String = runCatching {
+                    java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+                }.getOrDefault(value).trim()
+
+                val queryName = parsedUrl?.query
+                    ?.split("&")
+                    ?.mapNotNull { part ->
+                        val key = decodeName(part.substringBefore("=")).lowercase(Locale.ROOT)
+                        val value = part.substringAfter("=", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        val priority = when (key) {
+                            "filename", "file", "name", "title", "slug" -> 0
+                            "video_id", "videoid", "media_id", "mediaid", "id", "v" -> 1
+                            else -> return@mapNotNull null
+                        }
+                        Triple(priority, key, decodeName(value))
+                    }
+                    ?.sortedBy { it.first }
+                    ?.firstOrNull { it.third.isNotBlank() && it.third.length <= 160 }
+                    ?.third
+
+                val ignoredPathNames = setOf(
+                    "api", "cdn", "download", "embed", "file", "index", "manifest",
+                    "master", "media", "play", "playback", "player", "stream",
+                    "video", "videos", "videoplayback", "watch"
+                )
+                val pathName = parsedUrl?.path
+                    ?.split("/")
+                    ?.asReversed()
+                    ?.firstOrNull { part ->
+                        val decoded = decodeName(part)
+                        decoded.length > 2 && decoded.lowercase(Locale.ROOT) !in ignoredPathNames
+                    }
+                    ?.let(::decodeName)
+
+                val nameCandidate = (queryName ?: pathName)
+                    ?.substringAfterLast("/")
+                    ?.substringAfterLast("\\\\")
+                    ?.substringBefore("?")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() && it != "." && it != ".." }
+
+                if (nameCandidate != null) {
+                    val candidateExt = nameCandidate.substringAfterLast(".", "").lowercase(Locale.ROOT)
+                    if (candidateExt in KNOWN_MEDIA_EXTENSIONS) {
+                        nameCandidate
+                    } else {
+                        val safeBase = nameCandidate
+                            .substringBeforeLast(".")
+                            .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                            .trim('_', '.')
+                            .take(96)
+                        if (safeBase.isNotBlank()) "$safeBase.$ext" else "media_${fallbackIndex + 1}.$ext"
+                    }
+                } else {
+                    "media_${fallbackIndex + 1}.$ext"
+                }
             }
         }.getOrDefault("media_${fallbackIndex + 1}.bin")
     }

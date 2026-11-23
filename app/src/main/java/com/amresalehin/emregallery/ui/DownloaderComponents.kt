@@ -151,7 +151,6 @@ data class DownloaderPill(
         get() = name.firstOrNull()?.uppercaseChar()?.toString() ?: "W"
 }
 
-@Composable
 /**
  * Compact favicon for Inbox history rows. Keep a letter fallback visible while
  * loading and when the remote favicon cannot be retrieved.
@@ -198,6 +197,7 @@ private fun InboxSearchFavicon(url: String, modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
 fun DownloaderSearchMainPage(
     onFetchUrl: (String) -> Unit,
     onOpenBrowser: ((String) -> Unit)? = null,

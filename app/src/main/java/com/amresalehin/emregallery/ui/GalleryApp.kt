@@ -1030,6 +1030,8 @@ fun GalleryApp(
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
+                        customPeopleMap = customPeopleMap,
+                        customTagsMap = customTagsMap,
                         onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )

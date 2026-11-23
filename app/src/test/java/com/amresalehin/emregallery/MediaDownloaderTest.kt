@@ -263,6 +263,43 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun redditVideoNeverKeepsGifPreviewFormat() {
+        val root = org.json.JSONObject(
+            """
+            {
+              "engine": "gallery-dl",
+              "items": [
+                {
+                  "id": "reddit_video_1",
+                  "url": "https://v.redd.it/abc123/DASH_720.mp4",
+                  "title": "reddit_clip.gif",
+                  "category": "VIDEOS",
+                  "format": "GIF",
+                  "mimeType": "image/gif",
+                  "isVideo": true,
+                  "isAudio": false,
+                  "isStream": false,
+                  "source": "yt-dlp"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val (_, items) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(
+            root,
+            "https://www.reddit.com/r/videos/comments/abc123/clip/"
+        )
+        val video = items.single()
+
+        assertTrue(video.isVideo)
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.VIDEOS, video.category)
+        assertEquals("MP4", video.format)
+        assertEquals("video/mp4", video.mimeType)
+        assertEquals("reddit_clip.mp4", video.title)
+    }
+
+    @Test
     fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
         val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
         val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)

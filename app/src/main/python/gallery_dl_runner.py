@@ -62,6 +62,82 @@ def _parse_duration_millis(raw_val):
         return int(round(total_sec * 1000.0)) if total_sec > 0 else None
     return None
 
+
+def _extract_thumbnail_url(metadata):
+    """Return the best usable still-image URL exposed by gallery-dl or yt-dlp."""
+    if not isinstance(metadata, dict):
+        return None
+
+    direct_keys = (
+        "thumbnail", "thumbnail_url", "thumbnailUrl", "thumb", "thumb_url",
+        "preview", "preview_url", "poster", "poster_url", "cover", "cover_url",
+        "image_url", "image"
+    )
+
+    def add_url(value, output):
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith(("https://", "http://")) and value not in output:
+                output.append(value)
+        elif isinstance(value, dict):
+            add_url(value.get("url") or value.get("src") or value.get("href"), output)
+
+    candidates = []
+    for key in direct_keys:
+        add_url(metadata.get(key), candidates)
+
+    # yt-dlp exposes a list of thumbnail variants on many extractors. Prefer
+    # the largest actual image rather than relying on list order or a tiny icon.
+    variants = metadata.get("thumbnails")
+    if isinstance(variants, (list, tuple)):
+        ranked = []
+        for index, variant in enumerate(variants):
+            if not isinstance(variant, dict):
+                continue
+            try:
+                width = int(variant.get("width") or 0)
+                height = int(variant.get("height") or 0)
+            except Exception:
+                width, height = 0, 0
+            ranked.append((width * height, index, variant))
+        ranked.sort(key=lambda value: (value[0], value[1]), reverse=True)
+        for _, _, variant in ranked:
+            add_url(variant, candidates)
+
+    return candidates[0] if candidates else None
+
+
+def _derive_extracted_video_title(entry, page_url, index, parent_title=""):
+    """Create a stable, human-readable title when an extractor omits title/id."""
+    if isinstance(entry, dict):
+        for key in ("title", "fulltitle", "alt_title", "display_id", "id"):
+            value = entry.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+
+    candidate_url = page_url or ""
+    try:
+        from urllib.parse import unquote, urlparse
+        parts = [unquote(part) for part in urlparse(candidate_url).path.split("/") if part]
+        ignored = {
+            "watch", "video", "videos", "media", "embed", "player", "reel",
+            "reels", "clip", "clips", "post", "posts", "comments", "status"
+        }
+        meaningful = [
+            part for part in parts
+            if part.lower() not in ignored and not part.isdigit()
+            and len(part) > 2
+        ]
+        if meaningful:
+            return meaningful[-1].replace("-", " ").replace("_", " ").strip()
+    except Exception:
+        pass
+
+    if parent_title and str(parent_title).strip():
+        return str(parent_title).strip()
+    return f"video_{index + 1}"
+
+
 try:
     import gallery_dl
     from gallery_dl import extractor as gdl_extractor, job as gdl_job, config as gdl_config, exception as gdl_exception
@@ -346,14 +422,24 @@ def extract_gallery_dl(url, options_json="{}"):
                     seen_urls.add(item_url)
 
                     fn = kwdict.get("filename") or kwdict.get("name") or kwdict.get("title") or ""
-                    ext_suffix = kwdict.get("extension") or ""
-                    if fn and ext_suffix and not fn.endswith("." + ext_suffix):
+                    ext_suffix = str(kwdict.get("extension") or "").lstrip(".")
+                    if fn and ext_suffix and not str(fn).lower().endswith("." + ext_suffix.lower()):
                         item_title = f"{fn}.{ext_suffix}"
                     elif fn:
-                        item_title = fn
+                        item_title = str(fn)
                     else:
                         clean_path = item_url.split("?")[0].split("#")[0]
-                        item_title = os.path.basename(clean_path) or f"media_{len(items) + 1}.bin"
+                        path_name = os.path.basename(clean_path)
+                        identity = (
+                            kwdict.get("id") or kwdict.get("post_id") or
+                            kwdict.get("num") or kwdict.get("filename")
+                        )
+                        if path_name and path_name.lower() not in {"video", "media", "download", "file", "index"}:
+                            item_title = path_name
+                        elif identity:
+                            item_title = f"video_{identity}.{ext_suffix}" if ext_suffix else f"video_{identity}"
+                        else:
+                            item_title = f"video_{len(items) + 1}.{ext_suffix or 'mp4'}"
 
                     if not page_title:
                         page_title = kwdict.get("gallery_title") or kwdict.get("album_title") or kwdict.get("title") or kwdict.get("author") or ""
@@ -422,7 +508,7 @@ def extract_gallery_dl(url, options_json="{}"):
                     except Exception:
                         size_bytes = None
 
-                    thumb = kwdict.get("thumbnail") or kwdict.get("thumb") or (item_url if category == "IMAGES" else None)
+                    thumb = _extract_thumbnail_url(kwdict) or (item_url if category == "IMAGES" else None)
                     duration_ms = _parse_duration_millis(kwdict.get("duration"))
                     if duration_ms is None and kwdict.get("duration_ms") is not None:
                         try:
@@ -695,7 +781,12 @@ def extract_yt_dlp(url, options_json="{}"):
                     formats = entry.get("formats") or []
                     mode, primary_fmt, secondary_fmt = _select_best_ytdlp_formats(formats, max_height=max_height)
 
-                    v_title = entry.get("title") or entry.get("id") or f"media_{len(items) + 1}"
+                    v_title = _derive_extracted_video_title(
+                        entry,
+                        page_url,
+                        len(items),
+                        parent_title=info.get("title") or entry.get("playlist_title") or ""
+                    )
                     if mode == "split":
                         v_ext = "webm" if _is_webm_pair(primary_fmt, secondary_fmt) else "mp4"
                     else:
@@ -710,7 +801,7 @@ def extract_yt_dlp(url, options_json="{}"):
                     width = (primary_fmt or {}).get("width") or entry.get("width")
                     height = (primary_fmt or {}).get("height") or entry.get("height")
                     resolution_hint = f"{width}x{height}" if width and height else None
-                    thumb = entry.get("thumbnail")
+                    thumb = _extract_thumbnail_url(entry)
 
                     if mode == "split" and primary_fmt and secondary_fmt:
                         v_size = primary_fmt.get("filesize") or primary_fmt.get("filesize_approx") or 0

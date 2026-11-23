@@ -1050,6 +1050,49 @@ object MediaClassifier {
     }
 
     /**
+     * Merges two discoveries of the same media URL without losing useful preview or request data.
+     * Quality selects the primary item, while the secondary item can still contribute a poster,
+     * duration, authentication headers, metadata, and page provenance.
+     */
+    fun mergeScrapedMediaItems(
+        existing: ScrapedMediaItem,
+        incoming: ScrapedMediaItem
+    ): ScrapedMediaItem {
+        val incomingIsPreferred = compareMediaQuality(incoming, existing) > 0
+        val preferred = if (incomingIsPreferred) incoming else existing
+        val secondary = if (incomingIsPreferred) existing else incoming
+
+        val mergedHeaders = linkedMapOf<String, String>()
+        fun mergeHeaders(source: Map<String, String>) {
+            source.forEach { (name, value) ->
+                val previousName = mergedHeaders.keys.firstOrNull { it.equals(name, ignoreCase = true) }
+                if (previousName != null) mergedHeaders.remove(previousName)
+                mergedHeaders[name] = value
+            }
+        }
+        mergeHeaders(secondary.downloadHeaders)
+        mergeHeaders(preferred.downloadHeaders)
+
+        val engines = listOf(
+            existing.provenance.extractorEngine,
+            incoming.provenance.extractorEngine
+        ).filter { it.isNotBlank() }.distinct()
+
+        return preferred.copy(
+            id = existing.id,
+            thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
+            durationMillis = preferred.durationMillis ?: secondary.durationMillis,
+            provenance = preferred.provenance.copy(
+                extractorEngine = engines.joinToString(" + "),
+                pageUrl = preferred.provenance.pageUrl.ifBlank { secondary.provenance.pageUrl },
+                domSelector = preferred.provenance.domSelector ?: secondary.provenance.domSelector
+            ),
+            downloadHeaders = mergedHeaders,
+            metadata = secondary.metadata + preferred.metadata
+        )
+    }
+
+    /**
      * Deduplicates a list of scraped media items discovered by one or more extraction engines.
      * When duplicates are identified:
      * - Retains the item with the highest resolution / quality / full original URL

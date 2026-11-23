@@ -1491,7 +1491,7 @@ object MediaClassifier {
 
                 val nameCandidate = (queryName ?: pathName)
                     ?.substringAfterLast("/")
-                    ?.substringAfterLast("\\\\")
+                    ?.substringAfterLast("\\")
                     ?.substringBefore("?")
                     ?.trim()
                     ?.takeIf { it.isNotBlank() && it != "." && it != ".." }

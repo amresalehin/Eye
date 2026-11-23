@@ -167,6 +167,7 @@ private fun InboxSearchFavicon(url: String, modifier: Modifier = Modifier) {
         if (host.isBlank() || host.any { it.isWhitespace() || it in "/?#@" }) "" 
         else "https://www.google.com/s2/favicons?domain=$host&sz=96"
     }
+    var loaded by remember(faviconUrl) { mutableStateOf(false) }
     var failed by remember(faviconUrl) { mutableStateOf(faviconUrl.isBlank()) }
     Box(
         modifier = modifier
@@ -174,19 +175,31 @@ private fun InboxSearchFavicon(url: String, modifier: Modifier = Modifier) {
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = host.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        if (!failed) {
+        // The initial is a fallback only. Do not leave it beneath transparent favicon artwork.
+        if (!loaded) {
+            Text(
+                text = host.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (!failed && faviconUrl.isNotBlank()) {
             AsyncImage(
                 model = remember(faviconUrl, context) {
                     ImageRequest.Builder(context)
                         .data(faviconUrl)
                         .crossfade(false)
-                        .listener(onError = { _, _ -> failed = true })
+                        .listener(
+                            onSuccess = { _, _ ->
+                                loaded = true
+                                failed = false
+                            },
+                            onError = { _, _ ->
+                                loaded = false
+                                failed = true
+                            }
+                        )
                         .build()
                 },
                 contentDescription = "$host favicon",

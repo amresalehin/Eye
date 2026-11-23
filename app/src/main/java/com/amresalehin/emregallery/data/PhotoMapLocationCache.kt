@@ -76,6 +76,48 @@ class PhotoMapLocationCache(context: Context) :
         return result
     }
 
+    /**
+     * Loads only the requested media rows. The memories builder should not materialize the
+     * entire location database on every gallery refresh.
+     */
+    @Synchronized
+    fun loadForUris(uris: Collection<String>): Map<String, CachedLocation> {
+        if (uris.isEmpty()) return emptyMap()
+        val result = mutableMapOf<String, CachedLocation>()
+        for (chunk in uris.distinct().chunked(800)) {
+            val placeholders = List(chunk.size) { "?" }.joinToString(",")
+            readableDatabase.query(
+                "photo_locations",
+                arrayOf("uri", "latitude", "longitude"),
+                "uri IN ($placeholders)",
+                chunk.toTypedArray(),
+                null,
+                null,
+                null
+            ).use { cursor ->
+                val uriColumn = cursor.getColumnIndexOrThrow("uri")
+                val latitudeColumn = cursor.getColumnIndexOrThrow("latitude")
+                val longitudeColumn = cursor.getColumnIndexOrThrow("longitude")
+                while (cursor.moveToNext()) {
+                    val uri = cursor.getString(uriColumn)
+                    val hasCoordinates = !cursor.isNull(latitudeColumn) && !cursor.isNull(longitudeColumn)
+                    val point = if (!hasCoordinates) null else {
+                        val lat = cursor.getDouble(latitudeColumn)
+                        val lon = cursor.getDouble(longitudeColumn)
+                        if (
+                            lat.isFinite() && lon.isFinite() &&
+                            lat in -90.0..90.0 && lon in -180.0..180.0 &&
+                            !(lat == 0.0 && lon == 0.0)
+                        ) GeoPoint(lat, lon) else null
+                    }
+                    if (hasCoordinates && point == null) continue
+                    result[uri] = CachedLocation(point)
+                }
+            }
+        }
+        return result
+    }
+
     @Synchronized
     fun save(uri: String, point: GeoPoint?) {
         val values = ContentValues().apply {

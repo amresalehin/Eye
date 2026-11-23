@@ -441,6 +441,11 @@ fun MediaInboxScreen(
                             onOpenActivity = {
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
+                            onOpenMedia = { item ->
+                                item.localUri?.let { uriStr ->
+                                    onOpenMediaItem?.invoke(uriStr)
+                                }
+                            },
                             onOpenSearchHistory = {
                                 currentViewMode = DownloaderViewMode.SEARCH_HISTORY_PAGE
                             },

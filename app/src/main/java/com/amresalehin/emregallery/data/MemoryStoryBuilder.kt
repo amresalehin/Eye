@@ -40,10 +40,64 @@ object MemoryStoryBuilder {
             .toList()
         if (sorted.size < MIN_STORY_ITEMS) return emptyList()
 
-        val clusters = mutableListOf<MutableList<Pair<MediaItem, Long>>>()
+        val stories = mutableListOf<StoryGroup>()
+
+        fun appendStory(cluster: List<Pair<MediaItem, Long>>) {
+            if (cluster.size < MIN_STORY_ITEMS) return
+            val items = cluster.map { it.first }
+            val uriSet = items.mapTo(HashSet()) { it.uri }
+            val people = countSignals(uriSet, peopleByUri)
+            val tags = countSignals(uriSet, tagsByUri)
+            val hasLocationStory = items.count { item ->
+                locations[item.uri]?.let(::isValidLocation) == true
+            } >= 3
+
+            val signalThreshold = maxOf(3, ceil(items.size * 0.30).toInt())
+            val person = people.entries
+                .filter { it.value >= signalThreshold }
+                .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                ?.key
+            val tag = tags.entries
+                .filter { it.value >= signalThreshold }
+                .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                ?.key
+
+            if (!hasLocationStory && person == null && tag == null) return
+
+            val knownPlace = items.asSequence()
+                .mapNotNull { cachedPlaceNames[it.uri]?.trim()?.takeIf(String::isNotBlank) }
+                .groupingBy { it }
+                .eachCount()
+                .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                ?.key
+
+            val duration = cluster.last().second - cluster.first().second
+            val title = when {
+                person != null -> "With $person"
+                knownPlace != null && duration >= 24L * 60L * 60L * 1000L -> "Trip to $knownPlace"
+                knownPlace != null -> "At $knownPlace"
+                hasLocationStory -> "Location story"
+                tag != null -> displayTag(tag)
+                duration >= 24L * 60L * 60L * 1000L -> "Out and about"
+                else -> "A day out"
+            }
+
+            val storyItems = items.sortedByDescending(::timestampOf)
+            val candidate = StoryGroup(title = title, items = storyItems)
+            if (stories.size < 8) {
+                stories += candidate
+            } else {
+                val oldestIndex = stories.indices.minByOrNull { index ->
+                    stories[index].items.firstOrNull()?.let(::timestampOf) ?: 0L
+                } ?: return
+                val oldestTimestamp = stories[oldestIndex].items.firstOrNull()?.let(::timestampOf) ?: 0L
+                val candidateTimestamp = storyItems.firstOrNull()?.let(::timestampOf) ?: 0L
+                if (candidateTimestamp > oldestTimestamp) stories[oldestIndex] = candidate
+            }
+        }
+
         var current = mutableListOf<Pair<MediaItem, Long>>()
         var currentEventHasGps = false
-
         for (entry in sorted) {
             val previous = current.lastOrNull()
             if (previous != null && !belongsToSameEvent(
@@ -57,7 +111,7 @@ object MemoryStoryBuilder {
                     tagsByUri = tagsByUri
                 )
             ) {
-                if (current.isNotEmpty()) clusters += current
+                appendStory(current)
                 current = mutableListOf()
                 currentEventHasGps = false
             }
@@ -66,61 +120,11 @@ object MemoryStoryBuilder {
                 currentEventHasGps = true
             }
         }
-        if (current.isNotEmpty()) clusters += current
+        appendStory(current)
 
-        val stories = mutableListOf<StoryGroup>()
-        for (cluster in clusters) {
-            if (cluster.size < MIN_STORY_ITEMS) continue
-            val items = cluster.map { it.first }
-            val uriSet = items.mapTo(HashSet()) { it.uri }
-
-            val people = countSignals(uriSet, peopleByUri)
-            val tags = countSignals(uriSet, tagsByUri)
-            val gpsItems = items.mapNotNull { item -> locations[item.uri]?.takeIf(::isValidLocation) }
-            val hasLocationStory = gpsItems.size >= 3
-            val signalThreshold = maxOf(3, ceil(items.size * 0.30).toInt())
-            val person = people.entries
-                .filter { it.value >= signalThreshold }
-                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-                .firstOrNull()?.key
-            val tag = tags.entries
-                .filter { it.value >= signalThreshold }
-                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-                .firstOrNull()?.key
-
-            if (!hasLocationStory && person == null && tag == null) continue
-
-            val knownPlace = items.asSequence()
-                .mapNotNull { cachedPlaceNames[it.uri]?.trim()?.takeIf(String::isNotBlank) }
-                .groupingBy { it }
-                .eachCount()
-                .entries
-                .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-                ?.key
-
-            val place = knownPlace
-
-            val duration = cluster.last().second - cluster.first().second
-            val title = when {
-                person != null -> "With $person"
-                place != null && duration >= 24L * 60L * 60L * 1000L -> "Trip to $place"
-                place != null -> "At $place"
-                hasLocationStory -> "Location story"
-                tag != null -> displayTag(tag)
-                duration >= 24L * 60L * 60L * 1000L -> "Out and about"
-                else -> "A day out"
-            }
-
-            stories += StoryGroup(
-                title = title,
-                items = items.sortedByDescending(::timestampOf)
-            )
+        return stories.sortedByDescending { story ->
+            story.items.firstOrNull()?.let(::timestampOf) ?: 0L
         }
-
-        return stories
-            .distinctBy { story -> story.items.firstOrNull()?.uri ?: story.title }
-            .sortedByDescending { story -> story.items.maxOfOrNull(::timestampOf) ?: 0L }
-            .take(8)
     }
 
     private fun belongsToSameEvent(

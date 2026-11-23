@@ -305,6 +305,9 @@ object GalleryDlEngine {
             }
 
             val itemMetadata = mutableMapOf("source_url" to pageUrl)
+            obj.optString("thumbnailUrl")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?.let { itemMetadata["thumbnail_url"] = it }
             obj.optJSONObject("metadata")?.let { metadataJson ->
                 val keys = metadataJson.keys()
                 while (keys.hasNext()) {

@@ -63,7 +63,7 @@ class DownloaderBrowserNavigationTest {
     fun historyNormalizationKeepsBlankEntriesOut() {
         assertEquals("", normalizeMediaInboxSearchEntry("   "))
         assertEquals(
-            listOf("https://example.com"),
+            listOf("https://example.com/"),
             normalizeAndDeduplicateMediaInboxSearches(listOf("", "  ", "example.com"))
         )
     }

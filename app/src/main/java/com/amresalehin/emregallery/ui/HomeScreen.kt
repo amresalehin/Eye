@@ -181,6 +181,8 @@ fun HomeScreen(
     onAddToAlbum: ((Set<String>) -> Unit)? = null,
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
+    customPeopleMap: Map<String, Set<String>> = emptyMap(),
+    customTagsMap: Map<String, Set<String>> = emptyMap(),
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit,
     isVisible: Boolean = true,
@@ -518,6 +520,8 @@ fun HomeScreen(
                     item(key = "home_memories_strip", contentType = "memories_strip") {
                         MemoriesStrip(
                             media = sortedMedia,
+                            customPeopleMap = customPeopleMap,
+                            customTagsMap = customTagsMap,
                             onOpenMemory = onOpenMemory,
                             listState = memoriesListState
                         )

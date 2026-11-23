@@ -1077,9 +1077,18 @@ object MediaClassifier {
             existing.provenance.extractorEngine,
             incoming.provenance.extractorEngine
         ).filter { it.isNotBlank() }.distinct()
+        fun isPlaceholderTitle(value: String): Boolean {
+            val normalized = value.trim()
+            return normalized.isBlank() ||
+                Regex("""(?i)^(?:media|video|file|item)_\\d+(?:\\.[a-z0-9]+)?$""").matches(normalized)
+        }
+        val mergedTitle = if (
+            isPlaceholderTitle(preferred.title) && !isPlaceholderTitle(secondary.title)
+        ) secondary.title else preferred.title
 
         return preferred.copy(
             id = existing.id,
+            title = mergedTitle,
             thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
             durationMillis = preferred.durationMillis ?: secondary.durationMillis,
             provenance = preferred.provenance.copy(

@@ -198,7 +198,11 @@ fun MemoriesStrip(
     var stories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
     var storiesReady by remember { mutableStateOf(false) }
 
-    LaunchedEffect(media, customPeopleMap, customTagsMap) {
+    val mediaSnapshotKey = System.identityHashCode(media)
+    val peopleSnapshotKey = System.identityHashCode(customPeopleMap)
+    val tagsSnapshotKey = System.identityHashCode(customTagsMap)
+
+    LaunchedEffect(mediaSnapshotKey, peopleSnapshotKey, tagsSnapshotKey) {
         val appContext = context.applicationContext
 
         // SQLite is queried only for URIs in this library snapshot. CPU-heavy grouping runs

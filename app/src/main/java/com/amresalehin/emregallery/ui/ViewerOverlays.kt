@@ -139,35 +139,40 @@ fun ViewerStoryTopBar(
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        // Segmented progress indicator
-        Row(
+        // Segmented progress indicator drawn in a single Canvas pass
+        val count = itemCount.coerceAtLeast(1)
+        androidx.compose.foundation.Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 4.dp, vertical = 4.dp)
+                .height(3.dp)
         ) {
-            val count = itemCount.coerceAtLeast(1)
+            val gapPx = 4.dp.toPx()
+            val totalGap = gapPx * (count - 1).coerceAtLeast(0)
+            val segWidth = ((size.width - totalGap) / count).coerceAtLeast(1f)
+            val radiusPx = 2.dp.toPx()
+            val corner = androidx.compose.ui.geometry.CornerRadius(radiusPx, radiusPx)
+            val bgColor = Color.White.copy(alpha = 0.35f)
             for (i in 0 until count) {
-                val segmentProgress = when {
+                val left = i * (segWidth + gapPx)
+                drawRoundRect(
+                    color = bgColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(left, 0f),
+                    size = androidx.compose.ui.geometry.Size(segWidth, size.height),
+                    cornerRadius = corner
+                )
+                val segProgress = when {
                     i < currentIndex -> 1f
                     i == currentIndex -> currentProgress.coerceIn(0f, 1f)
                     else -> 0f
                 }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.35f))
-                ) {
-                    if (segmentProgress > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(fraction = segmentProgress)
-                                .background(Color.White)
-                        )
-                    }
+                if (segProgress > 0f) {
+                    drawRoundRect(
+                        color = Color.White,
+                        topLeft = androidx.compose.ui.geometry.Offset(left, 0f),
+                        size = androidx.compose.ui.geometry.Size(segWidth * segProgress, size.height),
+                        cornerRadius = corner
+                    )
                 }
             }
         }

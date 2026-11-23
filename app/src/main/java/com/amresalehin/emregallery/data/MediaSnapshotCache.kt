@@ -20,6 +20,20 @@ object MediaSnapshotCache {
     private const val VERSION = 1
     private const val MAX_ITEMS = 180
 
+    @Volatile
+    private var lastWrittenFingerprint: Long = Long.MIN_VALUE
+
+    private fun computeFingerprint(snapshot: List<MediaItem>): Long {
+        var hash = snapshot.size.toLong() * 31L
+        for (item in snapshot) {
+            hash = hash * 31L + item.id
+            hash = hash * 31L + item.dateAddedSeconds
+            hash = hash * 31L + item.dateTakenMillis
+            if (item.isTrashed) hash += 1L
+        }
+        return hash
+    }
+
     private fun snapshotFile(context: Context): File =
         File(context.noBackupFilesDir, FILE_NAME)
 
@@ -77,8 +91,11 @@ object MediaSnapshotCache {
     }
 
     fun write(context: Context, media: List<MediaItem>) {
-        val atomicFile = AtomicFile(snapshotFile(context))
+        val file = snapshotFile(context)
         val snapshot = media.take(MAX_ITEMS)
+        val fingerprint = computeFingerprint(snapshot)
+        if (fingerprint == lastWrittenFingerprint && file.isFile && file.length() > 0L) return
+        val atomicFile = AtomicFile(file)
         runCatching {
             val stream = atomicFile.startWrite()
             try {
@@ -104,6 +121,7 @@ object MediaSnapshotCache {
                 }
                 output.flush()
                 atomicFile.finishWrite(stream)
+                lastWrittenFingerprint = fingerprint
             } catch (error: Throwable) {
                 atomicFile.failWrite(stream)
                 throw error

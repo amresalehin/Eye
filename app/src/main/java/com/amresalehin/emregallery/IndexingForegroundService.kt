@@ -204,6 +204,7 @@ class IndexingForegroundService : Service() {
         retryFailedOnly: Boolean = false,
         folderFilter: Set<String>? = null
     ) {
+        val prevPriority = runCatching { android.os.Process.getThreadPriority(android.os.Process.myTid()) }.getOrNull()
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val allPhotos = loadPhotos()
         val photos = if (folderFilter != null && folderFilter.isNotEmpty()) {
@@ -226,9 +227,16 @@ class IndexingForegroundService : Service() {
                         // Reset indexed status for selected engine to reprocess photos without wiping identities
                         store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
                     } else {
-                        // Reset indexed status only for the scoped photos
-                        for (p in photos) {
-                            store.writableDatabase.delete("indexed_media", "media_uri=? AND engine_id=?", arrayOf(p.uri, engineId))
+                        // Reset indexed status only for the scoped photos in a single transaction
+                        val db = store.writableDatabase
+                        db.beginTransaction()
+                        try {
+                            for (p in photos) {
+                                db.delete("indexed_media", "media_uri=? AND engine_id=?", arrayOf(p.uri, engineId))
+                            }
+                            db.setTransactionSuccessful()
+                        } finally {
+                            db.endTransaction()
                         }
                     }
                 }
@@ -240,7 +248,8 @@ class IndexingForegroundService : Service() {
             } else null
 
             val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
-            val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
+            val relevantUris = relevantPhotos.map { it.uri }
+            val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantUris, engineId = engineId)
             val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
             pauseSignal.value = initialPaused
 
@@ -251,8 +260,8 @@ class IndexingForegroundService : Service() {
                 processed = alreadyDone,
                 total = relevantPhotos.size,
                 faces = store.indexedFaceCount(engineId),
-                failed = store.failedMediaCount(relevantPhotos.map { it.uri }, engineId),
-                photosWithFaces = store.mediaWithFacesCount(relevantPhotos.map { it.uri }, engineId),
+                failed = store.failedMediaCount(relevantUris, engineId),
+                photosWithFaces = store.mediaWithFacesCount(relevantUris, engineId),
             engineId = engineId,
             currentItemName = "Initializing ${factory.displayName}…",
             currentItemStatus = "",
@@ -280,35 +289,40 @@ class IndexingForegroundService : Service() {
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
                 val done = (alreadyDone + p.processed).coerceAtMost(relevantPhotos.size)
-                updateState(
-                    processed = done,
-                    total = relevantPhotos.size,
-                    faces = store.indexedFaceCount(engineId),
-                    failed = store.failedMediaCount(relevantPhotos.map { it.uri }, engineId),
-                    photosWithFaces = p.photosWithFaces,
-                    engineId = engineId,
-                    currentItemName = p.currentItemName,
-                    currentItemStatus = p.currentItemStatus,
-                    groupingStatus = p.groupingStatus,
-                    detectionState = p.detectionStage.state.name,
-                    detectionProcessed = p.detectionStage.processed,
-                    detectionTotal = p.detectionStage.total,
-                    embeddingState = p.embeddingStage.state.name,
-                    embeddingProcessed = p.embeddingStage.processed,
-                    embeddingTotal = p.embeddingStage.total,
-                    clusteringState = p.clusteringStage.state.name,
-                    clusteringProcessed = p.clusteringStage.processed,
-                    clusteringTotal = p.clusteringStage.total
-                )
                 if (done % 3 == 0 || done == relevantPhotos.size) {
+                    val faceCount = store.indexedFaceCount(engineId)
+                    updateState(
+                        processed = done,
+                        total = relevantPhotos.size,
+                        faces = faceCount,
+                        failed = store.failedMediaCount(relevantUris, engineId),
+                        photosWithFaces = p.photosWithFaces,
+                        engineId = engineId,
+                        currentItemName = p.currentItemName,
+                        currentItemStatus = p.currentItemStatus,
+                        groupingStatus = p.groupingStatus,
+                        detectionState = p.detectionStage.state.name,
+                        detectionProcessed = p.detectionStage.processed,
+                        detectionTotal = p.detectionStage.total,
+                        embeddingState = p.embeddingStage.state.name,
+                        embeddingProcessed = p.embeddingStage.processed,
+                        embeddingTotal = p.embeddingStage.total,
+                        clusteringState = p.clusteringStage.state.name,
+                        clusteringProcessed = p.clusteringStage.processed,
+                        clusteringTotal = p.clusteringStage.total
+                    )
                     val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
                     val statusSnippet = if (p.currentItemStatus.isNotBlank()) " (${p.currentItemStatus})" else ""
                     val groupingSnippet = if (p.groupingStatus.isNotBlank()) " · ${p.groupingStatus}" else ""
-                    postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
+                    postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · $faceCount faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
                 }
             }
         )
         } finally {
+            runCatching { store.close() }
+            if (prevPriority != null) {
+                runCatching { android.os.Process.setThreadPriority(prevPriority) }
+            }
             serviceHandle.close()
         }
     }

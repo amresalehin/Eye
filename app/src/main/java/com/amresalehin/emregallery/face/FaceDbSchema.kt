@@ -81,6 +81,7 @@ object FaceDbSchema {
         db.execSQL("CREATE INDEX idx_faces_engine_cluster ON faces(engine_id, cluster_id)")
         db.execSQL("CREATE INDEX idx_faces_engine_person ON faces(engine_id, person_id)")
         db.execSQL("CREATE INDEX idx_faces_media ON faces(media_uri)")
+        ensureIndexes(db)
 
         db.execSQL(
             """CREATE TABLE indexed_media (
@@ -154,6 +155,19 @@ object FaceDbSchema {
                 PRIMARY KEY(engine_id, model_version)
             )""".trimIndent()
         )
+    }
+
+    fun ensureIndexes(db: SQLiteDatabase) {
+        runCatching {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_faces_engine_model ON faces(engine_id, model_version)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_faces_cluster_engine_model ON faces(cluster_id, engine_id, model_version)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_faces_person_media ON faces(person_id, media_uri)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_faces_face_id ON faces(face_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_people_engine_hidden ON people(engine_id, is_hidden)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_suggestions_engine_status_dist ON review_suggestions(engine_id, status, distance)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_suggestions_media ON review_suggestions(media_uri)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_feedback_engine_type_source ON face_feedback(engine_id, feedback_type, source_id)")
+        }
     }
 
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {

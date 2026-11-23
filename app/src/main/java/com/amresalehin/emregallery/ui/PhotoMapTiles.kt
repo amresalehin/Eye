@@ -8,7 +8,7 @@ import org.osmdroid.util.MapTileIndex
  */
 object PhotoMapTiles {
 
-    fun satelliteTileSource(): OnlineTileSourceBase = object : OnlineTileSourceBase(
+    private val cachedSatelliteTileSource: OnlineTileSourceBase = object : OnlineTileSourceBase(
         "EsriWorldImagery",
         1,
         19,
@@ -22,4 +22,6 @@ object PhotoMapTiles {
                 MapTileIndex.getY(pMapTileIndex) + "/" +
                 MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding()
     }
+
+    fun satelliteTileSource(): OnlineTileSourceBase = cachedSatelliteTileSource
 }

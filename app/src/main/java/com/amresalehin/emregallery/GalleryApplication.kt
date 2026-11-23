@@ -28,10 +28,9 @@ class GalleryApplication : Application() {
         // avoiding recurring decompression bottlenecks during 120Hz continuous scrolling.
         val cachePercent = if (isLowRam) 0.15 else 0.25
 
-        // Unconstrained concurrency: Utilize full Dispatchers without artificial core-capping
-        // so that multi-core processors decode thumbnails at maximum throughput.
-        val imageIoDispatcher = Dispatchers.IO
-        val imageComputeDispatcher = Dispatchers.Default
+        // Bounded concurrency prevents fast flings from saturating CPU cores and causing GC/thermal spikes.
+        val imageIoDispatcher = Dispatchers.IO.limitedParallelism(6)
+        val imageComputeDispatcher = Dispatchers.Default.limitedParallelism(4)
 
         val imageLoader = ImageLoader.Builder(this)
             .okHttpClient { OkHttpDownloader.client }
@@ -57,7 +56,6 @@ class GalleryApplication : Application() {
             .bitmapConfig(if (isLowRam) android.graphics.Bitmap.Config.RGB_565 else android.graphics.Bitmap.Config.ARGB_8888)
             .allowRgb565(true)
             .allowHardware(true)
-            .crossfade(true)
             .crossfade(150)
             .respectCacheHeaders(false)
             .build()
@@ -66,10 +64,9 @@ class GalleryApplication : Application() {
         // Deterministic registration of both face recognition engines
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
-        com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
-
-        // Restore download history and reconcile saved Inbox records off the startup thread.
+        // Restore face coordinator state and download history off the startup main thread.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this@GalleryApplication)
             com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
         }
 
@@ -86,11 +83,11 @@ class GalleryApplication : Application() {
         runCatching {
             val coilCache = Coil.imageLoader(this).memoryCache
             when {
-                level >= TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_COMPLETE -> {
+                level >= TRIM_MEMORY_MODERATE || level == TRIM_MEMORY_RUNNING_CRITICAL -> {
                     coilCache?.clear()
                     com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
                 }
-                level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_BACKGROUND -> {
+                level >= TRIM_MEMORY_UI_HIDDEN || level >= TRIM_MEMORY_RUNNING_LOW -> {
                     coilCache?.trimMemory(level)
                     com.amresalehin.emregallery.face.FaceThumbnailHelper.trimMemory(level)
                 }

@@ -102,34 +102,26 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
             val result = cachedLocated.toMutableList()
             var scanned = 0
 
-            for (item in uncachedItems) {
-                if (!isActive) break
-
-                val point = withContext(Dispatchers.IO) {
-                    PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
-                }
-
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                for (item in uncachedItems) {
+                    if (!isActive) break
+                    val point = PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
                     locationCache.save(item.uri, point)
-                }
-
-                if (point != null) {
-                    result.add(item to point)
-                }
-                scanned++
-
-                // Avoid republishing the growing location list too frequently: each update
-                // invalidates the heatmap cache and recomposes the viewport grid.
-                if (scanned % 128 == 0 || scanned == uncachedItems.size) {
-                    val currentList = result.toList()
-                    val currentScanned = scanned
-                    _uiState.update {
-                        it.copy(
-                            locatedMedia = currentList,
-                            scanProgress = currentScanned
-                        )
+                    if (point != null) {
+                        result.add(item to point)
                     }
-                    yield()
+                    scanned++
+                    if (scanned % 128 == 0 || scanned == uncachedItems.size) {
+                        val currentList = result.toList()
+                        val currentScanned = scanned
+                        _uiState.update {
+                            it.copy(
+                                locatedMedia = currentList,
+                                scanProgress = currentScanned
+                            )
+                        }
+                        yield()
+                    }
                 }
             }
 

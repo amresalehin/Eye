@@ -30,7 +30,7 @@ class UiPreferencesManager(private val context: Context) {
     }.distinctUntilChanged()
 
     suspend fun setCompletedWelcome(completed: Boolean) {
-        sharedPrefs.edit().putBoolean("welcome_completed", completed).commit()
+        sharedPrefs.edit().putBoolean("welcome_completed", completed).apply()
         context.galleryDataStore.edit { prefs ->
             prefs[welcomeCompletedKey] = completed
         }

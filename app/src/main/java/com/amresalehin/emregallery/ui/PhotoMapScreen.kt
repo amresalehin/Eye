@@ -276,8 +276,18 @@ fun PhotoMapScreen(
     }
 
     // Indexing updates data only. Camera state is saved and restored independently.
-    DisposableEffect(Unit) {
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> mapRef?.onResume()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> mapRef?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             mapRef?.let { map ->
                 persistPhotoMapCamera(context, map)
                 map.onPause()

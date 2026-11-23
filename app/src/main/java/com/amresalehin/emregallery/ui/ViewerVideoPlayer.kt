@@ -209,7 +209,7 @@ fun rememberViewerVideoState(
     // Pause player when activity/lifecycle moves to background
     DisposableEffect(lifecycleOwner, player) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
                 player?.pause()
             }
         }

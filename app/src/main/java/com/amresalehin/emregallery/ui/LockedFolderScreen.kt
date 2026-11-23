@@ -63,13 +63,11 @@ fun filterLockedFolderItems(items: List<MediaItem>, query: String): List<MediaIt
     if (normalizedQuery.isEmpty()) return items
 
     return items.filter { item ->
-        listOf(
-            item.name,
-            item.relativePath,
-            item.uri,
-            item.mimeType.orEmpty(),
-            if (item.isVideo) "video" else "image"
-        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+        item.name.contains(normalizedQuery, ignoreCase = true) ||
+            item.relativePath.contains(normalizedQuery, ignoreCase = true) ||
+            item.uri.contains(normalizedQuery, ignoreCase = true) ||
+            (item.mimeType?.contains(normalizedQuery, ignoreCase = true) == true) ||
+            (if (item.isVideo) "video" else "image").contains(normalizedQuery, ignoreCase = true)
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)

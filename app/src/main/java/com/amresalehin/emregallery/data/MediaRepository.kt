@@ -35,10 +35,13 @@ class MediaRepository(private val resolver: ContentResolver) {
             successfulCollections++
         }
 
-        val sorted = rows.sortedWith(compareByDescending<MediaItem> {
-            if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L
-        }.thenBy { it.id })
-        return MediaLoadResult(sorted, successfulCollections)
+        rows.sortWith { a, b ->
+            val aTs = if (a.dateTakenMillis > 0) a.dateTakenMillis else a.dateAddedSeconds * 1000L
+            val bTs = if (b.dateTakenMillis > 0) b.dateTakenMillis else b.dateAddedSeconds * 1000L
+            val cmp = bTs.compareTo(aTs)
+            if (cmp != 0) cmp else a.id.compareTo(b.id)
+        }
+        return MediaLoadResult(rows, successfulCollections)
     }
 
     private fun queryCollection(
@@ -73,6 +76,9 @@ class MediaRepository(private val resolver: ContentResolver) {
                         android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
                         "${MediaStore.MediaColumns.DATE_ADDED} DESC"
                     )
+                    if (limit != null && limit > 0) {
+                        putInt(android.content.ContentResolver.QUERY_ARG_LIMIT, limit)
+                    }
                 }
                 runCatching { resolver.query(collection, projection, queryArgs, null) }.getOrNull()
                     ?: resolver.query(collection, projection, null, null, sort)
@@ -166,24 +172,27 @@ class MediaRepository(private val resolver: ContentResolver) {
         )
 
         fun isSupportedMedia(name: String, mimeType: String?, isVideo: Boolean): Boolean {
-            val cleanName = name.trim().lowercase(java.util.Locale.ROOT)
-            val ext = cleanName.substringAfterLast('.', "")
-            if (ext in NON_MEDIA_EXTENSIONS) return false
+            val dotIdx = name.lastIndexOf('.')
+            val ext = if (dotIdx >= 0 && dotIdx < name.length - 1) {
+                name.substring(dotIdx + 1).trim().lowercase(java.util.Locale.ROOT)
+            } else ""
+            if (ext.isNotEmpty() && ext in NON_MEDIA_EXTENSIONS) return false
 
-            val mime = mimeType?.trim()?.lowercase(java.util.Locale.ROOT)
+            val mime = mimeType?.trim()
             if (mime != null) {
-                if (mime == "text/xml" || mime == "application/xml" ||
-                    (mime.contains("xml") && !mime.contains("svg")) ||
-                    mime == "text/plain" || mime == "application/json" || mime == "text/html" ||
-                    mime == "application/zip" || mime == "application/pdf" || mime.startsWith("text/")) {
+                if (mime.equals("text/xml", true) || mime.equals("application/xml", true) ||
+                    (mime.contains("xml", ignoreCase = true) && !mime.contains("svg", ignoreCase = true)) ||
+                    mime.equals("text/plain", true) || mime.equals("application/json", true) ||
+                    mime.equals("text/html", true) || mime.equals("application/zip", true) ||
+                    mime.equals("application/pdf", true) || mime.startsWith("text/", ignoreCase = true)) {
                     return false
                 }
             }
 
             return if (isVideo) {
-                ext in VALID_VIDEO_EXTENSIONS || (mime != null && mime.startsWith("video/"))
+                (ext.isNotEmpty() && ext in VALID_VIDEO_EXTENSIONS) || (mime != null && mime.startsWith("video/", ignoreCase = true))
             } else {
-                ext in VALID_IMAGE_EXTENSIONS || (mime != null && mime.startsWith("image/"))
+                (ext.isNotEmpty() && ext in VALID_IMAGE_EXTENSIONS) || (mime != null && mime.startsWith("image/", ignoreCase = true))
             }
         }
     }

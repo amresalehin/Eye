@@ -88,6 +88,7 @@ fun groupMediaByMonth(media: List<MediaItem>): List<DayGroup> {
 
     val groupedMap = LinkedHashMap<Long, MutableList<MediaItem>>()
     var lastMonthStart = Long.MIN_VALUE
+    var lastMonthNumber = -1
 
     for (item in media) {
         val timestamp = if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
@@ -95,7 +96,7 @@ fun groupMediaByMonth(media: List<MediaItem>): List<DayGroup> {
 
         val monthStart = if (lastMonthStart != Long.MIN_VALUE && validTimestamp >= lastMonthStart && validTimestamp < lastMonthStart + 27 * 86_400_000L) {
             cal.timeInMillis = validTimestamp
-            if (cal.get(Calendar.MONTH) == cal.apply { timeInMillis = lastMonthStart }.get(Calendar.MONTH)) {
+            if (cal.get(Calendar.MONTH) == lastMonthNumber) {
                 lastMonthStart
             } else {
                 cal.set(Calendar.DAY_OF_MONTH, 1)
@@ -103,6 +104,7 @@ fun groupMediaByMonth(media: List<MediaItem>): List<DayGroup> {
                 cal.set(Calendar.MINUTE, 0)
                 cal.set(Calendar.SECOND, 0)
                 cal.set(Calendar.MILLISECOND, 0)
+                lastMonthNumber = cal.get(Calendar.MONTH)
                 cal.timeInMillis
             }
         } else {
@@ -112,6 +114,7 @@ fun groupMediaByMonth(media: List<MediaItem>): List<DayGroup> {
             cal.set(Calendar.MINUTE, 0)
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
+            lastMonthNumber = cal.get(Calendar.MONTH)
             cal.timeInMillis
         }
         lastMonthStart = monthStart

@@ -6,13 +6,16 @@ import android.net.Uri
 import android.provider.MediaStore
 import coil.ImageLoader
 import coil.decode.DataSource
+import coil.decode.ImageSource
 import coil.fetch.DrawableResult
 import coil.fetch.FetchResult
 import coil.fetch.Fetcher
+import coil.fetch.SourceResult
 import coil.request.Options
 import coil.size.Dimension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okio.Path.Companion.toOkioPath
 
 /**
  * Coil adapter for Android's MediaStore thumbnail API, backed by the app's prepared-thumbnail
@@ -36,6 +39,14 @@ class MediaStoreThumbnailFetcher(
         val heightPx = heightDim.px
         if (widthPx > 1024 || heightPx > 1024) return@withContext null
 
+        val preparedFile = PreparedThumbnailCache.loadOrCreateFile(context, uri, widthPx, heightPx)
+        if (preparedFile != null) {
+            return@withContext SourceResult(
+                source = ImageSource(preparedFile.toOkioPath(), context),
+                mimeType = "image/webp",
+                dataSource = DataSource.DISK
+            )
+        }
         val prepared = PreparedThumbnailCache.loadOrCreate(context, uri, widthPx, heightPx)
             ?: return@withContext null
 

@@ -62,10 +62,20 @@ enum class TesseractModel(
  * fallback from official Tesseract GitHub repositories.
  */
 object TesseractOcr {
+    private val HEX_CHARS = "0123456789abcdef".toCharArray()
+    private val sha256Local = ThreadLocal.withInitial { java.security.MessageDigest.getInstance("SHA-256") }
+
     private fun cacheFile(context: Context, uri: Uri): File {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(uri.toString().toByteArray(Charsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(byte) }
+        val md = sha256Local.get() ?: java.security.MessageDigest.getInstance("SHA-256")
+        md.reset()
+        val bytes = md.digest(uri.toString().toByteArray(Charsets.UTF_8))
+        val chars = CharArray(bytes.size * 2)
+        for (i in bytes.indices) {
+            val v = bytes[i].toInt() and 0xff
+            chars[i * 2] = HEX_CHARS[v ushr 4]
+            chars[i * 2 + 1] = HEX_CHARS[v and 0x0f]
+        }
+        val digest = String(chars)
         val directory = File(context.filesDir, "ocr-results")
         if (!directory.exists() && !directory.mkdirs()) {
             error("Could not create OCR result cache.")

@@ -1572,7 +1572,9 @@ fun GalleryApp(
         }
 
         // Wider top and bottom edge blur across app screens, smoothly fading with return progress
-        val showEdgeBlurs = (destination != Destination.VIEWER) || viewerTransitionProgress.value < 0.99f
+        val showEdgeBlurs by remember(destination) {
+            derivedStateOf { (destination != Destination.VIEWER) || viewerTransitionProgress.value < 0.99f }
+        }
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier

@@ -174,6 +174,13 @@ fun AlbumsScreen(
     // the map card when it scrolls out of composition, but the Albums screen itself
     // remains mounted across navigation, so this reference survives both cases.
     var mapPreviewView by remember(context) { mutableStateOf<MapView?>(null) }
+    DisposableEffect(mapPreviewView) {
+        val currentMap = mapPreviewView
+        onDispose {
+            currentMap?.onPause()
+            currentMap?.onDetach()
+        }
+    }
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,

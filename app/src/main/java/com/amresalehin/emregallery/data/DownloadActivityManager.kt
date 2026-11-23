@@ -73,7 +73,7 @@ object DownloadActivityManager {
 
     private var appContext: Context? = null
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeRetryJobs = ConcurrentHashMap<String, Job>()
 
     fun initialize(context: Context) {

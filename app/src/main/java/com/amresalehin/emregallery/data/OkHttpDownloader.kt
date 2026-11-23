@@ -111,12 +111,12 @@ object OkHttpDownloader {
         fun clearSession() {
             synchronized(cookieLock) {
                 inMemoryCookies.clear()
-                try {
-                    val cm = CookieManager.getInstance()
-                    cm.removeAllCookies(null)
-                    cm.flush()
-                } catch (_: Throwable) {}
             }
+            try {
+                val cm = CookieManager.getInstance()
+                cm.removeAllCookies(null)
+                cm.flush()
+            } catch (_: Throwable) {}
         }
     }
 

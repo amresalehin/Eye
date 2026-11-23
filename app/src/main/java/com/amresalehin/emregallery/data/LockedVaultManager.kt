@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,6 +20,12 @@ class LockedVaultManager(private val context: Context) {
     // main thread, while directory creation belongs in the existing IO write paths.
     private val vaultDir: File = File(context.filesDir, "locked_vault")
     private val metaFile: File = File(vaultDir, "vault_metadata.json")
+    private val vaultMutex = Mutex()
+
+    companion object {
+        private val SAFE_NAME_REGEX = "[^a-zA-Z0-9._-]".toRegex()
+        private const val COPY_BUFFER_BYTES = 64 * 1024
+    }
 
     private fun ensureVaultDirectory(): Boolean =
         vaultDir.isDirectory || vaultDir.mkdirs()
@@ -76,7 +84,15 @@ class LockedVaultManager(private val context: Context) {
             }
             array.put(obj)
         }
-        metaFile.writeText(array.toString())
+        val tmpFile = File(vaultDir, "vault_metadata.json.tmp")
+        tmpFile.writeText(array.toString())
+        if (!tmpFile.renameTo(metaFile)) {
+            metaFile.delete()
+            if (!tmpFile.renameTo(metaFile)) {
+                tmpFile.copyTo(metaFile, overwrite = true)
+                tmpFile.delete()
+            }
+        }
     }
 
     /**
@@ -84,20 +100,21 @@ class LockedVaultManager(private val context: Context) {
      * and deletes the original file from mainline storage (MediaStore).
      */
     suspend fun lockItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
-        if (!ensureVaultDirectory()) return@withContext emptyList()
+        vaultMutex.withLock {
+        if (!ensureVaultDirectory()) return@withLock emptyList()
         val currentVaultItems = getVaultItems().toMutableList()
         val lockedList = mutableListOf<MediaItem>()
 
         for (item in items) {
             try {
-                val safeName = item.name.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+                val safeName = item.name.replace(SAFE_NAME_REGEX, "_")
                 val destFile = File(vaultDir, "vault_${item.id}_$safeName")
                 val srcUri = Uri.parse(item.uri)
 
                 // Copy stream to isolated vault file
                 context.contentResolver.openInputStream(srcUri)?.use { input ->
                     destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                        input.copyTo(output, COPY_BUFFER_BYTES)
                     }
                 }
 
@@ -122,6 +139,7 @@ class LockedVaultManager(private val context: Context) {
 
         saveVaultItems(currentVaultItems)
         lockedList
+        }
     }
 
     /**

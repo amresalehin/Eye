@@ -182,6 +182,16 @@ class FaceClusterStore(context: Context) :
         super.onConfigure(db)
         db.enableWriteAheadLogging()
         db.setForeignKeyConstraintsEnabled(true)
+        runCatching {
+            db.rawQuery("PRAGMA busy_timeout = 5000", null).use { it.moveToFirst() }
+            db.execSQL("PRAGMA synchronous = NORMAL")
+            db.execSQL("PRAGMA temp_store = MEMORY")
+        }
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        FaceDbSchema.ensureIndexes(db)
     }
 
     override fun onCreate(db: SQLiteDatabase) {

@@ -18,6 +18,8 @@ class MainActivity : FragmentActivity() {
 
     private val incomingBrowserRequest = mutableStateOf<BrowserTabOpenRequest?>(null)
     private var nextBrowserRequestId = 0L
+    private var lastAppliedDisplayId: Int = -1
+    private var lastAppliedModeId: Int = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,7 +56,8 @@ class MainActivity : FragmentActivity() {
         if (rawUrl.isBlank()) return
 
         val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return
-        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return
+        val scheme = uri.scheme
+        if ((!scheme.equals("http", ignoreCase = true) && !scheme.equals("https", ignoreCase = true)) || uri.host.isNullOrBlank()) return
 
         incomingBrowserRequest.value = BrowserTabOpenRequest(
             requestId = ++nextBrowserRequestId,
@@ -94,10 +97,16 @@ class MainActivity : FragmentActivity() {
                 windowManager.defaultDisplay
             }
 
+            val displayId = currentDisplay?.displayId ?: -1
             val supportedModes = currentDisplay?.supportedModes ?: emptyArray()
-            val preferredMode = supportedModes
-                .filter { it.refreshRate >= 60f }
-                .maxByOrNull { it.refreshRate }
+            var preferredMode: android.view.Display.Mode? = null
+            for (mode in supportedModes) {
+                if (mode.refreshRate >= 60f && (preferredMode == null || mode.refreshRate > preferredMode.refreshRate)) {
+                    preferredMode = mode
+                }
+            }
+            val targetModeId = preferredMode?.modeId ?: 0
+            if (displayId == lastAppliedDisplayId && targetModeId == lastAppliedModeId) return
 
             val params = currentWindow.attributes
             if (preferredMode != null) {
@@ -116,6 +125,8 @@ class MainActivity : FragmentActivity() {
             }
 
             currentWindow.attributes = params
+            lastAppliedDisplayId = displayId
+            lastAppliedModeId = targetModeId
         }
     }
 

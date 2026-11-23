@@ -600,20 +600,20 @@ fun ViewerDetailsDrawer(
                         if (input.isNotEmpty()) {
                             isGeocoding = true
                             coroutineScope.launch {
-                                val geocoder = runCatching {
-                                    @Suppress("DEPRECATION")
-                                    Geocoder(context, Locale.getDefault()).getFromLocationName(input, 1)
-                                }.getOrNull()?.firstOrNull()
+                                val point = withContext(Dispatchers.IO) {
+                                    val geocoder = runCatching {
+                                        @Suppress("DEPRECATION")
+                                        Geocoder(context, Locale.getDefault()).getFromLocationName(input, 1)
+                                    }.getOrNull()?.firstOrNull()
 
-                                val point = if (geocoder != null) {
-                                    GeoPoint(geocoder.latitude, geocoder.longitude)
-                                } else {
-                                    val parts = input.split(",").mapNotNull { it.trim().toDoubleOrNull() }
-                                    if (parts.size >= 2) GeoPoint(parts[0], parts[1]) else null
-                                }
-
-                                withContext(Dispatchers.IO) {
-                                    PhotoMapLocationCache(context).save(item.uri, point)
+                                    val resolved = if (geocoder != null) {
+                                        GeoPoint(geocoder.latitude, geocoder.longitude)
+                                    } else {
+                                        val parts = input.split(",").mapNotNull { it.trim().toDoubleOrNull() }
+                                        if (parts.size >= 2) GeoPoint(parts[0], parts[1]) else null
+                                    }
+                                    PhotoMapLocationCache(context).save(item.uri, resolved)
+                                    resolved
                                 }
 
                                 val updated = detailsState.metadata.toMutableMap()
@@ -707,9 +707,13 @@ fun ViewerDetailsDrawer(
                     )
                     TextButton(
                         onClick = {
-                            faceStore.removeFaceFromPerson(face.mediaUri, face.faceIndex, engineId = face.engineId)
-                            faceReloadKey++
-                            renamingFace = null
+                            coroutineScope.launch(Dispatchers.IO) {
+                                faceStore.removeFaceFromPerson(face.mediaUri, face.faceIndex, engineId = face.engineId)
+                                withContext(Dispatchers.Main) {
+                                    faceReloadKey++
+                                    renamingFace = null
+                                }
+                            }
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                     ) {
@@ -724,9 +728,13 @@ fun ViewerDetailsDrawer(
                     onClick = {
                         val cleanName = nameInput.trim()
                         if (cleanName.isNotEmpty()) {
-                            if (personId.isNotBlank()) faceStore.renamePerson(personId, cleanName)
-                            faceReloadKey++
-                            renamingFace = null
+                            coroutineScope.launch(Dispatchers.IO) {
+                                if (personId.isNotBlank()) faceStore.renamePerson(personId, cleanName)
+                                withContext(Dispatchers.Main) {
+                                    faceReloadKey++
+                                    renamingFace = null
+                                }
+                            }
                         }
                     },
                     enabled = nameInput.isNotBlank() && personId.isNotBlank()

@@ -258,42 +258,31 @@ class PhotoHeatmapOverlay(
 
         val density = FloatArray(gridWidth * gridHeight)
         if (projectedPoints.isNotEmpty()) {
-            // Bucket points only for bookkeeping while retaining each point's original
-            // projected offset. Do not average nearby points into one artificial center.
-            val buckets = HashMap<BucketKey, MutableList<ScreenPoint>>()
-            for (point in projectedPoints) {
-                val cellX = floor(point.x / gridCell).toInt()
-                val cellY = floor(point.y / gridCell).toInt()
-                buckets.getOrPut(BucketKey(cellX, cellY)) { ArrayList() }.add(point)
-            }
-
             val supportRadius = kernelRadius * KERNEL_SUPPORT_MULTIPLIER
             val supportSquared = supportRadius * supportRadius
+            val invTwoSigmaSq = 1f / (2f * kernelSigma * kernelSigma)
             var visited = 0
-            for (bucketPoints in buckets.values) {
-                if (isCancelled()) return null
-                for (point in bucketPoints) {
-                    val minX = max(0, floor((point.x - supportRadius) / gridCell).toInt())
-                    val maxX = min(gridWidth - 1, floor((point.x + supportRadius) / gridCell).toInt())
-                    val minY = max(0, floor((point.y - supportRadius) / gridCell).toInt())
-                    val maxY = min(gridHeight - 1, floor((point.y + supportRadius) / gridCell).toInt())
-                    for (y in minY..maxY) {
-                        val sampleY = y * gridCell + gridCell / 2f
-                        val dy = sampleY - point.y
-                        for (x in minX..maxX) {
-                            val sampleX = x * gridCell + gridCell / 2f
-                            val dx = sampleX - point.x
-                            val distanceSquared = dx * dx + dy * dy
-                            if (distanceSquared <= supportSquared) {
-                                density[y * gridWidth + x] += exp(
-                                    -distanceSquared / (2f * kernelSigma * kernelSigma)
-                                )
-                            }
+            for (point in projectedPoints) {
+                val minX = max(0, floor((point.x - supportRadius) / gridCell).toInt())
+                val maxX = min(gridWidth - 1, floor((point.x + supportRadius) / gridCell).toInt())
+                val minY = max(0, floor((point.y - supportRadius) / gridCell).toInt())
+                val maxY = min(gridHeight - 1, floor((point.y + supportRadius) / gridCell).toInt())
+                for (y in minY..maxY) {
+                    val sampleY = y * gridCell + gridCell / 2f
+                    val dy = sampleY - point.y
+                    val dySq = dy * dy
+                    val rowOffset = y * gridWidth
+                    for (x in minX..maxX) {
+                        val sampleX = x * gridCell + gridCell / 2f
+                        val dx = sampleX - point.x
+                        val distanceSquared = dx * dx + dySq
+                        if (distanceSquared <= supportSquared) {
+                            density[rowOffset + x] += exp(-distanceSquared * invTwoSigmaSq)
                         }
                     }
-                    visited++
-                    if (visited % CANCEL_CHECK_BUCKETS == 0 && isCancelled()) return null
                 }
+                visited++
+                if (visited % CANCEL_CHECK_BUCKETS == 0 && isCancelled()) return null
             }
         }
 

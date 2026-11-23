@@ -16,8 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,9 +42,22 @@ import java.security.MessageDigest
 object PreparedThumbnailCache {
     private const val DIRECTORY_NAME = "prepared_thumbnails"
     private const val FREE_SPACE_RESERVE_BYTES = 768L * 1024L * 1024L
+    private const val MAX_CACHE_BYTES = 384L * 1024L * 1024L
+    private const val EVICT_TARGET_BYTES = 300L * 1024L * 1024L
+    private const val HEADROOM_TTL_MS = 15_000L
     private const val WEBP_QUALITY = 80
     private const val PREWARM_WIDTH = 420
     private const val PREWARM_HEIGHT = 420
+    private val HEX_CHARS = "0123456789abcdef".toCharArray()
+    private val sha256Local = ThreadLocal.withInitial { MessageDigest.getInstance("SHA-256") }
+
+    @Volatile
+    private var lastHeadroomCheckMs: Long = 0L
+
+    @Volatile
+    private var lastHeadroomOk: Boolean = true
+
+    private val writeCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
     // Fixed stripes avoid retaining one Mutex and URI-sized key per photo for large libraries.
     private val uriLocks = Array(256) { Mutex() }
@@ -57,9 +71,16 @@ object PreparedThumbnailCache {
         return file.isFile && file.length() > 0L
     }
 
-    fun hasStorageHeadroom(context: Context): Boolean = runCatching {
-        StatFs(context.applicationContext.cacheDir.absolutePath).availableBytes > FREE_SPACE_RESERVE_BYTES
-    }.getOrDefault(false)
+    fun hasStorageHeadroom(context: Context): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastHeadroomCheckMs < HEADROOM_TTL_MS) return lastHeadroomOk
+        val ok = runCatching {
+            StatFs(context.applicationContext.cacheDir.absolutePath).availableBytes > FREE_SPACE_RESERVE_BYTES
+        }.getOrDefault(false)
+        lastHeadroomOk = ok
+        lastHeadroomCheckMs = now
+        return ok
+    }
 
     /**
      * Returns a prepared thumbnail when present. On a miss, creates the Android MediaStore
@@ -67,6 +88,25 @@ object PreparedThumbnailCache {
      * would be violated. Per-URI/size locks prevent the UI request and background prewarmer from
      * generating the same thumbnail concurrently.
      */
+    suspend fun loadOrCreateFile(
+        context: Context,
+        uri: Uri,
+        widthPx: Int,
+        heightPx: Int
+    ): File? {
+        val appContext = context.applicationContext
+        val (targetWidth, targetHeight) = normalizedDimensions(widthPx, heightPx)
+        val key = cacheKey(uri.toString(), targetWidth, targetHeight)
+        val file = File(cacheDirectory(appContext), "$key.webp")
+        if (file.isFile && file.length() > 0L) {
+            runCatching { file.setLastModified(System.currentTimeMillis()) }
+            return file
+        }
+        val result = loadOrCreate(appContext, uri, widthPx, heightPx) ?: return null
+        if (!result.bitmap.isRecycled) result.bitmap.recycle()
+        return if (file.isFile && file.length() > 0L) file else null
+    }
+
     suspend fun loadOrCreate(
         context: Context,
         uri: Uri,
@@ -140,9 +180,16 @@ object PreparedThumbnailCache {
     private fun cacheKey(uri: String, widthPx: Int, heightPx: Int): String {
         val normalizedWidth = widthPx.coerceIn(96, 512)
         val normalizedHeight = heightPx.coerceIn(96, 512)
-        val bytes = MessageDigest.getInstance("SHA-256")
-            .digest("$uri|$normalizedWidth|$normalizedHeight".toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        val digest = sha256Local.get() ?: MessageDigest.getInstance("SHA-256")
+        digest.reset()
+        val bytes = digest.digest("$uri|$normalizedWidth|$normalizedHeight".toByteArray(Charsets.UTF_8))
+        val chars = CharArray(bytes.size * 2)
+        for (i in bytes.indices) {
+            val v = bytes[i].toInt() and 0xff
+            chars[i * 2] = HEX_CHARS[v ushr 4]
+            chars[i * 2 + 1] = HEX_CHARS[v and 0x0f]
+        }
+        return String(chars)
     }
 
     private fun readPrepared(file: File): Bitmap? {
@@ -185,8 +232,27 @@ object PreparedThumbnailCache {
                 }
             }
             file.setLastModified(System.currentTimeMillis())
+            if (writeCounter.incrementAndGet() % 32 == 0) {
+                evictIfNeeded(context)
+            }
         }
         if (temporary.exists()) runCatching { temporary.delete() }
+    }
+
+    private fun evictIfNeeded(context: Context) {
+        runCatching {
+            val dir = cacheDirectory(context)
+            val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".webp") } ?: return
+            var totalBytes = 0L
+            for (f in files) totalBytes += f.length()
+            if (totalBytes <= MAX_CACHE_BYTES) return
+            files.sortBy { it.lastModified() }
+            for (f in files) {
+                if (totalBytes <= EVICT_TARGET_BYTES) break
+                val len = f.length()
+                if (f.delete()) totalBytes -= len
+            }
+        }
     }
 
     private suspend fun loadMediaStoreThumbnail(
@@ -263,10 +329,13 @@ object ThumbnailPrewarmManager {
     @Volatile
     private var homeIsScrolling = false
 
+    private val homeIdleFlow = MutableStateFlow(false)
+
     /** Background thumbnail preparation yields to visible user interaction. */
     fun updateHomeActivity(isVisible: Boolean, isScrolling: Boolean) {
         homeIsVisible = isVisible
         homeIsScrolling = isVisible && isScrolling
+        homeIdleFlow.value = isVisible && !isScrolling
         if (!isVisible) {
             prioritizeJob?.cancel()
             synchronized(memoryLock) {
@@ -277,10 +346,8 @@ object ThumbnailPrewarmManager {
     }
 
     private suspend fun awaitIdleHome() {
-        while (!homeIsVisible || homeIsScrolling) {
-            currentCoroutineContext().ensureActive()
-            delay(120L)
-        }
+        if (homeIdleFlow.value) return
+        homeIdleFlow.first { it }
     }
 
     /**

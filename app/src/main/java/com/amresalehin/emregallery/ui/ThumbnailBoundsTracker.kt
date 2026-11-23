@@ -1,17 +1,16 @@
 package com.amresalehin.emregallery.ui
 
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.node.LayoutAwareModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.unit.dp
 
 /**
@@ -88,15 +87,46 @@ object ThumbnailBoundsTracker {
  * The registration is tied to this particular composed thumbnail instance. Disposing one screen
  * cannot unregister a second screen that is displaying the same media URI.
  */
-fun Modifier.trackThumbnailBounds(uri: String): Modifier = composed {
-    val owner = remember(uri) { Any() }
-    DisposableEffect(uri, owner) {
-        onDispose { ThumbnailBoundsTracker.unregisterCoordinates(uri, owner) }
+fun Modifier.trackThumbnailBounds(uri: String): Modifier =
+    this then TrackThumbnailBoundsElement(uri)
+
+private data class TrackThumbnailBoundsElement(val uri: String) :
+    ModifierNodeElement<TrackThumbnailBoundsNode>() {
+    override fun create(): TrackThumbnailBoundsNode = TrackThumbnailBoundsNode(uri)
+    override fun update(node: TrackThumbnailBoundsNode) {
+        node.updateUri(uri)
     }
-    this.onPlaced { coordinates ->
+    override fun InspectorInfo.inspectableProperties() {
+        name = "trackThumbnailBounds"
+        properties["uri"] = uri
+    }
+}
+
+private class TrackThumbnailBoundsNode(private var uri: String) :
+    Modifier.Node(), LayoutAwareModifierNode {
+    private val owner = Any()
+    private var lastCoordinates: LayoutCoordinates? = null
+
+    fun updateUri(newUri: String) {
+        if (uri == newUri) return
+        ThumbnailBoundsTracker.unregisterCoordinates(uri, owner)
+        uri = newUri
+        val coords = lastCoordinates
+        if (coords != null && coords.isAttached) {
+            ThumbnailBoundsTracker.registerCoordinates(uri, owner, coords)
+        }
+    }
+
+    override fun onPlaced(coordinates: LayoutCoordinates) {
+        lastCoordinates = coordinates
         if (coordinates.isAttached) {
             ThumbnailBoundsTracker.registerCoordinates(uri, owner, coordinates)
         }
+    }
+
+    override fun onDetach() {
+        ThumbnailBoundsTracker.unregisterCoordinates(uri, owner)
+        lastCoordinates = null
     }
 }
 

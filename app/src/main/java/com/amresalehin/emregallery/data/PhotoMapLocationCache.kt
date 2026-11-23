@@ -21,6 +21,15 @@ class PhotoMapLocationCache(context: Context) :
 
     data class CachedLocation(val point: GeoPoint?)
 
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        db.enableWriteAheadLogging()
+        runCatching {
+            db.rawQuery("PRAGMA busy_timeout = 5000", null).use { it.moveToFirst() }
+            db.execSQL("PRAGMA synchronous = NORMAL")
+        }
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS photo_locations (uri TEXT PRIMARY KEY NOT NULL, latitude REAL, longitude REAL)"
@@ -111,12 +120,12 @@ class PhotoMapLocationCache(context: Context) :
         if (forceRescan) {
             clearAll()
         }
-        val cached = loadAll()
-        val pending = if (forceRescan) items else items.filterNot { cached.containsKey(it.uri) }
+        val scannedUris = if (forceRescan) emptySet() else loadScannedUris()
+        val pending = if (forceRescan) items else items.filterNot { it.uri in scannedUris }
         if (pending.isEmpty()) return 0
 
         var newlyLocated = 0
-        var totalLocated = cached.values.count { it.point != null }
+        var totalLocated = if (forceRescan) 0 else countLocated()
 
         // Process in throttled batches with batched transactions to minimize disk sync and CPU usage
         val batchSize = 25
@@ -130,22 +139,24 @@ class PhotoMapLocationCache(context: Context) :
             val db = writableDatabase
             db.beginTransaction()
             try {
-                for ((item, point) in extracted) {
-                    val values = ContentValues().apply {
-                        put("uri", item.uri)
+                val stmt = db.compileStatement("INSERT OR REPLACE INTO photo_locations (uri, latitude, longitude) VALUES (?, ?, ?)")
+                try {
+                    for ((item, point) in extracted) {
+                        stmt.clearBindings()
+                        stmt.bindString(1, item.uri)
                         if (point == null) {
-                            putNull("latitude")
-                            putNull("longitude")
+                            stmt.bindNull(2)
+                            stmt.bindNull(3)
                         } else {
-                            put("latitude", point.latitude)
-                            put("longitude", point.longitude)
+                            stmt.bindDouble(2, point.latitude)
+                            stmt.bindDouble(3, point.longitude)
+                            newlyLocated++
+                            totalLocated++
                         }
+                        stmt.executeInsert()
                     }
-                    db.insertWithOnConflict("photo_locations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
-                    if (point != null) {
-                        newlyLocated++
-                        totalLocated++
-                    }
+                } finally {
+                    stmt.close()
                 }
                 db.setTransactionSuccessful()
             } finally {
@@ -156,7 +167,32 @@ class PhotoMapLocationCache(context: Context) :
         return newlyLocated
     }
 
+    @Synchronized
+    private fun loadScannedUris(): Set<String> {
+        val uris = HashSet<String>()
+        readableDatabase.rawQuery(
+            "SELECT uri FROM photo_locations WHERE latitude IS NULL OR (latitude BETWEEN -90.0 AND 90.0 AND longitude BETWEEN -180.0 AND 180.0 AND NOT (latitude = 0.0 AND longitude = 0.0))",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                uris.add(cursor.getString(0))
+            }
+        }
+        return uris
+    }
+
+    @Synchronized
+    private fun countLocated(): Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM photo_locations WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND NOT (latitude = 0.0 AND longitude = 0.0)",
+            null
+        ).use { cursor ->
+            return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+
     companion object {
+        private val ISO_6709_REGEX = Regex("([+-]\\d+(?:\\.\\d+)?)([+-]\\d+(?:\\.\\d+)?)")
         /**
          * Safely extracts latitude and longitude from an image URI's EXIF data or video metadata.
          * Handles unredacted MediaStore URIs (via ACCESS_MEDIA_LOCATION and MediaStore.setRequireOriginal),
@@ -191,22 +227,27 @@ class PhotoMapLocationCache(context: Context) :
             }
 
             // 1. Try ExifInterface with FileDescriptor (handles seekable streams correctly for TIFF/EXIF headers)
+            var parsedCleanly = false
             val fromFd = runCatching {
                 context.contentResolver.openFileDescriptor(targetUri, "r")?.use { pfd ->
                     val exif = ExifInterface(pfd.fileDescriptor)
+                    parsedCleanly = true
                     getGeoPointFromExif(exif)
                 }
             }.getOrNull()
             if (fromFd != null) return fromFd
+            if (parsedCleanly && !isVideo) return null
 
             // 2. Try ExifInterface with InputStream on targetUri
             val fromStream = runCatching {
                 context.contentResolver.openInputStream(targetUri)?.use { stream ->
                     val exif = ExifInterface(stream)
+                    parsedCleanly = true
                     getGeoPointFromExif(exif)
                 }
             }.getOrNull()
             if (fromStream != null) return fromStream
+            if (parsedCleanly && !isVideo) return null
 
             // 3. Fallback to original uri (in case setRequireOriginal failed due to provider quirks)
             if (targetUri != uri) {
@@ -312,7 +353,7 @@ class PhotoMapLocationCache(context: Context) :
 
         private fun parseIso6709(raw: String?): GeoPoint? {
             if (raw.isNullOrBlank()) return null
-            val match = Regex("([+-]\\d+(?:\\.\\d+)?)([+-]\\d+(?:\\.\\d+)?)").find(raw.trim()) ?: return null
+            val match = ISO_6709_REGEX.find(raw.trim()) ?: return null
             val lat = match.groupValues[1].toDoubleOrNull() ?: return null
             val lon = match.groupValues[2].toDoubleOrNull() ?: return null
             return if (lat in -90.0..90.0 && lon in -180.0..180.0 && !(lat == 0.0 && lon == 0.0)) {

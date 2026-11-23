@@ -253,9 +253,20 @@ class BrowserMediaExtractor(private val context: Context) {
                             DownloaderSession.addDiscoveredItems(acceptedItems)
                         }
 
+                        // BrowserProvider's discovery callback is thread-safe: it merges
+                        // into a synchronized result map and enqueues work in the extractor scope.
+                        // Keep the per-item fan-out off Main; only scan completion/status returns
+                        // to the WebView thread.
+                        for (item in acceptedItems) {
+                            if (!isCurrentRun()) return@execute
+                            runCatching { onMediaDiscovered(item) }
+                                .onFailure { error ->
+                                    Log.w("BrowserMediaExtractor", "Failed to publish a DOM media candidate", error)
+                                }
+                        }
+
                         mainHandler.post {
                             if (!isCurrentRun() || isExtractionCompleted) return@post
-                            acceptedItems.forEach(onMediaDiscovered)
                             onProcessed(totalCount)
                         }
                     }

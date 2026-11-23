@@ -160,8 +160,6 @@ fun DownloaderSearchMainPage(
     onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
     onOpenSearchHistory: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
-    savedStacks: List<MediaInboxStack> = emptyList(),
-    onSelectStack: (MediaInboxStack) -> Unit = {},
     activeDownloadsCount: Int = 0,
     savedStacksCount: Int = 0,
     modifier: Modifier = Modifier
@@ -175,16 +173,6 @@ fun DownloaderSearchMainPage(
     val recentInboxSearches by inboxSearchHistory.recentSearches.collectAsState(initial = emptyList())
     val downloaderPrefs = remember { DownloaderPreferencesManager(context) }
     var showDownloaderSettings by remember { mutableStateOf(false) }
-    val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val repoStacks by inboxRepo.stacks.collectAsState()
-    val effectiveStacks = remember(savedStacks, repoStacks) {
-        if (savedStacks.isNotEmpty()) savedStacks else repoStacks
-    }
-    val orderedSavedStacks = remember(effectiveStacks) {
-        filterSavedMediaStacks(effectiveStacks, "")
-            .sortedByDescending { it.timestampMillis }
-    }
-
     val activities by DownloadActivityManager.activities.collectAsState()
     LaunchedEffect(Unit) {
         DownloadActivityManager.initialize(context)
@@ -200,10 +188,11 @@ fun DownloaderSearchMainPage(
         keyboardController?.hide()
         focusManager.clearFocus()
         val normalized = normalizeDownloaderTargetUrl(trimmed)
+        // Persist before switching screens so the home composable cannot cancel the history write.
         scope.launch {
-            inboxSearchHistory.recordSearch(normalized)
+            runCatching { inboxSearchHistory.recordSearch(normalized) }
+            onFetchUrl(normalized)
         }
-        onFetchUrl(normalized)
     }
 
 
@@ -571,15 +560,6 @@ fun DownloaderSearchMainPage(
             )
         }
 
-        // Compact preview of the five newest saved library stacks.
-        if (orderedSavedStacks.isNotEmpty()) {
-            SavedPreviewSection(
-                stacks = orderedSavedStacks,
-                onViewSavedLibrary = onViewSavedLibrary,
-                onSelectStack = onSelectStack,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
     }
 }
 

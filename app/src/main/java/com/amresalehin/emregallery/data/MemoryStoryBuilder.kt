@@ -105,6 +105,7 @@ object MemoryStoryBuilder {
                     previousTimestamp = previous.second,
                     next = entry.first,
                     nextTimestamp = entry.second,
+                    eventStartTimestamp = current.first().second,
                     currentEventHasGps = currentEventHasGps,
                     locations = locations,
                     peopleByUri = peopleByUri,
@@ -132,6 +133,7 @@ object MemoryStoryBuilder {
         previousTimestamp: Long,
         next: MediaItem,
         nextTimestamp: Long,
+        eventStartTimestamp: Long,
         currentEventHasGps: Boolean,
         locations: Map<String, StoryLocation>,
         peopleByUri: Map<String, Set<String>>,
@@ -140,8 +142,7 @@ object MemoryStoryBuilder {
         val gap = nextTimestamp - previousTimestamp
         if (gap < 0L) return false
 
-        val firstTimestamp = currentEvent.firstOrNull()?.second ?: previousTimestamp
-        val eventSpan = nextTimestamp - firstTimestamp
+        val eventSpan = nextTimestamp - eventStartTimestamp
         val previousLocation = locations[previous.uri]?.takeIf(::isValidLocation)
         val nextLocation = locations[next.uri]?.takeIf(::isValidLocation)
         val distance = if (previousLocation != null && nextLocation != null) {

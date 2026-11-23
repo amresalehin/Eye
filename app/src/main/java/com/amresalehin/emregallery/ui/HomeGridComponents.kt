@@ -150,44 +150,33 @@ fun HomeFastScrollbar(
 
 @Composable
 fun MemoriesStripSkeleton() {
-    val transition = rememberInfiniteTransition(label = "memories_skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.38f,
-        targetValue = 0.78f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "memories_skeleton_alpha"
-    )
-    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
-
+    // Static placeholders avoid a frame-by-frame state update across the whole carousel.
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(vertical = 4.dp)
     ) {
-        items(4) {
+        items(4) { index ->
             Box(
                 Modifier
                     .width(132.dp)
                     .height(184.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(placeholderColor)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f))
             ) {
                 Box(
                     Modifier
+                        .padding(start = 10.dp, bottom = 29.dp)
                         .fillMaxWidth(0.66f)
                         .height(10.dp)
-                        .padding(start = 10.dp)
                         .align(Alignment.BottomStart)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))
                 )
                 Box(
                     Modifier
-                        .fillMaxWidth(0.42f)
+                        .padding(start = 10.dp, bottom = 11.dp)
+                        .fillMaxWidth(if (index % 2 == 0) 0.42f else 0.54f)
                         .height(7.dp)
-                        .padding(start = 10.dp, bottom = 10.dp)
                         .align(Alignment.BottomStart)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
@@ -209,39 +198,62 @@ fun MemoriesStrip(
     var stories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
     var storiesReady by remember { mutableStateOf(false) }
 
-    LaunchedEffect(media, customPeopleMap, customTagsMap, context) {
-        storiesReady = false
-        stories = withContext(Dispatchers.IO) {
-            // Use only location metadata already indexed by the app. Never scan every file's
-            // EXIF on gallery startup just to build the memories carousel.
-            val cachedLocations = runCatching {
-                PhotoMapLocationCache(context.applicationContext).loadAll()
+    LaunchedEffect(media, customPeopleMap, customTagsMap) {
+        val appContext = context.applicationContext
+
+        // SQLite is queried only for URIs in this library snapshot. CPU-heavy grouping runs
+        // separately, and reverse geocoding is limited to the final visible story candidates.
+        val cachedLocations = withContext(Dispatchers.IO) {
+            runCatching {
+                PhotoMapLocationCache(appContext).loadForUris(media.map { it.uri })
             }.getOrDefault(emptyMap())
+        }
 
-            val locations = buildMap<String, StoryLocation> {
-                for (item in media) {
-                    val point = cachedLocations[item.uri]?.point ?: continue
-                    put(item.uri, StoryLocation(point.latitude, point.longitude))
-                }
+        val locations = buildMap<String, StoryLocation> {
+            for (item in media) {
+                val point = cachedLocations[item.uri]?.point ?: continue
+                put(item.uri, StoryLocation(point.latitude, point.longitude))
             }
-            val cachedPlaceNames = media.mapNotNull { item ->
-                PlaceLocationResolver.getCachedPlace(item.uri)
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { item.uri to it }
-            }.toMap()
+        }
+        val cachedPlaceNames = media.mapNotNull { item ->
+            PlaceLocationResolver.getCachedPlace(item.uri)
+                ?.takeIf(String::isNotBlank)
+                ?.let { item.uri to it }
+        }.toMap()
 
+        val builtStories = withContext(Dispatchers.Default) {
             MemoryStoryBuilder.build(
                 source = media,
                 locations = locations,
                 peopleByUri = customPeopleMap,
                 tagsByUri = customTagsMap,
-                cachedPlaceNames = cachedPlaceNames,
-                // Reverse-geocode only the small number of event clusters, not every photo.
-                resolvePlace = { latitude, longitude ->
-                    getPlaceDisplayName(context, latitude, longitude)
-                }
+                cachedPlaceNames = cachedPlaceNames
             )
         }
+
+        val namedStories = withContext(Dispatchers.IO) {
+            builtStories.map { story ->
+                if (story.title != "Location story") return@map story
+                val points = story.items.mapNotNull { locations[it.uri] }
+                if (points.isEmpty()) return@map story
+                val latitude = points.sumOf { it.latitude } / points.size
+                val longitude = points.sumOf { it.longitude } / points.size
+                val place = runCatching {
+                    getPlaceDisplayName(appContext, latitude, longitude)
+                }.getOrNull()?.takeIf(String::isNotBlank)
+                val duration = story.items.maxOfOrNull {
+                    if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
+                }?.minus(story.items.minOfOrNull {
+                    if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
+                } ?: 0L) ?: 0L
+                if (place == null) story
+                else story.copy(title = if (duration >= 24L * 60L * 60L * 1000L) "Trip to $place" else "At $place")
+            }
+        }
+
+        // Keep the last good carousel visible while a new media snapshot is being processed.
+        // The skeleton is only used for the first load, never for every refresh/recomposition.
+        stories = namedStories
         storiesReady = true
     }
 
@@ -249,8 +261,6 @@ fun MemoriesStrip(
         MemoriesStripSkeleton()
         return
     }
-    // No date-only fallback: a blank carousel is preferable to inventing a story from a pile
-    // of unrelated photos that merely happen to share a calendar date.
     if (stories.isEmpty()) return
 
     LazyRow(

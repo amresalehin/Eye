@@ -50,10 +50,6 @@ import coil.request.ImageRequest
 import coil.size.Size
 import coil.size.Precision
 import com.amresalehin.emregallery.data.MediaItem
-import com.amresalehin.emregallery.data.MemoryStoryBuilder
-import com.amresalehin.emregallery.data.PhotoMapLocationCache
-import com.amresalehin.emregallery.data.PlaceLocationResolver
-import com.amresalehin.emregallery.data.StoryLocation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -149,185 +145,133 @@ fun HomeFastScrollbar(
 }
 
 @Composable
-fun MemoriesStripSkeleton() {
-    // Static placeholders avoid a frame-by-frame state update across the whole carousel.
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(4) { index ->
-            Box(
-                Modifier
-                    .width(132.dp)
-                    .height(184.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f))
-            ) {
-                Box(
-                    Modifier
-                        .padding(start = 10.dp, bottom = 29.dp)
-                        .fillMaxWidth(0.66f)
-                        .height(10.dp)
-                        .align(Alignment.BottomStart)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))
-                )
-                Box(
-                    Modifier
-                        .padding(start = 10.dp, bottom = 11.dp)
-                        .fillMaxWidth(if (index % 2 == 0) 0.42f else 0.54f)
-                        .height(7.dp)
-                        .align(Alignment.BottomStart)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun MemoriesStrip(
     media: List<MediaItem>,
-    customPeopleMap: Map<String, Set<String>>,
-    customTagsMap: Map<String, Set<String>>,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
     listState: LazyListState
 ) {
-    val context = LocalContext.current
-    var stories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
-    var storiesReady by remember { mutableStateOf(false) }
+    val today = remember { Calendar.getInstance() }
+    val currentYear = today.get(Calendar.YEAR)
+    val todayMonth = today.get(Calendar.MONTH)
+    val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
-    val mediaSnapshotKey = System.identityHashCode(media)
-    val peopleSnapshotKey = System.identityHashCode(customPeopleMap)
-    val tagsSnapshotKey = System.identityHashCode(customTagsMap)
+    fun computeStories(source: List<MediaItem>): List<Pair<String, List<MediaItem>>> {
+        if (source.isEmpty()) return emptyList()
+        val cal = Calendar.getInstance()
+        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
+        val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
 
-    LaunchedEffect(mediaSnapshotKey, peopleSnapshotKey, tagsSnapshotKey) {
-        val appContext = context.applicationContext
+        for (item in source) {
+            val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
+            if (timestamp <= 0L) continue
+            cal.timeInMillis = timestamp
+            val y = cal.get(Calendar.YEAR)
+            val m = cal.get(Calendar.MONTH)
+            val d = cal.get(Calendar.DAY_OF_YEAR)
 
-        // SQLite is queried only for URIs in this library snapshot. CPU-heavy grouping runs
-        // separately, and reverse geocoding is limited to the final visible story candidates.
-        val cachedLocations = withContext(Dispatchers.IO) {
-            runCatching {
-                PhotoMapLocationCache(appContext).loadForUris(media.map { it.uri })
-            }.getOrDefault(emptyMap())
-        }
-
-        val locations = buildMap<String, StoryLocation> {
-            for (item in media) {
-                val point = cachedLocations[item.uri]?.point ?: continue
-                put(item.uri, StoryLocation(point.latitude, point.longitude))
+            if (m == todayMonth && d == todayDay && y < currentYear) {
+                onThisDayMap.getOrPut(y) { mutableListOf() }.add(item)
             }
-        }
-        val cachedPlaceNames = media.mapNotNull { item ->
-            PlaceLocationResolver.getCachedPlace(item.uri)
-                ?.takeIf(String::isNotBlank)
-                ?.let { item.uri to it }
-        }.toMap()
-
-        val builtStories = withContext(Dispatchers.Default) {
-            MemoryStoryBuilder.build(
-                source = media,
-                locations = locations,
-                peopleByUri = customPeopleMap,
-                tagsByUri = customTagsMap,
-                cachedPlaceNames = cachedPlaceNames
-            )
+            val tripKey = y * 1000 + d
+            tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
         }
 
-        val namedStories = withContext(Dispatchers.IO) {
-            builtStories.map { story ->
-                if (story.title != "Location story") return@map story
-                val points = story.items.mapNotNull { locations[it.uri] }
-                if (points.isEmpty()) return@map story
-                val latitude = points.sumOf { it.latitude } / points.size
-                val longitude = points.sumOf { it.longitude } / points.size
-                val place = runCatching {
-                    getPlaceDisplayName(appContext, latitude, longitude)
-                }.getOrNull()?.takeIf(String::isNotBlank)
-                val duration = story.items.maxOfOrNull {
-                    if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
-                }?.minus(story.items.minOfOrNull {
-                    if (it.dateTakenMillis > 0L) it.dateTakenMillis else it.dateAddedSeconds * 1000L
-                } ?: 0L) ?: 0L
-                if (place == null) story
-                else story.copy(title = if (duration >= 24L * 60L * 60L * 1000L) "Trip to $place" else "At $place")
+        val result = mutableListOf<Pair<String, List<MediaItem>>>()
+        onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
+            result += "On this day · $year" to entries
+        }
+
+        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+        tripsMap.entries
+            .filter { it.value.size >= 4 }
+            .sortedByDescending { it.key }
+            .take(8)
+            .forEach { (_, entries) ->
+                val label = dateFormat.format(Date(entries.first().second))
+                if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
+                    result += label to entries.map { it.first }
+                }
             }
-        }
 
-        // Keep the last good carousel visible while a new media snapshot is being processed.
-        // The skeleton is only used for the first load, never for every refresh/recomposition.
-        stories = namedStories
-        storiesReady = true
+        return result.filter { it.second.isNotEmpty() }.take(10)
     }
 
-    if (!storiesReady) {
-        MemoriesStripSkeleton()
-        return
+    var stories by remember {
+        mutableStateOf(if (media.size <= 150) computeStories(media) else emptyList())
     }
+    LaunchedEffect(media, currentYear, todayMonth, todayDay) {
+        stories = if (media.size <= 150) {
+            computeStories(media)
+        } else {
+            withContext(Dispatchers.Default) { computeStories(media) }
+        }
+    }
+
     if (stories.isEmpty()) return
 
-    LazyRow(
-        state = listState,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(stories.size, key = { index ->
-            val story = stories[index]
-            "${story.title}_${story.items.firstOrNull()?.id ?: index}"
-        }) { index ->
-            val story = stories[index]
-            val storyMedia = story.items
-            val title = story.title
-            val cover = storyMedia.first()
-            val memInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            val isMemPressed by memInteractionSource.collectIsPressedAsState()
-            val memScale by animateFloatAsState(
-                targetValue = if (isMemPressed) 0.94f else 1f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                label = "mem_card_scale"
-            )
-            Box(
-                Modifier.width(132.dp).height(184.dp)
-                    .trackThumbnailBounds(cover.uri)
-                    .graphicsLayer {
-                        scaleX = memScale
-                        scaleY = memScale
-                    }
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(
-                        interactionSource = memInteractionSource,
-                        indication = ripple(bounded = true),
-                        onClick = { onOpenMemory(stories, index) }
-                    )
-            ) {
-                AsyncImage(
-                    model = remember(cover.uri, context) {
-                        ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 264, 368)
-                    },
-                    contentDescription = title,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == cover.uri) 0f else 1f
-                    },
-                    contentScale = ContentScale.Crop
+    Column {
+        LazyRow(
+            state = listState,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 4.dp)
+        ) {
+            items(stories.size, key = { index -> stories[index].first }) { index ->
+                val (title, storyMedia) = stories[index]
+                val cover = storyMedia.first()
+                val memInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val isMemPressed by memInteractionSource.collectIsPressedAsState()
+                val memScale by animateFloatAsState(
+                    targetValue = if (isMemPressed) 0.94f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    label = "mem_card_scale"
                 )
                 Box(
-                    Modifier.fillMaxWidth().height(78.dp).align(Alignment.BottomCenter)
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
-                )
-                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
-                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "${storyMedia.size} photos and videos",
-                        color = Color.White.copy(alpha = 0.88f),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
+                    Modifier.width(132.dp).height(184.dp)
+                        .trackThumbnailBounds(cover.uri)
+                        .graphicsLayer {
+                            scaleX = memScale
+                            scaleY = memScale
+                        }
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(
+                            interactionSource = memInteractionSource,
+                            indication = ripple(bounded = true),
+                            onClick = {
+                                val storyGroups = stories.map { StoryGroup(it.first, it.second) }
+                                onOpenMemory(storyGroups, index)
+                            }
+                        )
+                ) {
+                    val context = LocalContext.current
+                    AsyncImage(
+                        model = remember(cover.uri, context) {
+                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 264, 368)
+                        },
+                        contentDescription = title,
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            alpha = if (ThumbnailBoundsTracker.activeViewerUri == cover.uri) 0f else 1f
+                        },
+                        contentScale = ContentScale.Crop
                     )
+                    Box(
+                        Modifier.fillMaxWidth().height(78.dp).align(Alignment.BottomCenter)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
+                    )
+                    Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                        Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${storyMedia.size} photos and videos",
+                            color = Color.White.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
     }
 }
+
 
 
 @Composable

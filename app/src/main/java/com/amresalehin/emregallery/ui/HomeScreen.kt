@@ -7,7 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.foundation.background
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -50,6 +50,7 @@ import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
 private const val PREFETCH_LOOK_AHEAD_ROWS = 24
+private const val SYNC_COMPUTE_THRESHOLD = 150
 
 @Immutable
 private data class HomeGroupedData(
@@ -112,52 +113,6 @@ private fun buildHomeGridData(grouped: HomeGroupedData, columns: Int): HomeGridD
         predictivePrefetchIndex = predictivePrefetchIndex
     )
 }
-@Composable
-private fun HomeMediaLoadingSkeleton(
-    columns: Int,
-    containerWidth: Dp,
-    isSquare: Boolean
-) {
-    // Match JustifiedMosaicRow: every tile in a row shares one height and widths follow
-    // aspect-ratio weights. The old skeleton assigned unrelated heights to adjacent tiles.
-    val columnCount = columns.coerceIn(1, 6)
-    val gap = 4.dp
-    val aspectPattern = listOf(0.72f, 1.18f, 0.92f, 1.34f, 0.82f, 1.05f, 0.76f, 1.26f)
-    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
-    ) {
-        repeat(6) { rowIndex ->
-            val aspects = List(columnCount) { columnIndex ->
-                if (isSquare) 1f
-                else aspectPattern[(rowIndex * columnCount + columnIndex) % aspectPattern.size]
-            }
-            val totalGap = gap * (columnCount - 1)
-            val rowHeight = ((containerWidth - totalGap) / aspects.sum().coerceAtLeast(0.1f))
-                .coerceIn(72.dp, 220.dp)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(gap)
-            ) {
-                repeat(columnCount) { columnIndex ->
-                    Box(
-                        modifier = Modifier
-                            .weight(aspects[columnIndex])
-                            .height(rowHeight)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(placeholderColor)
-                    )
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -182,8 +137,6 @@ fun HomeScreen(
     onAddToAlbum: ((Set<String>) -> Unit)? = null,
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
-    customPeopleMap: Map<String, Set<String>> = emptyMap(),
-    customTagsMap: Map<String, Set<String>> = emptyMap(),
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit,
     isVisible: Boolean = true,
@@ -225,13 +178,22 @@ fun HomeScreen(
         return
     }
 
-    var groupedData by remember { mutableStateOf(HomeGroupedData()) }
-    val mediaSnapshotKey = System.identityHashCode(media)
-    LaunchedEffect(mediaSnapshotKey, sortOrder, groupBy) {
-        // Sorting, grouping and row preparation never run on the UI thread, even for small
-        // libraries. This avoids cold-start frame spikes as the library grows.
-        groupedData = withContext(Dispatchers.Default) {
+    var groupedData by remember {
+        mutableStateOf(
+            if (media.size <= SYNC_COMPUTE_THRESHOLD) {
+                buildHomeGroupedData(media, sortOrder, groupBy)
+            } else {
+                HomeGroupedData()
+            }
+        )
+    }
+    LaunchedEffect(media, sortOrder, groupBy) {
+        groupedData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
             buildHomeGroupedData(media, sortOrder, groupBy)
+        } else {
+            withContext(Dispatchers.Default) {
+                buildHomeGroupedData(media, sortOrder, groupBy)
+            }
         }
     }
     var gridData by remember {
@@ -461,38 +423,7 @@ fun HomeScreen(
                 }
             }
 
-            val preparingMedia = loading || (media.isNotEmpty() && sortedMedia.isEmpty())
-            if (preparingMedia) {
-                if (albumTitle == null) {
-                    item(key = "home_memories_strip", contentType = "memories_strip") {
-                        if (media.isEmpty()) {
-                            MemoriesStripSkeleton()
-                        } else {
-                            MemoriesStrip(
-                                media = media,
-                                customPeopleMap = customPeopleMap,
-                                customTagsMap = customTagsMap,
-                                onOpenMemory = onOpenMemory,
-                                listState = memoriesListState
-                            )
-                        }
-                    }
-                    item(key = "home_memories_divider", contentType = "divider") {
-                        HorizontalDivider(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-                            thickness = 1.dp
-                        )
-                    }
-                }
-                item(key = "home_media_skeleton", contentType = "media_skeleton") {
-                    HomeMediaLoadingSkeleton(
-                        columns = pinchGridColumns,
-                        containerWidth = containerWidth,
-                        isSquare = gridStyle == "square"
-                    )
-                }
-            } else if (sortedMedia.isEmpty()) {
+            if (!loading && sortedMedia.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -525,9 +456,7 @@ fun HomeScreen(
                 if (albumTitle == null) {
                     item(key = "home_memories_strip", contentType = "memories_strip") {
                         MemoriesStrip(
-                            media = media,
-                            customPeopleMap = customPeopleMap,
-                            customTagsMap = customTagsMap,
+                            media = sortedMedia,
                             onOpenMemory = onOpenMemory,
                             listState = memoriesListState
                         )

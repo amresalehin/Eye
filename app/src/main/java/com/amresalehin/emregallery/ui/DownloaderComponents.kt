@@ -179,10 +179,9 @@ fun DownloaderSearchMainPage(
     val effectiveStacks = remember(savedStacks, repoStacks) {
         if (savedStacks.isNotEmpty()) savedStacks else repoStacks
     }
-    val recentSavedStacks = remember(effectiveStacks) {
+    val orderedSavedStacks = remember(effectiveStacks) {
         filterSavedMediaStacks(effectiveStacks, "")
             .sortedByDescending { it.timestampMillis }
-            .take(5)
     }
 
     val activities by DownloadActivityManager.activities.collectAsState()
@@ -530,9 +529,9 @@ fun DownloaderSearchMainPage(
         }
 
         // Compact preview of the five newest saved library stacks.
-        if (recentSavedStacks.isNotEmpty()) {
+        if (orderedSavedStacks.isNotEmpty()) {
             SavedPreviewSection(
-                stacks = recentSavedStacks,
+                stacks = orderedSavedStacks,
                 onViewSavedLibrary = onViewSavedLibrary,
                 onSelectStack = onSelectStack,
                 modifier = Modifier.fillMaxWidth()

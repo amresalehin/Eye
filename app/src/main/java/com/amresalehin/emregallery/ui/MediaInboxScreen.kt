@@ -92,7 +92,8 @@ enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
     SAVED_LIBRARY,
-    ACTIVITY_PAGE
+    ACTIVITY_PAGE,
+    SEARCH_HISTORY_PAGE
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -156,7 +157,9 @@ fun MediaInboxScreen(
             selectedStackForDetail = null
         } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
             currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
-        } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+        } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE ||
+            currentViewMode == DownloaderViewMode.SEARCH_HISTORY_PAGE
+        ) {
             currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
         } else if (showFilterSheet) {
             showFilterSheet = false
@@ -438,6 +441,9 @@ fun MediaInboxScreen(
                             onOpenActivity = {
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
+                            onOpenSearchHistory = {
+                                currentViewMode = DownloaderViewMode.SEARCH_HISTORY_PAGE
+                            },
                             onOpenMenu = onOpenMenu,
                             savedStacks = stacks,
                             onSelectStack = { stack ->
@@ -459,6 +465,21 @@ fun MediaInboxScreen(
                             },
                             showBackButton = true,
                             modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    } else if (currentViewMode == DownloaderViewMode.SEARCH_HISTORY_PAGE) {
+                        tabStateHolder.SaveableStateProvider("downloader_search_history") {
+                            DownloaderSearchHistoryPage(
+                                onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                                onOpenSearch = { query ->
+                                    scope.launch {
+                                        com.amresalehin.emregallery.data.MediaInboxSearchHistory(context)
+                                            .recordSearch(query)
+                                    }
+                                    activeFetchUrl = query
+                                    currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
                     } else {

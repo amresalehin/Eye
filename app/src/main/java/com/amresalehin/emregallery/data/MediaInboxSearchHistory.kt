@@ -106,7 +106,8 @@ internal fun normalizeMediaInboxSearchEntry(rawQuery: String): String {
         }
         val path = uri.rawPath.orEmpty().ifBlank { "/" }
         val query = uri.rawQuery?.let { "?$it" }.orEmpty()
-        "$scheme://$userInfo$renderedHost$port$path$query"
+        val fragment = uri.rawFragment?.let { "#$it" }.orEmpty()
+        "$scheme://$userInfo$renderedHost$port$path$query$fragment"
     }.getOrDefault(candidate)
 }
 

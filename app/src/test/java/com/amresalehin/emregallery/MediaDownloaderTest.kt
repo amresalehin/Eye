@@ -23,6 +23,7 @@ import com.amresalehin.emregallery.ui.NavBackStackEntry
 import com.amresalehin.emregallery.ui.passesDimensionFilter
 import com.amresalehin.emregallery.ui.buildDownloaderPreviewHeaders
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,6 +39,90 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaDownloaderTest {
+
+    @Test
+    fun downloaderSessionAppliesPosterRemovalAndVideoUpsertAsOneOrderedDelta() = runBlocking {
+        val session = com.amresalehin.emregallery.data.DownloaderSession
+        session.startSession("https://example.com/poster-delta")
+
+        val poster = ScrapedMediaItem(
+            id = "poster-only",
+            url = "https://cdn.example.com/posters/clip.jpg",
+            title = "clip.jpg",
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            mimeType = "image/jpeg",
+            source = "DOM"
+        )
+        session.addDiscoveredItem(poster)
+
+        withTimeout(5_000L) {
+            session.discoveredItems.first { items ->
+                items.size == 1 && items.single().id == "poster-only"
+            }
+        }
+
+        val video = ScrapedMediaItem(
+            id = "clip-video",
+            url = "https://cdn.example.com/videos/clip.mp4",
+            title = "clip.mp4",
+            category = MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4",
+            isVideo = true,
+            thumbnailUrl = poster.url,
+            source = "Browser"
+        )
+        session.applyDiscoveredDelta(
+            upserts = listOf(video),
+            removedCanonicalKeys = setOf(MediaClassifier.canonicalKey(poster.url))
+        )
+
+        val finalItems = withTimeout(5_000L) {
+            session.discoveredItems.first { items ->
+                items.size == 1 && items.single().id == "clip-video" && items.single().isVideo
+            }
+        }
+        assertEquals(poster.url, finalItems.single().thumbnailUrl)
+        assertTrue(session.selectedItemIds.value.contains("clip-video"))
+    }
+
+    @Test
+    fun downloaderSessionDropsQueuedItemsFromPreviousPageAfterNavigation() = runBlocking {
+        val session = com.amresalehin.emregallery.data.DownloaderSession
+        session.startSession("https://old.example.com/gallery")
+        val previousPageItems = (1..120).map { index ->
+            ScrapedMediaItem(
+                id = "old-$index",
+                url = "https://old.example.com/media/$index.jpg",
+                title = "$index.jpg",
+                category = MediaCategory.IMAGES,
+                format = "JPG",
+                mimeType = "image/jpeg",
+                source = "DOM"
+            )
+        }
+        session.addDiscoveredItems(previousPageItems)
+
+        session.startSession("https://new.example.com/gallery")
+        val currentPageItem = ScrapedMediaItem(
+            id = "new-page-item",
+            url = "https://new.example.com/media/current.jpg",
+            title = "current.jpg",
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            mimeType = "image/jpeg",
+            source = "DOM"
+        )
+        session.addDiscoveredItem(currentPageItem)
+
+        val currentItems = withTimeout(5_000L) {
+            session.discoveredItems.first { items ->
+                items.any { it.id == "new-page-item" }
+            }
+        }
+        assertEquals(listOf("new-page-item"), currentItems.map { it.id })
+    }
 
     @Test
     fun parsedEngineItemsRetainExtractorAndFormatMetadata() {

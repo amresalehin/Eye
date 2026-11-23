@@ -10,6 +10,7 @@ import java.lang.ref.WeakReference
 import java.net.URI
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 /**
  * Non-owning access to the browser tab already displayed by DirectBrowserView.
@@ -42,6 +43,9 @@ object LiveBrowserWebViewRegistry {
 
     private val lock = Any()
     private var activeSession: Session? = null
+    private val observerExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "LiveBrowserMediaObservers").apply { isDaemon = true }
+    }
 
     class Registration internal constructor(
         private val token: Any
@@ -110,9 +114,16 @@ object LiveBrowserWebViewRegistry {
         val pageKey = pageKey(pageUrl) ?: return
         if (pageKey(session.currentUrl()) != pageKey) return
 
-        session.observers.forEach { observer ->
-            if (observer.pageKey == pageKey) {
-                items.forEach { item ->
+        val matchingObservers = session.observers.filter { it.pageKey == pageKey }
+        if (matchingObservers.isEmpty()) return
+
+        // Observer callbacks canonicalize and merge batches. Run them away from the
+        // visible browser's UI thread while keeping batch order deterministic.
+        val stableItems = items.toList()
+        observerExecutor.execute {
+            for (observer in matchingObservers) {
+                if (!session.observers.contains(observer)) continue
+                for (item in stableItems) {
                     runCatching { observer.onItem(item) }
                 }
             }

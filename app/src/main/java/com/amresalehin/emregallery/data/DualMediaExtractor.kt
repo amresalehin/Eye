@@ -356,153 +356,221 @@ class DualMediaExtractor(private val context: Context) {
         extractionJob = scope.launch {
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
             val itemsMutex = Mutex()
+            val videoKeysByPosterKey = HashMap<String, MutableSet<String>>()
+            val posterKeysByVideoKey = HashMap<String, Set<String>>()
+
+            fun unindexVideo(videoKey: String) {
+                posterKeysByVideoKey.remove(videoKey)?.forEach { posterKey ->
+                    val videoKeys = videoKeysByPosterKey[posterKey] ?: return@forEach
+                    videoKeys.remove(videoKey)
+                    if (videoKeys.isEmpty()) videoKeysByPosterKey.remove(posterKey)
+                }
+            }
+
+            fun indexVideo(videoKey: String, video: ScrapedMediaItem) {
+                unindexVideo(videoKey)
+                if (!video.isVideo) return
+
+                val posterKeys = linkedSetOf<String>()
+                video.thumbnailUrl?.let { posterKeys.add(MediaClassifier.deduplicationKey(it)) }
+                val ytId = MediaClassifier.extractYouTubeVideoId(video.url) ?:
+                    video.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
+                    MediaClassifier.extractYouTubeVideoId(video.provenance.pageUrl)
+                if (ytId != null) {
+                    posterKeys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
+                }
+                if (posterKeys.isNotEmpty()) {
+                    posterKeysByVideoKey[videoKey] = posterKeys
+                    posterKeys.forEach { posterKey ->
+                        videoKeysByPosterKey.getOrPut(posterKey) { linkedSetOf() }.add(videoKey)
+                    }
+                }
+            }
 
             suspend fun updateItems(
                 newList: List<ScrapedMediaItem>,
                 title: String? = null,
                 msg: String? = null,
                 phase: ExtractionPhase? = null
-            ) = itemsMutex.withLock {
-                var modified = false
+            ) = withContext(Dispatchers.Default) {
+                itemsMutex.withLock {
+                    var modified = false
+                    val sessionUpserts = LinkedHashMap<String, ScrapedMediaItem>()
+                    val sessionRemovals = LinkedHashSet<String>()
 
-                fun getVideoThumbKeys(): Set<String> {
-                    val keys = mutableSetOf<String>()
-                    for (entry in itemsMap.values) {
-                        if (entry.isVideo) {
-                            entry.thumbnailUrl?.let { keys.add(MediaClassifier.deduplicationKey(it)) }
-                            val ytId = MediaClassifier.extractYouTubeVideoId(entry.url) ?:
-                                       entry.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
-                                       MediaClassifier.extractYouTubeVideoId(entry.provenance.pageUrl)
-                            if (ytId != null) {
-                                keys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
-                            }
-                        }
+                    fun rememberSessionUpsert(item: ScrapedMediaItem) {
+                        val canonical = MediaClassifier.canonicalKey(item.url)
+                        sessionUpserts[canonical] = item
+                        sessionRemovals.remove(canonical)
                     }
-                    return keys
-                }
 
-                for (item in newList) {
-                    val key = MediaClassifier.deduplicationKey(item.url)
+                    fun rememberSessionRemoval(item: ScrapedMediaItem) {
+                        val canonical = MediaClassifier.canonicalKey(item.url)
+                        sessionUpserts.remove(canonical)
+                        sessionRemovals.add(canonical)
+                    }
 
-                    // Case A: Incoming item is a Video
-                    if (item.isVideo) {
-                        val ytId = MediaClassifier.extractYouTubeVideoId(item.url) ?:
-                                   item.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
-                                   MediaClassifier.extractYouTubeVideoId(item.provenance.pageUrl)
-                        val videoPosterKeys = mutableSetOf<String>()
-                        item.thumbnailUrl?.let { videoPosterKeys.add(MediaClassifier.deduplicationKey(it)) }
-                        if (ytId != null) videoPosterKeys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
+                    for (item in newList) {
+                        val key = MediaClassifier.deduplicationKey(item.url)
 
-                        var bestThumb = item.thumbnailUrl
-                        for (pKey in videoPosterKeys) {
-                            val existingImg = itemsMap[pKey]
-                            if (existingImg != null && !existingImg.isVideo) {
-                                if (bestThumb == null || MediaClassifier.compareMediaQuality(existingImg, item.copy(url = bestThumb)) > 0) {
-                                    bestThumb = existingImg.thumbnailUrl ?: existingImg.url
-                                }
-                                itemsMap.remove(pKey)
-                                modified = true
+                        // Case A: Incoming item is a Video.
+                        if (item.isVideo) {
+                            val ytId = MediaClassifier.extractYouTubeVideoId(item.url) ?:
+                                item.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
+                                MediaClassifier.extractYouTubeVideoId(item.provenance.pageUrl)
+                            val videoPosterKeys = mutableSetOf<String>()
+                            item.thumbnailUrl?.let { videoPosterKeys.add(MediaClassifier.deduplicationKey(it)) }
+                            if (ytId != null) {
+                                videoPosterKeys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
                             }
+
+                            var bestThumb = item.thumbnailUrl
+                            for (posterKey in videoPosterKeys) {
+                                val existingImage = itemsMap[posterKey]
+                                if (existingImage != null && !existingImage.isVideo) {
+                                    if (bestThumb == null ||
+                                        MediaClassifier.compareMediaQuality(existingImage, item.copy(url = bestThumb)) > 0
+                                    ) {
+                                        bestThumb = existingImage.thumbnailUrl ?: existingImage.url
+                                    }
+                                    itemsMap.remove(posterKey)
+                                    rememberSessionRemoval(existingImage)
+                                    modified = true
+                                }
+                            }
+
+                            val candidateVideo = if (bestThumb != item.thumbnailUrl) {
+                                item.copy(thumbnailUrl = bestThumb)
+                            } else item
+                            val existing = itemsMap[key]
+                            if (existing == null) {
+                                itemsMap[key] = candidateVideo
+                                indexVideo(key, candidateVideo)
+                                rememberSessionUpsert(candidateVideo)
+                                modified = true
+                            } else {
+                                val cmp = MediaClassifier.compareMediaQuality(candidateVideo, existing)
+                                val preferred = if (cmp > 0) candidateVideo else existing
+                                val secondary = if (preferred === candidateVideo) existing else candidateVideo
+                                val engines = listOf(
+                                    existing.provenance.extractorEngine,
+                                    candidateVideo.provenance.extractorEngine
+                                ).distinct()
+                                val upgraded = preferred.copy(
+                                    id = existing.id,
+                                    thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
+                                    provenance = preferred.provenance.copy(
+                                        extractorEngine = engines.joinToString(" + ")
+                                    ),
+                                    downloadHeaders = secondary.downloadHeaders + preferred.downloadHeaders,
+                                    metadata = secondary.metadata + preferred.metadata
+                                )
+                                if (upgraded != existing) {
+                                    itemsMap[key] = upgraded
+                                    indexVideo(key, upgraded)
+                                    rememberSessionUpsert(upgraded)
+                                    modified = true
+                                }
+                            }
+                            continue
                         }
-                        val candidateVideo = if (bestThumb != item.thumbnailUrl) item.copy(thumbnailUrl = bestThumb) else item
+
+                        // Case B: Incoming image is a video poster. Resolve matching
+                        // videos from the reverse index rather than scanning the whole map.
+                        val matchingVideoKeys = videoKeysByPosterKey[key]?.toList().orEmpty()
+                        if (matchingVideoKeys.isNotEmpty()) {
+                            for (videoKey in matchingVideoKeys) {
+                                val existingVideo = itemsMap[videoKey] ?: continue
+                                val existingPoster = existingVideo.thumbnailUrl
+                                if (existingPoster == null ||
+                                    MediaClassifier.compareMediaQuality(
+                                        item,
+                                        existingVideo.copy(url = existingPoster)
+                                    ) > 0
+                                ) {
+                                    val updatedVideo = existingVideo.copy(
+                                        thumbnailUrl = item.thumbnailUrl ?: item.url
+                                    )
+                                    itemsMap[videoKey] = updatedVideo
+                                    indexVideo(videoKey, updatedVideo)
+                                    rememberSessionUpsert(updatedVideo)
+                                    modified = true
+                                }
+                            }
+                            continue
+                        }
+
                         val existing = itemsMap[key]
                         if (existing == null) {
-                            itemsMap[key] = candidateVideo
+                            itemsMap[key] = item
+                            rememberSessionUpsert(item)
                             modified = true
                         } else {
-                            val cmp = MediaClassifier.compareMediaQuality(candidateVideo, existing)
-                            val preferred = if (cmp > 0) candidateVideo else existing
-                            val secondary = if (preferred === candidateVideo) existing else candidateVideo
-                            val engines = listOf(existing.provenance.extractorEngine, candidateVideo.provenance.extractorEngine).distinct()
-                            val mergedEngine = engines.joinToString(" + ")
+                            // Merge and deduplicate across scrapers and variants.
+                            val cmp = MediaClassifier.compareMediaQuality(item, existing)
+                            val preferred = if (cmp > 0) item else existing
+                            val secondary = if (preferred === item) existing else item
+
+                            val engines = listOf(
+                                existing.provenance.extractorEngine,
+                                item.provenance.extractorEngine
+                            ).distinct()
+                            val mergedThumb = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                            val mergedResolution = when {
+                                MediaClassifier.parsePixelArea(preferred) != null ->
+                                    preferred.resolutionHint ?: secondary.resolutionHint
+                                MediaClassifier.parsePixelArea(secondary) != null ->
+                                    secondary.resolutionHint ?: preferred.resolutionHint
+                                !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" ->
+                                    preferred.resolutionHint
+                                !secondary.resolutionHint.isNullOrBlank() && secondary.resolutionHint != "Network" ->
+                                    secondary.resolutionHint
+                                else -> preferred.resolutionHint ?: secondary.resolutionHint
+                            }
+                            val mergedHeaders = secondary.downloadHeaders + preferred.downloadHeaders
+                            val resolvedUrl = MediaClassifier.resolveOriginalMedia(preferred.url).mediaUrl
+
                             val upgraded = preferred.copy(
                                 id = existing.id,
-                                thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
-                                provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                                downloadHeaders = secondary.downloadHeaders + preferred.downloadHeaders,
+                                url = resolvedUrl,
+                                thumbnailUrl = mergedThumb,
+                                resolutionHint = mergedResolution,
+                                provenance = preferred.provenance.copy(
+                                    extractorEngine = engines.joinToString(" + ")
+                                ),
+                                downloadHeaders = mergedHeaders,
                                 metadata = secondary.metadata + preferred.metadata
                             )
                             if (upgraded != existing) {
                                 itemsMap[key] = upgraded
+                                rememberSessionUpsert(upgraded)
                                 modified = true
                             }
                         }
-                        continue
                     }
 
-                    // Case B: Incoming item is an Image
-                    val currentVideoThumbKeys = getVideoThumbKeys()
-                    if (key in currentVideoThumbKeys) {
-                        for ((vKey, vItem) in itemsMap.entries.toList()) {
-                            if (vItem.isVideo) {
-                                val ytId = MediaClassifier.extractYouTubeVideoId(vItem.url) ?:
-                                           vItem.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
-                                           MediaClassifier.extractYouTubeVideoId(vItem.provenance.pageUrl)
-                                val matches = (vItem.thumbnailUrl != null && MediaClassifier.deduplicationKey(vItem.thumbnailUrl) == key) ||
-                                              (ytId != null && "ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}" == key)
-                                if (matches) {
-                                    if (vItem.thumbnailUrl == null || MediaClassifier.compareMediaQuality(item, vItem.copy(url = vItem.thumbnailUrl)) > 0) {
-                                        itemsMap[vKey] = vItem.copy(thumbnailUrl = item.thumbnailUrl ?: item.url)
-                                        modified = true
-                                    }
-                                }
-                            }
-                        }
-                        continue
-                    }
-
-                    val existing = itemsMap[key]
-                    if (existing == null) {
-                        itemsMap[key] = item
-                        modified = true
-                    } else {
-                        // Merge and deduplicate across scrapers and variants
-                        val cmp = MediaClassifier.compareMediaQuality(item, existing)
-                        val preferred = if (cmp > 0) item else existing
-                        val secondary = if (preferred === item) existing else item
-
-                        val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
-                        val mergedEngine = engines.joinToString(" + ")
-                        val mergedThumb = preferred.thumbnailUrl ?: secondary.thumbnailUrl
-                        val mergedResolution = when {
-                            MediaClassifier.parsePixelArea(preferred) != null -> preferred.resolutionHint ?: secondary.resolutionHint
-                            MediaClassifier.parsePixelArea(secondary) != null -> secondary.resolutionHint ?: preferred.resolutionHint
-                            !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" -> preferred.resolutionHint
-                            !secondary.resolutionHint.isNullOrBlank() && secondary.resolutionHint != "Network" -> secondary.resolutionHint
-                            else -> preferred.resolutionHint ?: secondary.resolutionHint
-                        }
-                        val mergedHeaders = secondary.downloadHeaders + preferred.downloadHeaders
-                        val resolvedUrl = MediaClassifier.resolveOriginalMedia(preferred.url).mediaUrl
-
-                        val upgraded = preferred.copy(
-                            id = existing.id, // Preserve ID for stable Compose keys & selection
-                            url = resolvedUrl,
-                            thumbnailUrl = mergedThumb,
-                            resolutionHint = mergedResolution,
-                            provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                            downloadHeaders = mergedHeaders,
-                            metadata = secondary.metadata + preferred.metadata
+                    if (modified || msg != null || phase != null || title != null) {
+                        val currentItems = itemsMap.values.toList()
+                        _state.value = _state.value.copy(
+                            items = currentItems,
+                            pageTitle = if (_state.value.pageTitle.isBlank() && !title.isNullOrBlank()) {
+                                title
+                            } else {
+                                _state.value.pageTitle
+                            },
+                            statusMessage = msg ?: _state.value.statusMessage,
+                            phase = phase ?: _state.value.phase
                         )
-                        if (upgraded != existing) {
-                            itemsMap[key] = upgraded
-                            modified = true
+                        DownloaderSession.applyDiscoveredDelta(
+                            upserts = sessionUpserts.values.toList(),
+                            removedCanonicalKeys = sessionRemovals
+                        )
+                        if (title != null && title.isNotBlank()) {
+                            DownloaderSession.setPageTitle(title)
                         }
-                    }
-                }
-                if (modified || msg != null || phase != null || title != null) {
-                    val currentItems = itemsMap.values.toList()
-                    _state.value = _state.value.copy(
-                        items = currentItems,
-                        pageTitle = if (_state.value.pageTitle.isBlank() && !title.isNullOrBlank()) title else _state.value.pageTitle,
-                        statusMessage = msg ?: _state.value.statusMessage,
-                        phase = phase ?: _state.value.phase
-                    )
-                    DownloaderSession.addDiscoveredItems(currentItems)
-                    if (title != null && title.isNotBlank()) {
-                        DownloaderSession.setPageTitle(title)
-                    }
-                    if (msg != null) {
-                        DownloaderSession.setStatusMessage(msg)
+                        if (msg != null) {
+                            DownloaderSession.setStatusMessage(msg)
+                        }
                     }
                 }
             }

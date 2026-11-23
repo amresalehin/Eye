@@ -442,8 +442,11 @@ fun MediaInboxScreen(
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
                             onOpenMedia = { item ->
-                                item.localUri?.let { uriStr ->
-                                    onOpenMediaItem?.invoke(uriStr)
+                                val uriStr = item.localUri
+                                if (uriStr != null && onOpenMediaItem != null) {
+                                    onOpenMediaItem.invoke(uriStr)
+                                } else {
+                                    currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                                 }
                             },
                             onOpenSearchHistory = {

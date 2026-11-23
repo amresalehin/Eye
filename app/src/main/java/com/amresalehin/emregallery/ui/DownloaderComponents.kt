@@ -462,12 +462,30 @@ fun DownloaderSearchMainPage(
                     .fillMaxWidth()
                     .testTag("downloader_recent_searches")
             ) {
-                Text(
-                    text = "Recent searches",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Recent searches",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(
+                        onClick = onOpenSearchHistory,
+                        modifier = Modifier.testTag("downloader_history_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("History")
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 recentInboxSearches.take(5).forEachIndexed { index, query ->
                     Row(
@@ -512,16 +530,6 @@ fun DownloaderSearchMainPage(
                     }
                 }
 
-                if (recentInboxSearches.size > 5) {
-                    TextButton(
-                        onClick = onOpenSearchHistory,
-                        modifier = Modifier
-                            .align(Alignment.End)
-                            .testTag("downloader_recent_see_all")
-                    ) {
-                        Text("See all")
-                    }
-                }
             }
         }
 

@@ -676,7 +676,7 @@ class BrowserMediaExtractor(private val context: Context) {
             var currentScrollY = lastScrollY
             var remaining = 1000
             runCatching {
-                val unescaped = if (resultJson != null && resultJson.startsWith("\\\"") && resultJson.endsWith("\\\"")) {
+                val unescaped = if (resultJson != null && resultJson.startsWith("\"") && resultJson.endsWith("\"")) {
                     org.json.JSONTokener(resultJson).nextValue().toString()
                 } else resultJson ?: "{}"
                 val obj = org.json.JSONObject(unescaped)

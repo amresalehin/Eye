@@ -300,6 +300,47 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun extractedVideoRetainsPosterAndAuthenticatedPageHeaders() {
+        val pageUrl = "https://media.example.com/watch/clip-42"
+        val cookie = "session_token=test-session"
+        val root = org.json.JSONObject(
+            """
+            {
+              "engine": "yt-dlp",
+              "items": [
+                {
+                  "id": "yt_video_42",
+                  "url": "$pageUrl",
+                  "title": "Example clip.mp4",
+                  "category": "VIDEOS",
+                  "format": "MP4",
+                  "mimeType": "video/mp4",
+                  "isVideo": true,
+                  "thumbnailUrl": "https://cdn.example.com/posters/clip-42.jpg",
+                  "source": "yt-dlp"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val (_, items) = com.amresalehin.emregallery.data.GalleryDlEngine.parseExtractedItems(
+            root = root,
+            pageUrl = pageUrl,
+            cookieHeader = cookie
+        )
+        val video = items.single()
+
+        assertEquals("https://cdn.example.com/posters/clip-42.jpg", video.thumbnailUrl)
+        assertEquals(cookie, video.downloadHeaders["Cookie"])
+        assertEquals(pageUrl, video.downloadHeaders["Referer"])
+        assertEquals(
+            "https://cdn.example.com/posters/clip-42.jpg",
+            video.metadata["thumbnail_url"]
+        )
+    }
+
+    @Test
     fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
         val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
         val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)

@@ -42,6 +42,7 @@ object MemoryStoryBuilder {
 
         val clusters = mutableListOf<MutableList<Pair<MediaItem, Long>>>()
         var current = mutableListOf<Pair<MediaItem, Long>>()
+        var currentEventHasGps = false
 
         for (entry in sorted) {
             val previous = current.lastOrNull()
@@ -50,7 +51,7 @@ object MemoryStoryBuilder {
                     previousTimestamp = previous.second,
                     next = entry.first,
                     nextTimestamp = entry.second,
-                    currentEvent = current,
+                    currentEventHasGps = currentEventHasGps,
                     locations = locations,
                     peopleByUri = peopleByUri,
                     tagsByUri = tagsByUri
@@ -58,8 +59,12 @@ object MemoryStoryBuilder {
             ) {
                 if (current.isNotEmpty()) clusters += current
                 current = mutableListOf()
+                currentEventHasGps = false
             }
             current += entry
+            if (locations[entry.first.uri]?.let(::isValidLocation) == true) {
+                currentEventHasGps = true
+            }
         }
         if (current.isNotEmpty()) clusters += current
 
@@ -93,7 +98,6 @@ object MemoryStoryBuilder {
                 .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
                 ?.key
 
-            val centroid = if (hasLocationStory) centroidOf(gpsItems) else null
             val place = knownPlace
 
             val duration = cluster.last().second - cluster.first().second
@@ -124,7 +128,7 @@ object MemoryStoryBuilder {
         previousTimestamp: Long,
         next: MediaItem,
         nextTimestamp: Long,
-        currentEvent: List<Pair<MediaItem, Long>>,
+        currentEventHasGps: Boolean,
         locations: Map<String, StoryLocation>,
         peopleByUri: Map<String, Set<String>>,
         tagsByUri: Map<String, Set<String>>
@@ -148,9 +152,7 @@ object MemoryStoryBuilder {
             peopleByUri[previous.uri].orEmpty().intersect(peopleByUri[next.uri].orEmpty()).isNotEmpty() ||
             tagsByUri[previous.uri].orEmpty().intersect(tagsByUri[next.uri].orEmpty()).isNotEmpty()
 
-        val hasGpsContext = currentEvent.any { (item, _) ->
-            locations[item.uri]?.let(::isValidLocation) == true
-        } || nextLocation != null
+        val hasGpsContext = currentEventHasGps || nextLocation != null
 
         val maxSpan = if (hasGpsContext) MAX_GEO_EVENT_SPAN_MS else MAX_UNLOCATED_EVENT_SPAN_MS
         if (eventSpan > maxSpan) return false

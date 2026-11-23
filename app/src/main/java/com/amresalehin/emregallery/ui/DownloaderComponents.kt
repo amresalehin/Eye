@@ -2842,18 +2842,24 @@ fun DownloaderMediaCard(
         item.isStream -> "Streams"
         else -> "Images"
     }
-    val formatText = if (!item.isVideo && item.format.contains("4K", ignoreCase = true)) {
-        "JPG"
-    } else {
-        val raw = item.format.uppercase().trim()
-        when {
-            raw == "JPEG" -> "JPG"
-            raw.isNotBlank() -> raw
-            item.isVideo -> "MP4"
-            item.isAudio -> "MP3"
-            item.isStream -> "M3U8"
-            else -> "JPG"
+    val rawFormat = item.format.uppercase().trim()
+    val videoFormat = when (rawFormat) {
+        "MP4", "M4V", "WEBM", "MKV", "MOV", "AVI", "FLV", "3GP", "TS" -> rawFormat
+        else -> when {
+            item.mimeType.equals("video/webm", ignoreCase = true) -> "WEBM"
+            item.mimeType.equals("video/quicktime", ignoreCase = true) -> "MOV"
+            item.mimeType.equals("video/x-matroska", ignoreCase = true) -> "MKV"
+            else -> "MP4"
         }
+    }
+    val formatText = when {
+        item.isStream -> rawFormat.ifBlank { "M3U8" }
+        item.isVideo -> videoFormat
+        rawFormat.contains("4K") -> "JPG"
+        rawFormat == "JPEG" -> "JPG"
+        rawFormat.isNotBlank() -> rawFormat
+        item.isAudio -> "MP3"
+        else -> "JPG"
     }
 
     Surface(

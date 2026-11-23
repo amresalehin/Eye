@@ -138,8 +138,11 @@ fun MediaInboxScreen(
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
     var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
-    LaunchedEffect(currentViewMode) {
-        onGlobalNavigationVisibilityChanged(currentViewMode != DownloaderViewMode.DOWNLOADER_PAGE)
+    LaunchedEffect(currentViewMode, selectedStackForDetail) {
+        // The global bottom navigation belongs only to the Inbox home page.
+        val isInboxHome = currentViewMode == DownloaderViewMode.SEARCH_PAGE &&
+            selectedStackForDetail == null
+        onGlobalNavigationVisibilityChanged(isInboxHome)
     }
     DisposableEffect(Unit) {
         onDispose { onGlobalNavigationVisibilityChanged(true) }

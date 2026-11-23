@@ -233,23 +233,24 @@ class BrowserMediaExtractor(private val context: Context) {
                     ) ?: return
 
                     val key = MediaClassifier.canonicalKey(candidateItem.url)
-                    synchronized(seenMap) {
+                    val acceptedItem = synchronized(seenMap) {
                         val existing = seenMap[key]
-                        if (existing != null && MediaClassifier.compareMediaQuality(candidateItem, existing) <= 0) {
-                            return
+                        if (existing == null) {
+                            seenMap[key] = candidateItem
+                            candidateItem
+                        } else {
+                            val merged = MediaClassifier.mergeScrapedMediaItems(existing, candidateItem)
+                            if (merged == existing) null else {
+                                seenMap[key] = merged
+                                merged
+                            }
                         }
-                        seenMap[key] = if (existing != null) {
-                            candidateItem.copy(
-                                thumbnailUrl = candidateItem.thumbnailUrl ?: existing.thumbnailUrl,
-                                durationMillis = candidateItem.durationMillis ?: existing.durationMillis
-                            )
-                        } else candidateItem
-                    }
+                    } ?: return
 
-                    DownloaderSession.addDiscoveredItem(candidateItem)
+                    DownloaderSession.addDiscoveredItem(acceptedItem)
                     mainHandler.post {
                         if (!isCancelled) {
-                            onMediaDiscovered(candidateItem)
+                            onMediaDiscovered(acceptedItem)
                         }
                     }
                 }
@@ -257,18 +258,22 @@ class BrowserMediaExtractor(private val context: Context) {
                 fun dispatchCapturedBlobItem(item: ScrapedMediaItem) {
                     if (isCancelled || !seenCandidateUrls.add(item.url)) return
                     val key = MediaClassifier.canonicalKey(item.url)
-                    val accepted = synchronized(seenMap) {
+                    val acceptedItem = synchronized(seenMap) {
                         val existing = seenMap[key]
-                        if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) false
-                        else {
+                        if (existing == null) {
                             seenMap[key] = item
-                            true
+                            item
+                        } else {
+                            val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                            if (merged == existing) null else {
+                                seenMap[key] = merged
+                                merged
+                            }
                         }
-                    }
-                    if (!accepted) return
-                    DownloaderSession.addDiscoveredItem(item)
+                    } ?: return
+                    DownloaderSession.addDiscoveredItem(acceptedItem)
                     mainHandler.post {
-                        if (!isCancelled) onMediaDiscovered(item)
+                        if (!isCancelled) onMediaDiscovered(acceptedItem)
                     }
                 }
 
@@ -459,20 +464,21 @@ class BrowserMediaExtractor(private val context: Context) {
                                 val entries = MediaCaptureEngine.parseJsDomScanResult(scanJson, normalizedUrl)
                                 for (item in entries) {
                                     val key = MediaClassifier.canonicalKey(item.url)
-                                    synchronized(seenMap) {
+                                    val acceptedItem = synchronized(seenMap) {
                                         val existing = seenMap[key]
-                                        if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
-                                            continue
+                                        if (existing == null) {
+                                            seenMap[key] = item
+                                            item
+                                        } else {
+                                            val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                                            if (merged == existing) null else {
+                                                seenMap[key] = merged
+                                                merged
+                                            }
                                         }
-                                        seenMap[key] = if (existing != null) {
-                                            item.copy(
-                                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
-                                                durationMillis = item.durationMillis ?: existing.durationMillis
-                                            )
-                                        } else item
-                                    }
-                                    onMediaDiscovered(item)
-                                    DownloaderSession.addDiscoveredItem(item)
+                                    } ?: continue
+                                    onMediaDiscovered(acceptedItem)
+                                    DownloaderSession.addDiscoveredItem(acceptedItem)
                                 }
 
                                 val currentCountAfterInitial = synchronized(seenMap) { seenMap.size }
@@ -491,20 +497,21 @@ class BrowserMediaExtractor(private val context: Context) {
                                             val postEntries = MediaCaptureEngine.parseJsDomScanResult(postScrollJson, normalizedUrl)
                                             for (item in postEntries) {
                                                 val key = MediaClassifier.canonicalKey(item.url)
-                                                synchronized(seenMap) {
+                                                val acceptedItem = synchronized(seenMap) {
                                                     val existing = seenMap[key]
-                                                    if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
-                                                        continue
+                                                    if (existing == null) {
+                                                        seenMap[key] = item
+                                                        item
+                                                    } else {
+                                                        val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                                                        if (merged == existing) null else {
+                                                            seenMap[key] = merged
+                                                            merged
+                                                        }
                                                     }
-                                                    seenMap[key] = if (existing != null) {
-                                                        item.copy(
-                                                            thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
-                                                            durationMillis = item.durationMillis ?: existing.durationMillis
-                                                        )
-                                                    } else item
-                                                }
-                                                onMediaDiscovered(item)
-                                                DownloaderSession.addDiscoveredItem(item)
+                                                } ?: continue
+                                                onMediaDiscovered(acceptedItem)
+                                                DownloaderSession.addDiscoveredItem(acceptedItem)
                                             }
                                             val totalCount = synchronized(seenMap) { seenMap.size }
                                             onStatusUpdate("Live browser extraction completed ($totalCount items).")
@@ -572,15 +579,21 @@ class BrowserMediaExtractor(private val context: Context) {
                             val fallbackEntries = MediaCaptureEngine.parseJsDomScanResult(fallbackJson, normalizedUrl)
                             for (item in fallbackEntries) {
                                 val key = MediaClassifier.canonicalKey(item.url)
-                                synchronized(seenMap) {
+                                val acceptedItem = synchronized(seenMap) {
                                     val existing = seenMap[key]
-                                    if (existing != null && MediaClassifier.compareMediaQuality(item, existing) <= 0) {
-                                        continue
+                                    if (existing == null) {
+                                        seenMap[key] = item
+                                        item
+                                    } else {
+                                        val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                                        if (merged == existing) null else {
+                                            seenMap[key] = merged
+                                            merged
+                                        }
                                     }
-                                    seenMap[key] = item
-                                }
-                                onMediaDiscovered(item)
-                                DownloaderSession.addDiscoveredItem(item)
+                                } ?: continue
+                                onMediaDiscovered(acceptedItem)
+                                DownloaderSession.addDiscoveredItem(acceptedItem)
                             }
                             val isSeenEmpty = synchronized(seenMap) { seenMap.isEmpty() }
                             val finalReason = if (isSeenEmpty) {

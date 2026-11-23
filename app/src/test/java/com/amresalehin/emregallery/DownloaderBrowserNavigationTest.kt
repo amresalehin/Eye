@@ -33,7 +33,7 @@ class DownloaderBrowserNavigationTest {
             normalizeMediaInboxSearchEntry(" HTTPS://Example.COM:443/a/../video?id=1#section ")
         )
         assertEquals(
-            "http://example.com/Path",
+            "http://example.com/Path#fragment",
             normalizeMediaInboxSearchEntry("HTTP://EXAMPLE.COM:80/Path#fragment")
         )
         assertEquals(

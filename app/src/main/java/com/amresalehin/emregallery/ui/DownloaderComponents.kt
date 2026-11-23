@@ -187,6 +187,12 @@ fun DownloaderSearchMainPage(
 
     var urlInput by rememberSaveable { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
+    var showAllRecentSearches by rememberSaveable { mutableStateOf(false) }
+    val visibleRecentSearches = if (showAllRecentSearches) {
+        recentInboxSearches
+    } else {
+        recentInboxSearches.take(5)
+    }
     val scrollState = rememberScrollState()
 
     fun submitSearch(target: String) {
@@ -201,21 +207,6 @@ fun DownloaderSearchMainPage(
         onFetchUrl(normalized)
     }
 
-    // Inbox-only recent searches: never sourced from browser navigation history.
-    val pills = remember(recentInboxSearches) {
-        recentInboxSearches.mapNotNull { query ->
-            val domain = runCatching {
-                java.net.URL(query).host.removePrefix("www.").lowercase()
-            }.getOrDefault("").ifBlank {
-                query.substringAfter("://", query).substringBefore("/").removePrefix("www.")
-            }
-            if (domain.isBlank()) null else DownloaderPill(
-                domain = domain,
-                name = domain.substringBefore('.').replaceFirstChar { it.uppercase() },
-                url = query
-            )
-        }
-    }
 
     Column(
         modifier = modifier
@@ -465,7 +456,7 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // Inbox search history is rendered as the exact query the user entered.
+        // Keep the homepage compact; the full search history remains available on demand.
         if (recentInboxSearches.isNotEmpty()) {
             Column(
                 modifier = Modifier
@@ -479,7 +470,7 @@ fun DownloaderSearchMainPage(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(6.dp))
-                recentInboxSearches.forEachIndexed { index, query ->
+                visibleRecentSearches.forEachIndexed { index, query ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -511,7 +502,7 @@ fun DownloaderSearchMainPage(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (index < recentInboxSearches.lastIndex) {
+                    if (index < visibleRecentSearches.lastIndex) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -519,6 +510,17 @@ fun DownloaderSearchMainPage(
                                 .height(1.dp)
                                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                         )
+                    }
+                }
+
+                if (recentInboxSearches.size > 5) {
+                    TextButton(
+                        onClick = { showAllRecentSearches = !showAllRecentSearches },
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .testTag("downloader_recent_see_all")
+                    ) {
+                        Text(if (showAllRecentSearches) "Show less" else "See all")
                     }
                 }
             }

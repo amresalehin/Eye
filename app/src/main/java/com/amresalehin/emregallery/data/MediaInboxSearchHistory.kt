@@ -51,7 +51,10 @@ class MediaInboxSearchHistory(private val context: Context) {
             buildList {
                 for (index in 0 until values.length()) {
                     val value = values.optString(index).trim()
-                    if (value.isNotBlank() && none { it.equals(value, ignoreCase = true) }) {
+                    if (value.isNotBlank() && indexOfFirst { existing ->
+                            existing.equals(value, ignoreCase = true)
+                        } < 0
+                    ) {
                         add(value)
                     }
                 }

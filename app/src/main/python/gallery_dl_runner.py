@@ -359,27 +359,59 @@ def extract_gallery_dl(url, options_json="{}"):
                         page_title = kwdict.get("gallery_title") or kwdict.get("album_title") or kwdict.get("title") or kwdict.get("author") or ""
 
                     lower_url = item_url.lower()
-                    lower_ext = ext_suffix.lower() if ext_suffix else ""
-                    is_video = lower_ext in ["mp4", "webm", "mkv", "mov", "avi"] or lower_url.endswith(".mp4") or lower_url.endswith(".webm") or ".mp4?" in lower_url or "v.redd.it/" in lower_url
+                    lower_ext = ext_suffix.lower().lstrip(".") if ext_suffix else ""
+                    clean_path = lower_url.split("?")[0].split("#")[0]
+                    path_ext = os.path.splitext(clean_path)[1].lstrip(".").lower()
+                    video_extensions = {"mp4", "m4v", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts"}
+                    image_extensions = {"jpg", "jpeg", "png", "webp", "gif", "avif", "bmp"}
+                    is_reddit_video = "v.redd.it/" in lower_url
+                    mime_hint = str(kwdict.get("mime_type") or kwdict.get("mimetype") or kwdict.get("content_type") or "").lower()
+                    metadata_video_hint = (
+                        kwdict.get("is_video") is True
+                        or kwdict.get("video") is True
+                        or mime_hint.startswith("video/")
+                    )
+                    reddit_metadata_video_hint = (
+                        ("reddit" in lower_url or "reddit" in ext.__class__.__name__.lower())
+                        and (_parse_duration_millis(kwdict.get("duration")) is not None or metadata_video_hint)
+                    )
+                    is_video = (
+                        lower_ext in video_extensions
+                        or path_ext in video_extensions
+                        or any(f".{video_ext}?" in lower_url for video_ext in video_extensions)
+                        or is_reddit_video
+                        or metadata_video_hint
+                        or reddit_metadata_video_hint
+                    )
                     is_stream = lower_ext in ["m3u8", "mpd"] or lower_url.endswith(".m3u8") or ".m3u8?" in lower_url or lower_url.endswith(".mpd")
-                    is_audio = lower_ext in ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"] or lower_url.endswith(".mp3") or lower_url.endswith(".m4a")
+                    is_audio = lower_ext in ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"] or path_ext in ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
 
                     if is_stream:
                         category = "STREAMS"
                         format_label = "HLS/DASH"
                         mime_type = "application/x-mpegURL"
                     elif is_video:
+                        # Reddit's video extractor can report the preview's .gif extension
+                        # even though v.redd.it delivers an MP4/DASH video. Never propagate
+                        # an image extension into a video item or its suggested filename.
+                        video_ext = lower_ext if lower_ext in video_extensions else (
+                            path_ext if path_ext in video_extensions else "mp4"
+                        )
+                        title_root, title_ext = os.path.splitext(item_title)
+                        if title_ext.lstrip(".").lower() in image_extensions:
+                            item_title = f"{title_root}.{video_ext}"
                         category = "VIDEOS"
-                        format_label = ext_suffix.upper() if ext_suffix else "MP4"
-                        mime_type = f"video/{lower_ext}" if lower_ext else "video/mp4"
+                        format_label = video_ext.upper()
+                        mime_type = f"video/{video_ext}"
                     elif is_audio:
                         category = "AUDIO"
-                        format_label = ext_suffix.upper() if ext_suffix else "MP3"
-                        mime_type = f"audio/{lower_ext}" if lower_ext else "audio/mpeg"
+                        format_label = lower_ext.upper() if lower_ext else (path_ext.upper() if path_ext else "MP3")
+                        mime_type = f"audio/{lower_ext or path_ext or 'mpeg'}"
                     else:
                         category = "IMAGES"
-                        format_label = ext_suffix.upper() if ext_suffix else "IMAGE"
-                        mime_type = f"image/{lower_ext}" if lower_ext in ["png", "jpeg", "jpg", "webp", "gif", "avif"] else "image/jpeg"
+                        format_label = lower_ext.upper() if lower_ext else (path_ext.upper() if path_ext else "IMAGE")
+                        image_ext = lower_ext if lower_ext in image_extensions else path_ext
+                        mime_type = f"image/{image_ext}" if image_ext in image_extensions else "image/jpeg"
 
                     width = kwdict.get("width")
                     height = kwdict.get("height")

@@ -19,6 +19,7 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import com.amresalehin.emregallery.data.StoryGroup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -87,6 +88,9 @@ fun ViewerScreen(
     item: MediaItem,
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
+    storyTitle: String? = null,
+    storyGroups: List<StoryGroup> = emptyList(),
+    initialStoryIndex: Int = 0,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
     defaultMlKitLanguages: Set<String> = setOf("latin"),
@@ -207,20 +211,63 @@ fun ViewerScreen(
         dismissOffsetY.snapTo(0f)
     }
 
-    // Horizontal pager for browsing the current media list.
-    val initialIndex = remember(items, item.uri) {
-        val index = items.indexOfFirst { it.uri == item.uri }
-        if (index >= 0) index else 0
+    // Story mode state
+    val isStoryMode = storyTitle != null || storyGroups.isNotEmpty()
+    var activeStoryIndex by remember(storyGroups, initialStoryIndex) {
+        mutableIntStateOf(initialStoryIndex.coerceIn(0, (storyGroups.size - 1).coerceAtLeast(0)))
+    }
+
+    val currentStory = remember(storyGroups, activeStoryIndex, storyTitle, items) {
+        if (storyGroups.isNotEmpty()) {
+            storyGroups.getOrElse(activeStoryIndex.coerceIn(0, storyGroups.size - 1)) {
+                StoryGroup(storyTitle ?: "", items)
+            }
+        } else {
+            StoryGroup(storyTitle ?: "", items)
+        }
+    }
+    val currentStoryTitle = currentStory.title
+    val currentStoryItems = currentStory.items.ifEmpty { items }
+    val allStoryItems = remember(storyGroups, items) {
+        if (storyGroups.isNotEmpty()) storyGroups.flatMap { it.items }.ifEmpty { items } else items
+    }
+
+    // Horizontal pager for media browsing
+    val initialIndex = remember(items, currentStoryItems, isStoryMode, item.uri) {
+        val list = if (isStoryMode) currentStoryItems else items
+        val idx = list.indexOfFirst { it.uri == item.uri }
+        if (idx >= 0) idx else 0
     }
     val pagerState = rememberPagerState(
         initialPage = initialIndex,
-        pageCount = { items.size }
+        pageCount = { if (isStoryMode) currentStoryItems.size else items.size }
     )
 
-    // Keep the parent selection and shared-element source aligned with the settled page.
-    LaunchedEffect(pagerState, items) {
+    var storyProgress by remember { mutableFloatStateOf(0f) }
+    var isStoryHolding by remember { mutableStateOf(false) }
+    var showEndOfStory by remember { mutableStateOf(false) }
+
+    // When moving between story groups, reset pager position and notify neighbor
+    LaunchedEffect(activeStoryIndex) {
+        if (isStoryMode) {
+            storyProgress = 0f
+            if (pagerState.currentPage != 0) {
+                pagerState.scrollToPage(0)
+            }
+            val first = currentStoryItems.firstOrNull()
+            if (first != null && first.uri != item.uri) {
+                onOpenNeighbor(first)
+                ThumbnailBoundsTracker.activeViewerUri = first.uri
+            }
+        }
+    }
+
+    // Synchronize pager page settlement with parent selected media only when page has completely settled
+    LaunchedEffect(pagerState, currentStoryItems) {
         snapshotFlow { pagerState.settledPage }.collect { settledPage ->
-            val current = items.getOrNull(settledPage)
+            storyProgress = 0f
+            val activeList = if (isStoryMode) currentStoryItems else items
+            val current = activeList.getOrNull(settledPage)
             if (current != null && current.uri != item.uri) {
                 onOpenNeighbor(current)
                 ThumbnailBoundsTracker.activeViewerUri = current.uri
@@ -228,9 +275,107 @@ fun ViewerScreen(
         }
     }
 
-    // Scroll to the selected item if the parent changes it.
+    val stepNext: () -> Unit = {
+        if (!showEndOfStory && !isClosing && !pagerState.isScrollInProgress) {
+            val activeList = if (isStoryMode) currentStoryItems else items
+            if (pagerState.currentPage < activeList.size - 1) {
+                val targetPage = pagerState.currentPage + 1
+                storyProgress = 0f
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(
+                        page = targetPage,
+                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+                    )
+                }
+            } else {
+                // Reached last photo of current story. Check if more stories exist in sequence
+                if (isStoryMode && activeStoryIndex < storyGroups.size - 1) {
+                    activeStoryIndex++
+                } else {
+                    // All memories have finished playing
+                    showEndOfStory = true
+                }
+            }
+        }
+    }
+
+    val stepPrevious: () -> Unit = {
+        if (!showEndOfStory && !isClosing && !pagerState.isScrollInProgress) {
+            if (pagerState.currentPage > 0) {
+                val targetPage = pagerState.currentPage - 1
+                storyProgress = 0f
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(
+                        page = targetPage,
+                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+                    )
+                }
+            } else {
+                // At first photo of current story: return to previous story's last photo if available
+                if (isStoryMode && activeStoryIndex > 0) {
+                    val prevStoryIndex = activeStoryIndex - 1
+                    val prevStoryItems = storyGroups[prevStoryIndex].items
+                    activeStoryIndex = prevStoryIndex
+                    storyProgress = 0f
+                    coroutineScope.launch {
+                        pagerState.scrollToPage((prevStoryItems.size - 1).coerceAtLeast(0))
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-advance story timer (~4.5s per photo, synchronized with video playback for videos)
+    if (isStoryMode) {
+        val currentMediaList = currentStoryItems
+        val currentActiveItem = currentMediaList.getOrNull(pagerState.currentPage) ?: item
+        val isCurrentItemVideo = currentActiveItem.isVideo || com.amresalehin.emregallery.data.MediaClassifier.isAudioMimeOrUri(
+            currentActiveItem.mimeType,
+            currentActiveItem.name.ifBlank { currentActiveItem.uri }
+        )
+        val isPaused = isStoryHolding || showDetails || showMore || confirmMoveToBin || confirmPermanentDelete || isCurrentZoomed || isClosing || showEndOfStory || (isCurrentItemVideo && !videoState.isPlaying)
+
+        LaunchedEffect(
+            pagerState.settledPage,
+            activeStoryIndex,
+            isPaused,
+            isCurrentItemVideo,
+            videoState.durationMs,
+            videoState.positionMs,
+            videoState.isPlaying
+        ) {
+            if (showEndOfStory || isClosing || pagerState.isScrollInProgress) return@LaunchedEffect
+
+            if (isCurrentItemVideo) {
+                if (videoState.durationMs > 0L) {
+                    storyProgress = (videoState.positionMs.toFloat() / videoState.durationMs.toFloat()).coerceIn(0f, 1f)
+                    if (videoState.positionMs >= videoState.durationMs - 150L && videoState.durationMs > 500L) {
+                        stepNext()
+                    }
+                }
+            } else {
+                if (!isPaused) {
+                    val totalDurationMs = 4500f
+                    val startProgress = storyProgress
+                    val startTime = System.currentTimeMillis()
+                    while (!isPaused && storyProgress < 1f) {
+                        val elapsed = System.currentTimeMillis() - startTime
+                        val newProgress = (startProgress + elapsed / totalDurationMs).coerceIn(0f, 1f)
+                        storyProgress = newProgress
+                        if (newProgress >= 1f) {
+                            stepNext()
+                            break
+                        }
+                        delay(16L)
+                    }
+                }
+            }
+        }
+    }
+
+    // Scroll to target page if parent changes selected media (non-story mode only)
     LaunchedEffect(item.uri) {
-        if (!pagerState.isScrollInProgress) {
+        if (!isStoryMode && !pagerState.isScrollInProgress) {
             val targetIndex = items.indexOfFirst { it.uri == item.uri }
             if (targetIndex >= 0 && targetIndex != pagerState.currentPage) {
                 pagerState.scrollToPage(targetIndex)
@@ -333,9 +478,14 @@ fun ViewerScreen(
                 userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && !showDetails && !isClosing && transitionProgress.value >= 0.99f,
                 pageSpacing = 16.dp,
                 modifier = Modifier.fillMaxSize(),
-                key = { pageIndex -> items.getOrNull(pageIndex)?.uri ?: pageIndex.toString() }
+                key = { pageIndex ->
+                    val activeList = if (isStoryMode) currentStoryItems else items
+                    val uri = activeList.getOrNull(pageIndex)?.uri ?: pageIndex.toString()
+                    if (isStoryMode) "${activeStoryIndex}_$uri" else uri
+                }
             ) { pageIndex ->
-                val currentItem = items.getOrNull(pageIndex) ?: item
+                val activeList = if (isStoryMode) currentStoryItems else items
+                val currentItem = activeList.getOrNull(pageIndex) ?: item
                 val isCurrent = pageIndex == pagerState.currentPage
                 val currentBounds = if (isCurrent) (targetBounds ?: ThumbnailBoundsTracker.getBounds(currentItem.uri)) else null
 
@@ -429,6 +579,10 @@ fun ViewerScreen(
                     onZoomChanged = { zoomed ->
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
+                    isStoryMode = isStoryMode,
+                    onStoryTapLeft = stepPrevious,
+                    onStoryTapRight = stepNext,
+                    onStoryHoldingChanged = { isStoryHolding = it },
                     transitionProgress = transitionProgress.value,
                     targetBounds = currentBounds,
                     dismissOffsetY = dismissOffsetY.value
@@ -437,25 +591,52 @@ fun ViewerScreen(
 
             // Edge gradient shading behind top and bottom bars (hidden in fullscreen or when sheet rises)
             if (!videoState.isFullscreen) {
-                ViewerEdgeShading(visible = showControls && !isClosing)
+                ViewerEdgeShading(visible = ((showControls && !isStoryMode) || (isStoryMode && !isStoryHolding && !showEndOfStory)) && !isClosing)
             }
 
-            // Standard viewer action bar.
-            if (!videoState.isFullscreen && showControls) {
-                ViewerTopAppBar(
-                    isFavourite = favourite,
-                    onBack = { initiateClose() },
-                    onShare = shareMedia,
-                    onToggleFavourite = onFavourite,
-                    onMore = { showMore = true },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .graphicsLayer {
-                            val p = transitionProgress.value
-                            translationY = -(80.dp.toPx()) * (1f - p)
-                            alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
-                        }
-                )
+            // Top App Bar in standard or story view
+            if (!videoState.isFullscreen) {
+                if (isStoryMode) {
+                    val showStoryBar = !isStoryHolding && !isClosing && !showEndOfStory
+                    AnimatedVisibility(
+                        visible = showStoryBar,
+                        enter = fadeIn(animationSpec = tween(150)),
+                        exit = fadeOut(animationSpec = tween(150)),
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    ) {
+                        ViewerStoryTopBar(
+                            storyTitle = currentStoryTitle,
+                            currentIndex = pagerState.currentPage,
+                            itemCount = currentStoryItems.size,
+                            currentProgress = storyProgress,
+                            isFavourite = favourite,
+                            onBack = { initiateClose() },
+                            onShare = shareMedia,
+                            onToggleFavourite = onFavourite,
+                            onMore = { showMore = true },
+                            modifier = Modifier.graphicsLayer {
+                                val p = transitionProgress.value
+                                translationY = -(80.dp.toPx()) * (1f - p)
+                                alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
+                            }
+                        )
+                    }
+                } else if (showControls) {
+                    ViewerTopAppBar(
+                        isFavourite = favourite,
+                        onBack = { initiateClose() },
+                        onShare = shareMedia,
+                        onToggleFavourite = onFavourite,
+                        onMore = { showMore = true },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .graphicsLayer {
+                                val p = transitionProgress.value
+                                translationY = -(80.dp.toPx()) * (1f - p)
+                                alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
+                            }
+                    )
+                }
             }
 
             // Fullscreen quick exit back button
@@ -501,7 +682,7 @@ fun ViewerScreen(
                         )
                     }
 
-                    if (!videoState.isFullscreen) {
+                    if (!videoState.isFullscreen && !isStoryMode) {
                         ViewerBottomActionBar(
                             isBin = isBin,
                             isHidden = isHidden,
@@ -552,7 +733,23 @@ fun ViewerScreen(
                 )
             }
 
-
+            // End-of-memory constellation screen
+            if (isStoryMode && showEndOfStory && !isClosing) {
+                EndOfStoryOverlay(
+                    storyItems = allStoryItems,
+                    storyTitle = currentStoryTitle,
+                    itemCount = allStoryItems.size,
+                    onReplay = {
+                        showEndOfStory = false
+                        activeStoryIndex = 0
+                        storyProgress = 0f
+                        coroutineScope.launch {
+                            pagerState.scrollToPage(0)
+                        }
+                    },
+                    onClose = { initiateClose() }
+                )
+            }
         }
     }
 
@@ -656,6 +853,10 @@ private fun ZoomableMediaItem(
     onSwipeDownDelta: (Float) -> Unit,
     onSwipeDownRelease: (Float) -> Unit,
     onZoomChanged: (Boolean) -> Unit,
+    isStoryMode: Boolean = false,
+    onStoryTapLeft: () -> Unit = {},
+    onStoryTapRight: () -> Unit = {},
+    onStoryHoldingChanged: (Boolean) -> Unit = {},
     transitionProgress: Float = 1f,
     targetBounds: androidx.compose.ui.geometry.Rect? = null,
     dismissOffsetY: Float = 0f,
@@ -725,9 +926,11 @@ private fun ZoomableMediaItem(
                             var speedBoostStarted = false
 
                             val longPressJob = launch {
-                                delay(500L)
+                                delay(if (isStoryMode) 180L else 500L)
                                 if (!isDragging && !isPinching && scale <= 1.02f) {
-                                    if (isVideo && videoState != null) {
+                                    if (isStoryMode) {
+                                        onStoryHoldingChanged(true)
+                                    } else if (isVideo && videoState != null) {
                                         // Hold anywhere on the video for temporary 2× playback speed.
                                         longPressTriggered = true
                                         speedBoostStarted = true
@@ -782,6 +985,7 @@ private fun ZoomableMediaItem(
 
                                     if (totalMovementX > touchSlop || totalMovementY > touchSlop) {
                                         longPressJob.cancel()
+                                        if (isStoryMode) onStoryHoldingChanged(false)
                                     }
 
                                     if (scale > 1.02f && !isVideo) {
@@ -825,6 +1029,7 @@ private fun ZoomableMediaItem(
                                     // Always restore normal speed on release, cancellation, or gesture disposal.
                                     videoState?.setPlaybackSpeed(1f)
                                 }
+                                if (isStoryMode) onStoryHoldingChanged(false)
                             }
 
                             val velocityY = velocityTracker.calculateVelocity().y
@@ -837,7 +1042,14 @@ private fun ZoomableMediaItem(
                                     onSwipeDownRelease(velocityY)
                                 }
                             } else if (!isPinching && !longPressTriggered && totalMovementX < touchSlop && totalMovementY < touchSlop) {
-                                val now = System.currentTimeMillis()
+                                if (isStoryMode) {
+                                    if (down.position.x < width * 0.30f) {
+                                        onStoryTapLeft()
+                                    } else {
+                                        onStoryTapRight()
+                                    }
+                                } else {
+                                    val now = System.currentTimeMillis()
                                     val isDoubleTap = now - lastTapTime < 280L &&
                                         (down.position - lastTapPos).getDistance() < touchSlop * 3f
                                     if (isDoubleTap) {
@@ -889,6 +1101,7 @@ private fun ZoomableMediaItem(
                                             }
                                         }
                                     }
+                                }
                             }
                         }
                     }

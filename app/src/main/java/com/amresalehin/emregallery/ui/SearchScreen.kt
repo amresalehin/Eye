@@ -13,11 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
-import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -954,12 +949,8 @@ private fun TypingLiveSuggestionsContent(
 
 /**
  * State C: Submitted Search Results.
- *
- * All result thumbnails use the same 420px prepared thumbnail, URI cache key,
- * and shared Coil loader as the main gallery. The staggered grid keeps result
- * composition lazy so a large search never launches requests for every match.
+ * Date-grouped masonry photo grid, Sort/View controls beside results header.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SubmittedResultsContent(
     query: String,
@@ -988,25 +979,16 @@ private fun SubmittedResultsContent(
         return
     }
 
+    // Date grouping for results
     val dayGroups = remember(results) { groupMediaByDay(results) }
-    val columns = when (viewMode) {
-        SearchViewMode.MASONRY, SearchViewMode.GRID -> StaggeredGridCells.Fixed(3)
-        SearchViewMode.LARGE_GRID -> StaggeredGridCells.Fixed(2)
-        SearchViewMode.LIST -> StaggeredGridCells.Fixed(1)
-    }
-    val itemSpacing = if (viewMode == SearchViewMode.LIST) 8.dp else 4.dp
 
-    LazyVerticalStaggeredGrid(
-        columns = columns,
+    LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 4.dp, bottom = 32.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (viewMode == SearchViewMode.LIST) 0.dp else 4.dp),
-        verticalItemSpacing = itemSpacing
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item(
-            key = "search_results_header",
-            span = StaggeredGridItemSpan.FullLine
-        ) {
+        // Results Header: Query title, count, content summary, Sort & View controls
+        item {
             SearchResultsHeader(
                 queryTitle = query.ifBlank { "All results" },
                 totalCount = totalCount,
@@ -1020,12 +1002,11 @@ private fun SubmittedResultsContent(
             )
         }
 
-        dayGroups.forEach { group ->
+        // Date Groups
+        items(dayGroups, key = { it.dayKey }) { group ->
             val isCollapsed = collapsedGroups[group.dayKey] == true
-            item(
-                key = "search_date_group_${group.dayKey}",
-                span = StaggeredGridItemSpan.FullLine
-            ) {
+
+            Column(modifier = Modifier.fillMaxWidth()) {
                 SearchDateGroupHeader(
                     label = group.dayLabel,
                     count = group.items.size,
@@ -1033,39 +1014,46 @@ private fun SubmittedResultsContent(
                     onToggleExpand = { onToggleGroupCollapse(group.dayKey) },
                     isDark = isDark
                 )
-            }
 
-            if (!isCollapsed) {
-                if (viewMode == SearchViewMode.LIST) {
-                    staggeredItems(
-                        items = group.items,
-                        key = { item -> "search_row_${item.id}" }
-                    ) { item ->
-                        CompactMediaListRow(
-                            item = item,
-                            onOpen = { onOpenMedia(item) },
-                            isDark = isDark
-                        )
-                    }
-                } else {
-                    staggeredItems(
-                        items = group.items,
-                        key = { item -> "search_media_${item.id}" }
-                    ) { item ->
-                        val aspectRatio = if (viewMode == SearchViewMode.MASONRY) {
-                            when (kotlin.math.abs(item.id.hashCode()) % 3) {
-                                0 -> 0.85f
-                                1 -> 1.0f
-                                else -> 1.25f
-                            }
-                        } else {
-                            1.0f
+                AnimatedVisibility(
+                    visible = !isCollapsed,
+                    enter = expandVertically(tween(200)) + fadeIn(tween(150)),
+                    exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                ) {
+                    when (viewMode) {
+                        SearchViewMode.MASONRY -> {
+                            // Natural varied image heights, narrow 4dp gutters, rounded corners
+                            DynamicMasonryGrid(
+                                media = group.items,
+                                columnsCount = 3,
+                                onOpen = onOpenMedia
+                            )
                         }
-                        SearchResultMediaTile(
-                            item = item,
-                            aspectRatio = aspectRatio,
-                            onOpen = onOpenMedia
-                        )
+                        SearchViewMode.GRID -> {
+                            SquareGrid(
+                                media = group.items,
+                                columnsCount = 3,
+                                onOpen = onOpenMedia
+                            )
+                        }
+                        SearchViewMode.LARGE_GRID -> {
+                            SquareGrid(
+                                media = group.items,
+                                columnsCount = 2,
+                                onOpen = onOpenMedia
+                            )
+                        }
+                        SearchViewMode.LIST -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                group.items.forEach { item ->
+                                    CompactMediaListRow(
+                                        item = item,
+                                        onOpen = { onOpenMedia(item) },
+                                        isDark = isDark
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1074,44 +1062,135 @@ private fun SubmittedResultsContent(
 }
 
 @Composable
-private fun SearchResultMediaTile(
-    item: MediaItem,
-    aspectRatio: Float,
-    onOpen: (MediaItem) -> Unit
+private fun SquareGrid(
+    media: List<MediaItem>,
+    columnsCount: Int,
+    onOpen: (MediaItem) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val thumbnailRequest = remember(item.uri, context) {
-        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+    val cols = columnsCount.coerceAtLeast(1)
+    val rows = remember(media, cols) {
+        media.chunked(cols)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(aspectRatio)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onOpen(item) }
-            .testTag("media_item_${item.id}")
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        AsyncImage(
-            model = thumbnailRequest,
-            contentDescription = item.name,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-        if (item.isVideo) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                    .padding(4.dp)
+        rows.forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Video",
-                    modifier = Modifier.size(14.dp),
-                    tint = Color.White
-                )
+                rowItems.forEach { item ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onOpen(item) }
+                            .testTag("media_item_${item.id}")
+                    ) {
+                        AsyncImage(
+                            model = remember(item.uri, context) {
+                                ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                            },
+                            contentDescription = item.name,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        if (item.isVideo) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp)
+                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                    .padding(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Video",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+                val remainder = cols - rowItems.size
+                repeat(remainder) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DynamicMasonryGrid(
+    media: List<MediaItem>,
+    columnsCount: Int,
+    onOpen: (MediaItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val cols = columnsCount.coerceAtLeast(1)
+    val columns = remember(media, cols) {
+        List(cols) { colIndex ->
+            media.filterIndexed { index, _ -> index % cols == colIndex }
+        }
+    }
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        columns.forEach { colItems ->
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                colItems.forEach { item ->
+                    val aspect = when (Math.abs(item.id.hashCode()) % 3) {
+                        0 -> 0.85f
+                        1 -> 1.0f
+                        else -> 1.25f
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(aspect)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onOpen(item) }
+                            .testTag("media_item_${item.id}")
+                    ) {
+                        AsyncImage(
+                            model = remember(item.uri, context) {
+                                ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                            },
+                            contentDescription = item.name,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        if (item.isVideo) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp)
+                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                    .padding(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Video",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

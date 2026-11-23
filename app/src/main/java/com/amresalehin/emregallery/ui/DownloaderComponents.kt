@@ -477,7 +477,7 @@ fun DownloaderSearchMainPage(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (savedStacksCount == 1) "1 saved item" else "${savedStacksCount} saved items",
+                            text = "${savedStacksCount} saved",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -517,14 +517,6 @@ fun DownloaderSearchMainPage(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .padding(9.dp)
-                        )
                         Text(
                             text = query,
                             modifier = Modifier.weight(1f),
@@ -532,6 +524,14 @@ fun DownloaderSearchMainPage(
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(9.dp)
                         )
                     }
                     if (index < minOf(recentInboxSearches.size, 5) - 1) {

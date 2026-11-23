@@ -152,6 +152,52 @@ data class DownloaderPill(
 }
 
 @Composable
+/**
+ * Compact favicon for Inbox history rows. Keep a letter fallback visible while
+ * loading and when the remote favicon cannot be retrieved.
+ */
+@Composable
+private fun InboxSearchFavicon(url: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val host = remember(url) {
+        runCatching {
+            URL(normalizeDownloaderTargetUrl(url)).host.removePrefix("www.").lowercase(Locale.ROOT)
+        }.getOrDefault("")
+    }
+    val faviconUrl = remember(host) {
+        if (host.isBlank() || host.any { it.isWhitespace() || it in "/?#@" }) "" 
+        else "https://www.google.com/s2/favicons?domain=$host&sz=96"
+    }
+    var failed by remember(faviconUrl) { mutableStateOf(faviconUrl.isBlank()) }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = host.firstOrNull()?.uppercaseChar()?.toString() ?: "W",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        if (!failed) {
+            AsyncImage(
+                model = remember(faviconUrl, context) {
+                    ImageRequest.Builder(context)
+                        .data(faviconUrl)
+                        .crossfade(false)
+                        .listener(onError = { _, _ -> failed = true })
+                        .build()
+                },
+                contentDescription = "$host favicon",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(5.dp)
+            )
+        }
+    }
+}
+
 fun DownloaderSearchMainPage(
     onFetchUrl: (String) -> Unit,
     onOpenBrowser: ((String) -> Unit)? = null,
@@ -517,6 +563,7 @@ fun DownloaderSearchMainPage(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        InboxSearchFavicon(url = query, modifier = Modifier.size(36.dp))
                         Text(
                             text = query,
                             modifier = Modifier.weight(1f),
@@ -731,14 +778,7 @@ fun DownloaderSearchHistoryPage(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .padding(9.dp)
-                        )
+                        InboxSearchFavicon(url = query, modifier = Modifier.size(36.dp))
                         Text(
                             text = query,
                             modifier = Modifier.weight(1f),

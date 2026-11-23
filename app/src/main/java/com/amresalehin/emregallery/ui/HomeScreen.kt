@@ -56,7 +56,6 @@ import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
 private const val PREFETCH_LOOK_AHEAD_ROWS = 24
-private const val SYNC_COMPUTE_THRESHOLD = 150
 
 @Immutable
 private data class HomeGroupedData(
@@ -232,22 +231,12 @@ fun HomeScreen(
         return
     }
 
-    var groupedData by remember {
-        mutableStateOf(
-            if (media.size <= SYNC_COMPUTE_THRESHOLD) {
-                buildHomeGroupedData(media, sortOrder, groupBy)
-            } else {
-                HomeGroupedData()
-            }
-        )
-    }
+    var groupedData by remember { mutableStateOf(HomeGroupedData()) }
     LaunchedEffect(media, sortOrder, groupBy) {
-        groupedData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
+        // Sorting, grouping and row preparation never run on the UI thread, even for small
+        // libraries. This avoids cold-start frame spikes as the library grows.
+        groupedData = withContext(Dispatchers.Default) {
             buildHomeGroupedData(media, sortOrder, groupBy)
-        } else {
-            withContext(Dispatchers.Default) {
-                buildHomeGroupedData(media, sortOrder, groupBy)
-            }
         }
     }
     var gridData by remember {

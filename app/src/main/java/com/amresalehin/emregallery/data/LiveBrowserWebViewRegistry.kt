@@ -148,16 +148,13 @@ object LiveBrowserWebViewRegistry {
                         discoveredByUrl[key] = item
                         item
                     }
-                    MediaClassifier.compareMediaQuality(item, existing) > 0 -> {
-                        val improved = item.copy(
-                            id = existing.id,
-                            thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
-                            durationMillis = item.durationMillis ?: existing.durationMillis
-                        )
-                        discoveredByUrl[key] = improved
-                        improved
+                    else -> {
+                        val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                        if (merged == existing) null else {
+                            discoveredByUrl[key] = merged
+                            merged
+                        }
                     }
-                    else -> null
                 }
             }
             accepted?.let {

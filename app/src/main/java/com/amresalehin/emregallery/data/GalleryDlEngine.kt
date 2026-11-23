@@ -233,7 +233,11 @@ object GalleryDlEngine {
     /**
      * Parses extracted JSON items while preserving each item's exact source engine ("yt-dlp" or "gallery-dl").
      */
-    internal fun parseExtractedItems(root: JSONObject, pageUrl: String): Pair<String, List<ScrapedMediaItem>> {
+    internal fun parseExtractedItems(
+        root: JSONObject,
+        pageUrl: String,
+        cookieHeader: String? = null
+    ): Pair<String, List<ScrapedMediaItem>> {
         val pageTitle = root.optString("pageTitle", "")
         val defaultEngine = root.optString("engine", "gallery-dl").ifBlank { "gallery-dl" }
         val itemsArray = root.optJSONArray("items") ?: JSONArray()
@@ -333,10 +337,11 @@ object GalleryDlEngine {
                     pageUrl = pageUrl
                 ),
                 metadata = itemMetadata,
-                downloadHeaders = mapOf(
-                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                    "Referer" to pageUrl
-                )
+                downloadHeaders = buildMap {
+                    put("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
+                    put("Referer", pageUrl)
+                    cookieHeader?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
+                }
             )
             itemsList.add(item)
         }
@@ -378,7 +383,11 @@ object GalleryDlEngine {
             }
 
             val extractorName = root.optString("extractor", root.optString("engine", methodName))
-            val (pageTitle, itemsList) = parseExtractedItems(root, url.trim())
+            val (pageTitle, itemsList) = parseExtractedItems(
+                root = root,
+                pageUrl = url.trim(),
+                cookieHeader = options.cookies
+            )
 
             GalleryDlExtractResult(
                 success = true,

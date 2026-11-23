@@ -222,6 +222,45 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
+                fun processDomScanResult(scanJson: String?, onProcessed: (Int) -> Unit) {
+                    // evaluateJavascript callbacks execute on Main. Parsing the returned
+                    // DOM JSON, canonicalizing URLs and merging metadata must not.
+                    domProcessingExecutor.execute {
+                        if (!isCurrentRun()) return@execute
+                        val entries = MediaCaptureEngine.parseJsDomScanResult(scanJson, normalizedUrl)
+                        val acceptedItems = ArrayList<ScrapedMediaItem>(entries.size)
+                        for (item in entries) {
+                            if (!isCurrentRun()) return@execute
+                            val key = MediaClassifier.canonicalKey(item.url)
+                            val acceptedItem = synchronized(seenMap) {
+                                val existing = seenMap[key]
+                                if (existing == null) {
+                                    seenMap[key] = item
+                                    item
+                                } else {
+                                    val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                                    if (merged == existing) null else {
+                                        seenMap[key] = merged
+                                        merged
+                                    }
+                                }
+                            }
+                            if (acceptedItem != null) acceptedItems.add(acceptedItem)
+                        }
+
+                        val totalCount = synchronized(seenMap) { seenMap.size }
+                        if (acceptedItems.isNotEmpty()) {
+                            DownloaderSession.addDiscoveredItems(acceptedItems)
+                        }
+
+                        mainHandler.post {
+                            if (!isCurrentRun() || isExtractionCompleted) return@post
+                            acceptedItems.forEach(onMediaDiscovered)
+                            onProcessed(totalCount)
+                        }
+                    }
+                }
+
                 fun dispatchMediaItem(
                     rawUrl: String,
                     source: ExtractionSource,
@@ -466,45 +505,6 @@ class BrowserMediaExtractor(private val context: Context) {
                         // Install page-context API/Blob hooks before DOM and mutation scans.
                         wv.evaluateJavascript(MediaCaptureEngine.getDynamicMediaCaptureScript(), null)
                         wv.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
-
-                        fun processDomScanResult(scanJson: String?, onProcessed: (Int) -> Unit) {
-                            // evaluateJavascript callbacks execute on Main. Parsing the returned
-                            // DOM JSON, canonicalizing URLs and merging metadata must not.
-                            domProcessingExecutor.execute {
-                                if (!isCurrentRun()) return@execute
-                                val entries = MediaCaptureEngine.parseJsDomScanResult(scanJson, normalizedUrl)
-                                val acceptedItems = ArrayList<ScrapedMediaItem>(entries.size)
-                                for (item in entries) {
-                                    if (!isCurrentRun()) return@execute
-                                    val key = MediaClassifier.canonicalKey(item.url)
-                                    val acceptedItem = synchronized(seenMap) {
-                                        val existing = seenMap[key]
-                                        if (existing == null) {
-                                            seenMap[key] = item
-                                            item
-                                        } else {
-                                            val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
-                                            if (merged == existing) null else {
-                                                seenMap[key] = merged
-                                                merged
-                                            }
-                                        }
-                                    }
-                                    if (acceptedItem != null) acceptedItems.add(acceptedItem)
-                                }
-
-                                val totalCount = synchronized(seenMap) { seenMap.size }
-                                if (acceptedItems.isNotEmpty()) {
-                                    DownloaderSession.addDiscoveredItems(acceptedItems)
-                                }
-
-                                mainHandler.post {
-                                    if (!isCurrentRun() || isExtractionCompleted) return@post
-                                    acceptedItems.forEach(onMediaDiscovered)
-                                    onProcessed(totalCount)
-                                }
-                            }
-                        }
 
                         fun performScanAndScroll(onComplete: () -> Unit, forceScroll: Boolean = false) {
                             wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { scanJson ->

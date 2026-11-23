@@ -419,6 +419,7 @@ class DualMediaExtractor(private val context: Context) {
                                 id = existing.id,
                                 thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
                                 provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                                downloadHeaders = secondary.downloadHeaders + preferred.downloadHeaders,
                                 metadata = secondary.metadata + preferred.metadata
                             )
                             if (upgraded != existing) {

@@ -528,16 +528,6 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // Compact preview of the five newest saved library stacks.
-        if (orderedSavedStacks.isNotEmpty()) {
-            SavedPreviewSection(
-                stacks = orderedSavedStacks,
-                onViewSavedLibrary = onViewSavedLibrary,
-                onSelectStack = onSelectStack,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
         // Compact preview of the five newest download activities.
         if (recentActivities.isNotEmpty()) {
             Column(
@@ -580,6 +570,16 @@ fun DownloaderSearchMainPage(
                     }
                 }
             }
+        }
+
+        // Compact preview of the five newest saved library stacks.
+        if (orderedSavedStacks.isNotEmpty()) {
+            SavedPreviewSection(
+                stacks = orderedSavedStacks,
+                onViewSavedLibrary = onViewSavedLibrary,
+                onSelectStack = onSelectStack,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -919,64 +919,9 @@ fun SavedPreviewSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 22.dp, bottom = 20.dp, start = 18.dp, end = 18.dp),
+                .padding(top = 14.dp, bottom = 14.dp, start = 18.dp, end = 18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: [Cloud Icon] Saved       [See All >]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CloudDownload,
-                        contentDescription = "Saved",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Text(
-                        text = "Saved",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 24.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                if (stacks.size > 5) {
-                    Surface(
-                        onClick = onViewSavedLibrary,
-                        shape = RoundedCornerShape(22.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier.testTag("downloader_saved_see_all_btn")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "See all",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
             val displayStacks = remember(stacks) { stacks.take(5) }
             if (displayStacks.isNotEmpty()) {
                 // Horizontal list of stacked preview cards (bounded to max 5 items to avoid unlimited horizontal scrolling)
@@ -1052,6 +997,33 @@ fun SavedPreviewSection(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            if (stacks.size > 5) {
+                TextButton(
+                    onClick = onViewSavedLibrary,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .testTag("downloader_saved_see_all_btn")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "See all",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }

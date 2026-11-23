@@ -341,6 +341,55 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun repeatedVideoDiscoveryKeepsPosterCookiesAndDescriptiveTitle() {
+        val url = "https://cdn.example.com/video/clip.mp4"
+        val existing = com.amresalehin.emregallery.data.ScrapedMediaItem(
+            id = "first-video",
+            url = url,
+            title = "media_1.mp4",
+            isVideo = true,
+            category = com.amresalehin.emregallery.data.MediaCategory.VIDEOS,
+            format = "MP4",
+            mimeType = "video/mp4",
+            sizeBytes = 10_000L,
+            source = "Network",
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(
+                extractorEngine = "Browser network capture",
+                pageUrl = "https://example.com/watch/clip"
+            ),
+            downloadHeaders = mapOf(
+                "User-Agent" to "EyeTestAgent",
+                "Referer" to "https://example.com/watch/clip"
+            )
+        )
+        val laterDiscovery = existing.copy(
+            id = "second-video",
+            title = "Summer road trip.mp4",
+            sizeBytes = 1_000L,
+            thumbnailUrl = "https://cdn.example.com/posters/clip.jpg",
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(
+                extractorEngine = "Static HTML",
+                pageUrl = "https://example.com/watch/clip"
+            ),
+            downloadHeaders = mapOf("Cookie" to "session=test")
+        )
+
+        val merged = com.amresalehin.emregallery.data.MediaClassifier
+            .mergeScrapedMediaItems(existing, laterDiscovery)
+
+        assertEquals("first-video", merged.id)
+        assertEquals("media_1.mp4", existing.title)
+        assertEquals("Summer road trip.mp4", merged.title)
+        assertEquals("https://cdn.example.com/posters/clip.jpg", merged.thumbnailUrl)
+        assertEquals("session=test", merged.downloadHeaders["Cookie"])
+        assertEquals("EyeTestAgent", merged.downloadHeaders["User-Agent"])
+        assertEquals(
+            "https://example.com/watch/clip",
+            merged.downloadHeaders["Referer"]
+        )
+    }
+
+    @Test
     fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
         val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
         val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)

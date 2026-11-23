@@ -120,37 +120,44 @@ private fun buildHomeGridData(grouped: HomeGroupedData, columns: Int): HomeGridD
     )
 }
 @Composable
-private fun HomeMediaLoadingSkeleton(columns: Int) {
-    val transition = rememberInfiniteTransition(label = "home_media_skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.34f,
-        targetValue = 0.72f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "home_media_skeleton_alpha"
-    )
+private fun HomeMediaLoadingSkeleton(
+    columns: Int,
+    containerWidth: Dp,
+    isSquare: Boolean
+) {
+    // Match JustifiedMosaicRow: every tile in a row shares one height and widths follow
+    // aspect-ratio weights. The old skeleton assigned unrelated heights to adjacent tiles.
     val columnCount = columns.coerceIn(1, 6)
-    val heights = listOf(148, 190, 126, 174, 210, 138, 166, 198, 132, 182, 154, 204)
+    val gap = 4.dp
+    val aspectPattern = listOf(0.72f, 1.18f, 0.92f, 1.34f, 0.82f, 1.05f, 0.76f, 1.26f)
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        repeat(5) { rowIndex ->
+        repeat(6) { rowIndex ->
+            val aspects = List(columnCount) { columnIndex ->
+                if (isSquare) 1f
+                else aspectPattern[(rowIndex * columnCount + columnIndex) % aspectPattern.size]
+            }
+            val totalGap = gap * (columnCount - 1)
+            val rowHeight = ((containerWidth - totalGap) / aspects.sum().coerceAtLeast(0.1f))
+                .coerceIn(72.dp, 220.dp)
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(gap)
             ) {
                 repeat(columnCount) { columnIndex ->
-                    val height = heights[(rowIndex * columnCount + columnIndex) % heights.size]
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(height.dp)
+                            .weight(aspects[columnIndex])
+                            .height(rowHeight)
                             .clip(RoundedCornerShape(7.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+                            .background(placeholderColor)
                     )
                 }
             }
@@ -485,7 +492,11 @@ fun HomeScreen(
                     }
                 }
                 item(key = "home_media_skeleton", contentType = "media_skeleton") {
-                    HomeMediaLoadingSkeleton(columns = pinchGridColumns)
+                    HomeMediaLoadingSkeleton(
+                        columns = pinchGridColumns,
+                        containerWidth = containerWidth,
+                        isSquare = gridStyle == "square"
+                    )
                 }
             } else if (sortedMedia.isEmpty()) {
                 item {
@@ -520,7 +531,7 @@ fun HomeScreen(
                 if (albumTitle == null) {
                     item(key = "home_memories_strip", contentType = "memories_strip") {
                         MemoriesStrip(
-                            media = sortedMedia,
+                            media = media,
                             customPeopleMap = customPeopleMap,
                             customTagsMap = customTagsMap,
                             onOpenMemory = onOpenMemory,

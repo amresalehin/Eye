@@ -75,16 +75,12 @@ object DownloaderSession {
                 if (existing == null) {
                     canonicalMap[key] = item
                     updated = true
-                } else if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
-                    canonicalMap[key] = item.copy(
-                        id = existing.id,
-                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl,
-                        durationMillis = item.durationMillis ?: existing.durationMillis
-                    )
-                    updated = true
-                } else if (existing.durationMillis == null && item.durationMillis != null) {
-                    canonicalMap[key] = existing.copy(durationMillis = item.durationMillis)
-                    updated = true
+                } else {
+                    val merged = MediaClassifier.mergeScrapedMediaItems(existing, item)
+                    if (merged != existing) {
+                        canonicalMap[key] = merged
+                        updated = true
+                    }
                 }
             }
             if (updated) {

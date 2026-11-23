@@ -157,6 +157,7 @@ fun DownloaderSearchMainPage(
     onOpenBrowser: ((String) -> Unit)? = null,
     onViewSavedLibrary: () -> Unit,
     onOpenActivity: () -> Unit = {},
+    onOpenSearchHistory: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
     savedStacks: List<MediaInboxStack> = emptyList(),
     onSelectStack: (MediaInboxStack) -> Unit = {},
@@ -187,12 +188,6 @@ fun DownloaderSearchMainPage(
 
     var urlInput by rememberSaveable { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
-    var showAllRecentSearches by rememberSaveable { mutableStateOf(false) }
-    val visibleRecentSearches = if (showAllRecentSearches) {
-        recentInboxSearches
-    } else {
-        recentInboxSearches.take(5)
-    }
     val scrollState = rememberScrollState()
 
     fun submitSearch(target: String) {
@@ -470,7 +465,7 @@ fun DownloaderSearchMainPage(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(6.dp))
-                visibleRecentSearches.forEachIndexed { index, query ->
+                recentInboxSearches.take(5).forEachIndexed { index, query ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -502,7 +497,7 @@ fun DownloaderSearchMainPage(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (index < visibleRecentSearches.lastIndex) {
+                    if (index < minOf(recentInboxSearches.size, 5) - 1) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -515,12 +510,200 @@ fun DownloaderSearchMainPage(
 
                 if (recentInboxSearches.size > 5) {
                     TextButton(
-                        onClick = { showAllRecentSearches = !showAllRecentSearches },
+                        onClick = onOpenSearchHistory,
                         modifier = Modifier
                             .align(Alignment.End)
                             .testTag("downloader_recent_see_all")
                     ) {
-                        Text(if (showAllRecentSearches) "Show less" else "See all")
+                        Text("See all")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full-screen Inbox search history, presented as a dedicated page alongside Activity.
+ * The list keeps every saved query; selecting one starts that Inbox search again.
+ */
+@Composable
+fun DownloaderSearchHistoryPage(
+    onBack: () -> Unit,
+    onOpenSearch: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val history = remember { MediaInboxSearchHistory(context) }
+    val recentSearches by history.recentSearches.collectAsState(initial = emptyList())
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    val filteredSearches = remember(recentSearches, searchQuery) {
+        if (searchQuery.isBlank()) recentSearches
+        else recentSearches.filter { it.contains(searchQuery.trim(), ignoreCase = true) }
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize().testTag("downloader_search_history_page"),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(40.dp).testTag("search_history_back_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("search_history_search_bar")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search history...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        keyboardController?.hide()
+                                    }),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("search_history_search_input")
+                                )
+                            }
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("search_history_clear_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        if (filteredSearches.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .testTag("search_history_empty_state"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (recentSearches.isEmpty()) "No recent searches" else "No matching searches",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .testTag("search_history_list"),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                itemsIndexed(filteredSearches, key = { index, query -> "$index:$query" }) { index, query ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onOpenSearch(query) }
+                            .heightIn(min = 56.dp)
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                            .testTag("search_history_row_$index"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(9.dp)
+                        )
+                        Text(
+                            text = query,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (index < filteredSearches.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 52.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        )
                     }
                 }
             }

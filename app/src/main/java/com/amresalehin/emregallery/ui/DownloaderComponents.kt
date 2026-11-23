@@ -185,6 +185,9 @@ fun DownloaderSearchMainPage(
         DownloadActivityManager.initialize(context)
         DownloadActivityManager.syncWithInboxRepository()
     }
+    val recentActivities = remember(activities) {
+        activities.sortedByDescending { it.timestampMillis }.take(5)
+    }
 
     var urlInput by rememberSaveable { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
@@ -520,6 +523,158 @@ fun DownloaderSearchMainPage(
                 }
             }
         }
+
+        // Compact preview of the five newest download activities.
+        if (recentActivities.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("downloader_recent_activity")
+            ) {
+                Text(
+                    text = "Recent activity",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(6.dp))
+                recentActivities.forEachIndexed { index, activity ->
+                    InboxRecentActivityRow(
+                        item = activity,
+                        onClick = onOpenActivity,
+                        modifier = Modifier.testTag("downloader_recent_activity_row_$index")
+                    )
+                    if (index < recentActivities.lastIndex) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 52.dp)
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        )
+                    }
+                }
+
+                if (activities.size > 5) {
+                    TextButton(
+                        onClick = onOpenActivity,
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .testTag("downloader_activity_see_all")
+                    ) {
+                        Text("See all")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InboxRecentActivityRow(
+    item: DownloadActivityItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val statusLabel = when (item.status) {
+        DownloadActivityStatus.DOWNLOADING -> "Downloading"
+        DownloadActivityStatus.RETRYING -> "Retrying"
+        DownloadActivityStatus.PAUSED -> "Paused"
+        DownloadActivityStatus.FAILED -> "Failed"
+        DownloadActivityStatus.FINISHED -> "Downloaded"
+    }
+    val statusColor = when (item.status) {
+        DownloadActivityStatus.FAILED -> MaterialTheme.colorScheme.error
+        DownloadActivityStatus.FINISHED -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val mediaIcon = when {
+        item.isAudio -> Icons.Default.MusicNote
+        item.isVideo -> Icons.Default.PlayCircle
+        else -> Icons.Default.Image
+    }
+    val statusIcon = when (item.status) {
+        DownloadActivityStatus.DOWNLOADING -> Icons.Default.Download
+        DownloadActivityStatus.RETRYING -> Icons.Default.Sync
+        DownloadActivityStatus.PAUSED -> Icons.Default.PauseCircle
+        DownloadActivityStatus.FAILED -> Icons.Default.ErrorOutline
+        DownloadActivityStatus.FINISHED -> Icons.Default.CheckCircle
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .heightIn(min = 60.dp)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = mediaIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = item.title.ifBlank { item.sourceDomain ?: item.mediaUrl },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = listOfNotNull(
+                    statusLabel,
+                    item.sourceDomain?.takeIf { it.isNotBlank() },
+                    DownloadActivityManager.formatDate(item.timestampMillis)
+                ).joinToString(" • "),
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (item.isDownloading || item.isRetrying) {
+                LinearProgressIndicator(
+                    progress = {
+                        val progress = if (item.isRetrying) 0.05f else item.progress
+                        if (progress.isNaN() || progress.isInfinite() || progress < 0f) {
+                            0.05f
+                        } else {
+                            progress.coerceIn(0f, 1f)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(CircleShape),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+            }
+        }
+
+        Icon(
+            imageVector = statusIcon,
+            contentDescription = statusLabel,
+            tint = statusColor,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 

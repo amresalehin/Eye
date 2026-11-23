@@ -249,10 +249,34 @@ object GalleryDlEngine {
                 else -> MediaCategory.IMAGES
             }
 
-            val isVideo = obj.optBoolean("isVideo", false)
-            val isAudio = obj.optBoolean("isAudio", false)
-            val isStream = obj.optBoolean("isStream", false)
+            val isStream = obj.optBoolean("isStream", false) || mediaCategory == MediaCategory.STREAMS
+            val isVideo = obj.optBoolean("isVideo", false) ||
+                mediaCategory == MediaCategory.VIDEOS || mediaCategory == MediaCategory.STREAMS
+            val isAudio = obj.optBoolean("isAudio", false) || mediaCategory == MediaCategory.AUDIO
             val itemSource = obj.optString("source", defaultEngine).ifBlank { defaultEngine }
+
+            // Some Reddit extractor entries carry a GIF preview extension/MIME hint even
+            // when the selected payload is a v.redd.it video. Trust the resolved media
+            // category over an image-only extension so the UI and downstream download
+            // metadata cannot label that video as GIF.
+            val rawFormat = obj.optString("format", "IMAGE").trim()
+            val normalizedFormat = if (
+                isVideo && !isStream && rawFormat.uppercase(Locale.ROOT) in setOf(
+                    "GIF", "JPG", "JPEG", "PNG", "WEBP", "AVIF", "BMP", "SVG", "IMAGE"
+                )
+            ) "MP4" else rawFormat
+            val rawMimeType = obj.optString("mimeType", "").trim()
+            val normalizedMimeType = when {
+                isStream && !rawMimeType.contains("mpegurl", ignoreCase = true) &&
+                    !rawMimeType.contains("dash", ignoreCase = true) -> "application/x-mpegURL"
+                isVideo && !isStream && !rawMimeType.startsWith("video/", ignoreCase = true) -> "video/mp4"
+                isAudio && !rawMimeType.startsWith("audio/", ignoreCase = true) -> "audio/mpeg"
+                rawMimeType.isNotBlank() -> rawMimeType
+                isStream -> "application/x-mpegURL"
+                isVideo -> "video/mp4"
+                isAudio -> "audio/mpeg"
+                else -> "image/jpeg"
+            }
 
             val durationMillis = if (obj.has("durationMillis") && !obj.isNull("durationMillis")) {
                 obj.optLong("durationMillis", 0L).takeIf { it > 0L }
@@ -281,8 +305,8 @@ object GalleryDlEngine {
                 isAudio = isAudio,
                 isStream = isStream,
                 category = mediaCategory,
-                format = obj.optString("format", "IMAGE"),
-                mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
+                format = normalizedFormat.ifBlank { if (isVideo && !isStream) "MP4" else "IMAGE" },
+                mimeType = normalizedMimeType,
                 thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
                 source = itemSource,
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },

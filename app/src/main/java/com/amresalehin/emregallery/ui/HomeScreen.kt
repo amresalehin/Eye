@@ -192,24 +192,15 @@ fun HomeScreen(
     var gridData by remember {
         mutableStateOf(HomeGridData())
     }
-    var skeletonRows by remember {
-        mutableStateOf(emptyList<Pair<DayGroup, List<List<MediaItem>>>>())
-    }
-    // Sort, group and chunk once. Publish those exact rows to the skeleton first, then build
-    // the predictive lookup from the same row list before switching to real thumbnail cells.
+    // Build the actual gallery rows directly in the background. While this runs, Home stays
+    // visually empty rather than drawing placeholder cells that are immediately discarded.
     LaunchedEffect(isVisible, media, sortOrder, groupBy, pinchGridColumns) {
         if (!isVisible) return@LaunchedEffect
-        val groupedAndRows = withContext(Dispatchers.Default) {
+        gridData = withContext(Dispatchers.Default) {
             val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
-            grouped to buildHomeGroupedRows(grouped, pinchGridColumns)
+            val groupedRows = buildHomeGroupedRows(grouped, pinchGridColumns)
+            buildHomeGridData(grouped, groupedRows)
         }
-        skeletonRows = groupedAndRows.second
-        // Give Compose a frame to draw the data-aligned skeleton before real media cells replace it.
-        withFrameNanos { }
-        val next = withContext(Dispatchers.Default) {
-            buildHomeGridData(groupedAndRows.first, groupedAndRows.second)
-        }
-        gridData = next
     }
     val sortedMedia = gridData.sortedMedia
     val groupedRows = gridData.groupedRows
@@ -458,15 +449,7 @@ fun HomeScreen(
                     }
                 }
             } else if (sortedMedia.isEmpty() && (loading || media.isNotEmpty())) {
-                item(key = "home_loading_skeleton", contentType = "home_skeleton") {
-                    HomeScreenSkeleton(
-                        gridColumns = pinchGridColumns,
-                        gridStyle = gridStyle,
-                        showMemories = albumTitle == null,
-                        groupedRows = skeletonRows,
-                        containerWidth = containerWidth
-                    )
-                }
+                // No loading skeleton: keep the gallery blank until real media rows are ready.
             } else if (sortedMedia.isEmpty()) {
                 item {
                     Box(

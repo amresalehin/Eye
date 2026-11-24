@@ -2784,7 +2784,6 @@ private fun DownloaderMediaThumbnail(
                 .listener(
                     onError = { _, _ ->
                         if (candidateIndex == requestIndex) {
-                            isLoading = false
                             if (requestIndex < candidates.lastIndex) {
                                 candidateIndex = requestIndex + 1
                             } else {

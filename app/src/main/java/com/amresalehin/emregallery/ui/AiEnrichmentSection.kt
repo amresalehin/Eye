@@ -77,7 +77,7 @@ fun AiEnrichmentSection(
             try {
                 val settings = currentSettings
                 if (!settings.isConfigured) {
-                    message = "Configure a BYOK API or local vision model in Settings → AI & Models."
+                    message = "Configure a BYOK API or external vision server in Settings → AI & Models."
                     return@launch
                 }
                 val result = AiVisionRepository(context.applicationContext).enrich(item, settings)

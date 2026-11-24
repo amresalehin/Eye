@@ -275,27 +275,74 @@ fun MemoriesStrip(
 
 
 /**
- * Lightweight first-frame placeholders that use the same justified-row geometry as the
- * real gallery grid. When a cached/partial media list exists, use its aspect ratios; on a
- * true cold start, use a stable fallback pattern rather than a column-masonry approximation.
+ * Shared geometry for the real mosaic and its loading placeholders.
+ * Keeping these calculations in one place prevents the skeleton from drifting away from
+ * the actual cells as aspect-ratio rules or row constraints evolve.
  */
+internal fun mosaicAspectRatios(
+    items: List<MediaItem>,
+    isSquare: Boolean,
+    rowIndex: Int
+): List<Float> = items.mapIndexed { index, item ->
+    if (isSquare) {
+        1f
+    } else if (item.width > 0 && item.height > 0) {
+        (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
+    } else {
+        when ((item.id.hashCode() + rowIndex + index).mod(4)) {
+            0 -> 0.72f
+            1 -> 0.9f
+            2 -> 1.0f
+            else -> 1.35f
+        }
+    }
+}
+
+internal fun mosaicRowHeight(
+    containerWidth: Dp,
+    itemCount: Int,
+    aspectRatios: List<Float>
+): Dp {
+    val totalGap = 4.dp * (itemCount - 1).coerceAtLeast(0)
+    val aspectSum = aspectRatios.sum().coerceAtLeast(0.1f)
+    return ((containerWidth - totalGap) / aspectSum).coerceIn(72.dp, 220.dp)
+}
+
+@Composable
+fun HomeGroupHeader(group: DayGroup) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = group.dayLabel,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = "\${group.items.size} \${if (group.items.size == 1) "item" else "items"}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 @Composable
 fun HomeScreenSkeleton(
     gridColumns: Int,
     gridStyle: String,
     showMemories: Boolean,
-    media: List<MediaItem>,
+    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>,
     containerWidth: Dp
 ) {
     val columns = gridColumns.coerceIn(1, 6)
-    val placeholderCount = if (media.isEmpty()) {
-        columns * 4
-    } else {
-        media.size.coerceAtMost(columns * 4).coerceAtLeast(1)
-    }
-    val rows = (0 until placeholderCount).toList().chunked(columns)
     val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
     val placeholderShape = RoundedCornerShape(10.dp)
+    val isSquare = gridStyle == "square"
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -318,60 +365,75 @@ fun HomeScreenSkeleton(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                Modifier.width(104.dp).height(18.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(placeholderColor)
-            )
-            Box(
-                Modifier.width(38.dp).height(13.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(placeholderColor.copy(alpha = 0.78f))
-            )
-        }
-
-        rows.forEachIndexed { rowIndex, rowItems ->
-            val aspects = rowItems.mapIndexed { indexInRow, mediaIndex ->
-                val item = media.getOrNull(mediaIndex)
-                when {
-                    gridStyle == "square" -> 1f
-                    item != null && item.width > 0 && item.height > 0 ->
-                        (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
-                    item != null -> when ((item.id.hashCode() + rowIndex + indexInRow).mod(4)) {
-                        0 -> 0.72f
-                        1 -> 0.9f
-                        2 -> 1.0f
-                        else -> 1.35f
-                    }
-                    else -> when ((mediaIndex + rowIndex + indexInRow).mod(4)) {
+        if (groupedRows.isEmpty()) {
+            // Before the first media query returns, no real aspect ratios or group boundaries
+            // exist yet. Use a stable neutral fallback, then switch to exact grouped rows as
+            // soon as the same background preparation used by the real grid publishes them.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    Modifier.width(104.dp).height(18.dp)
+                        .clip(RoundedCornerShape(5.dp)).background(placeholderColor)
+                )
+                Box(
+                    Modifier.width(38.dp).height(13.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(placeholderColor.copy(alpha = 0.78f))
+                )
+            }
+            repeat(4) { rowIndex ->
+                val aspects = List(columns) { index ->
+                    if (isSquare) 1f else when ((rowIndex * columns + index).mod(4)) {
                         0 -> 0.72f
                         1 -> 0.9f
                         2 -> 1.0f
                         else -> 1.35f
                     }
                 }
+                val rowHeight = mosaicRowHeight(containerWidth, aspects.size, aspects)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    aspects.forEach { aspect ->
+                        Box(
+                            modifier = Modifier
+                                .weight(aspect)
+                                .height(rowHeight)
+                                .clip(placeholderShape)
+                                .background(placeholderColor)
+                        )
+                    }
+                }
             }
-            val aspectSum = aspects.sum().coerceAtLeast(0.1f)
-            val totalGap = 4.dp * (rowItems.size - 1)
-            val rowHeight = ((containerWidth - totalGap) / aspectSum).coerceIn(72.dp, 220.dp)
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                aspects.forEach { aspect ->
-                    Box(
-                        modifier = Modifier
-                            .weight(aspect)
-                            .height(rowHeight)
-                            .clip(placeholderShape)
-                            .background(placeholderColor)
-                    )
+        } else {
+            groupedRows.forEach { (group, rowChunks) ->
+                if (group.dayLabel.isNotBlank()) {
+                    HomeGroupHeader(group)
+                }
+                rowChunks.forEachIndexed { rowIndex, rowItems ->
+                    val aspects = remember(rowItems, isSquare, rowIndex) {
+                        mosaicAspectRatios(rowItems, isSquare, rowIndex)
+                    }
+                    val rowHeight = remember(containerWidth, rowItems.size, aspects) {
+                        mosaicRowHeight(containerWidth, rowItems.size, aspects)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        aspects.forEach { aspect ->
+                            Box(
+                                modifier = Modifier
+                                    .weight(aspect)
+                                    .height(rowHeight)
+                                    .clip(placeholderShape)
+                                    .background(placeholderColor)
+                            )
+                        }
+                    }
                 }
             }
         }

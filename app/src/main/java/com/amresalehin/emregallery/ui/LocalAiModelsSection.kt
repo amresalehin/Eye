@@ -63,7 +63,7 @@ fun LocalAiModelsSection() {
     var installedVersion by remember { mutableStateOf(0) }
     var importedFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf(false) }
+    var hasError by remember { mutableStateOf(false) }
 
     fun refresh() {
         downloadState = AiModelStorage.state(context)
@@ -95,11 +95,11 @@ fun LocalAiModelsSection() {
                     withContextIo { AiModelStorage.importFile(context, input, name) }
                 }.onSuccess {
                     notice = "Imported ${it.name}"
-                    error = false
+                    hasError = false
                     refresh()
                 }.onFailure {
                     notice = it.message ?: "Import failed"
-                    error = true
+                    hasError = true
                 }
             }
         }
@@ -142,7 +142,7 @@ fun LocalAiModelsSection() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (activeAsset != null && state.status in listOf("queued", "downloading", "paused", "error")) {
+            if (state != null && activeAsset != null && state.status in listOf("queued", "downloading", "paused", "error")) {
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(activeAsset.modelName, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
                     if (state.totalBytes > 0L) {
@@ -277,7 +277,7 @@ fun LocalAiModelsSection() {
             }
 
             if (notice != null) {
-                Text(notice.orEmpty(), style = MaterialTheme.typography.labelSmall, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                Text(notice.orEmpty(), style = MaterialTheme.typography.labelSmall, color = if (hasError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
             }
             Text(
                 "GGUF vision models may need a matching mmproj file. Model files can be managed here; on-device inference requires a compatible runtime.",

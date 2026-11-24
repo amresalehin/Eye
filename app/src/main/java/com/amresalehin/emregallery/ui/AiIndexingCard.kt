@@ -8,7 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayArrow\nimport androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,45 +56,51 @@ fun AiIndexingCard(
 
     var showClipMenu by remember { mutableStateOf(false) }
 
-    // CLIP semantic embeddings: model download and indexing are represented in this card only.
+    // CLIP semantic embeddings — match the Face Recognition card's header, pill and divider progress.
     Card(
         shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = cardBackground),
         border = cardBorder,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().testTag("clip_indexing_card")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "CLIP",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    )
-                    if (countsReady) {
-                        Text(
-                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(23.dp)
                         )
                     }
                 }
 
+                Spacer(Modifier.width(16.dp))
+
+                Text(
+                    text = "CLIP",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+
                 if (aiState.isClipRunning || aiState.isDownloadingModel) {
                     IconButton(
                         onClick = onStopAiIndexing,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(34.dp).testTag("clip_stop_button")
                     ) {
                         Icon(
                             Icons.Default.Stop,
@@ -112,7 +118,15 @@ fun AiIndexingCard(
                         enabled = !aiState.isRunning,
                         onClick = onDownloadClipModel
                     )
-                } else if (!aiState.isDownloadingModel) {
+                } else if (aiState.isDownloadingModel) {
+                    CompactActionPill(
+                        label = if (aiState.downloadTotalBytes > 0L) {
+                            "${(aiState.downloadBytes * 100L / aiState.downloadTotalBytes).coerceIn(0L, 100L)}%"
+                        } else "Downloading",
+                        enabled = false,
+                        onClick = {}
+                    )
+                } else {
                     Box {
                         CompactProgressPill(
                             isRunning = clipRunning,
@@ -120,8 +134,7 @@ fun AiIndexingCard(
                             isDone = clipDone,
                             percent = clipPct,
                             hasPartial = aiState.processed > 0,
-                            enabled = countsReady && totalPhotos > 0 &&
-                                !aiState.isVlmRunning,
+                            enabled = countsReady && totalPhotos > 0 && !aiState.isVlmRunning,
                             onClick = {
                                 if (clipDone) showClipMenu = true else onToggleClipIndexing()
                             }
@@ -140,38 +153,49 @@ fun AiIndexingCard(
                             )
                         }
                     }
-                } else {
-                    Text(
-                        text = if (aiState.downloadTotalBytes > 0L) {
-                            "${(aiState.downloadBytes * 100L / aiState.downloadTotalBytes).coerceIn(0L, 100L)}%"
-                        } else {
-                            "Downloading"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+            ) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    thickness = 1.dp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val clipBarProgress = if (aiState.isDownloadingModel) {
+                    if (aiState.downloadTotalBytes > 0L) {
+                        (aiState.downloadBytes.toFloat() / aiState.downloadTotalBytes.toFloat()).coerceIn(0f, 1f)
+                    } else 0f
+                } else animClip
+                if (aiState.isDownloadingModel || clipProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { clipBarProgress },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = if (aiState.isDownloadingModel) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                        trackColor = Color.Transparent
                     )
                 }
             }
 
-            if (aiState.isDownloadingModel) {
-                val downloadProgress = if (aiState.downloadTotalBytes > 0L) {
-                    (aiState.downloadBytes.toFloat() / aiState.downloadTotalBytes.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                LinearProgressIndicator(
-                    progress = { downloadProgress },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                )
-            } else {
-                LinearProgressIndicator(
-                    progress = { animClip },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (countsReady) {
+                        "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}"
+                    } else "Preparing index",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
             }
 
@@ -181,7 +205,8 @@ fun AiIndexingCard(
                 Text(
                     text = aiState.error,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 14.dp)
                 )
             }
         }

@@ -185,7 +185,8 @@ fun HomeScreen(
     // Build the Home snapshot in one background pass: sorting, grouping, row chunking and
     // predictive index creation are all derived from the same media version. This avoids
     // publishing an intermediate grouped snapshot and immediately rebuilding it a second time.
-    LaunchedEffect(media, sortOrder, groupBy, pinchGridColumns) {
+    LaunchedEffect(isVisible, media, sortOrder, groupBy, pinchGridColumns) {
+        if (!isVisible) return@LaunchedEffect
         val next = withContext(Dispatchers.Default) {
             val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
             buildHomeGridData(grouped, pinchGridColumns)

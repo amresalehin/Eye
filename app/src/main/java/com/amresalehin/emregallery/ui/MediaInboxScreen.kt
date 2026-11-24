@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -506,8 +507,28 @@ fun MediaInboxScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 if (isDownloading) {
-                                    item(key = "downloading_skeleton_card_item") {
-                                        DownloadingSkeletonCard()
+                                    item(
+                                        key = "downloading_progress",
+                                        span = { GridItemSpan(maxLineSpan) }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text(
+                                                "Downloading media",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                                 itemsIndexed(filteredStacks, key = { _, stack -> stack.id }) { index, stack ->
@@ -2023,165 +2044,6 @@ fun DetailTagChip(label: String) {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             maxLines = 1
         )
-    }
-}
-
-/**
- * Single skeleton card displayed when media is actively downloading.
- */
-@Composable
-fun DownloadingSkeletonCard(
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "download_skeleton_shimmer")
-    val alphaAnim by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "download_skeleton_alpha"
-    )
-
-    ElevatedCard(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("downloading_skeleton_card"),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Upper thumbnail skeleton block with animated shimmer
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(175.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = alphaAnim)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CloudDownload,
-                    contentDescription = "Downloading media",
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = alphaAnim * 0.7f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-
-            // Lower info skeleton bars
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Top longer horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .height(10.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = alphaAnim * 0.5f))
-                )
-                // Bottom shorter horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.5f)
-                        .height(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = alphaAnim * 0.35f))
-                )
-            }
-        }
-    }
-}
-
-/**
- * Skeleton wireframe grid matching Screenshot 1 layout precisely
- */
-@Composable
-fun SkeletonWireframeGrid() {
-    // Skeletons matching the varied heights from Screenshot 1:
-    // Left column: 130dp, 190dp, 130dp, 160dp
-    // Right column: 190dp, 120dp, 170dp, 120dp
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Left Column
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SkeletonCard(heightDp = 130)
-            SkeletonCard(heightDp = 190)
-            SkeletonCard(heightDp = 130)
-            SkeletonCard(heightDp = 160)
-        }
-
-        // Right Column
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SkeletonCard(heightDp = 190)
-            SkeletonCard(heightDp = 120)
-            SkeletonCard(heightDp = 170)
-            SkeletonCard(heightDp = 120)
-        }
-    }
-}
-
-/**
- * Single skeleton card matching Screenshot 1 wireframe
- */
-@Composable
-fun SkeletonCard(heightDp: Int) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Upper thumbnail skeleton block
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(heightDp.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            )
-
-            // Lower info skeleton bars
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Top longer horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .height(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                )
-                // Bottom shorter horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.55f)
-                        .height(7.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                )
-            }
-        }
     }
 }
 

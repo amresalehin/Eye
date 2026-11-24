@@ -130,6 +130,7 @@ fun HomeScreen(
     media: List<MediaItem>,
     loading: Boolean,
     isRefreshing: Boolean = false,
+    mediaLoadError: Boolean = false,
     onRefresh: (() -> Unit)? = null,
     albumTitle: String? = null,
     sortOrder: String = "date_desc",
@@ -424,7 +425,38 @@ fun HomeScreen(
                 }
             }
 
-            if (sortedMedia.isEmpty() && (loading || media.isNotEmpty())) {
+            if (sortedMedia.isEmpty() && mediaLoadError) {
+                item(key = "home_media_load_error", contentType = "home_media_load_error") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp, horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "Couldn't load media",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Your gallery couldn't be read. Check media access and try again.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                        if (onRefresh != null) {
+                            Spacer(Modifier.height(14.dp))
+                            OutlinedButton(onClick = { onRefresh.invoke() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Try again")
+                            }
+                        }
+                    }
+                }
+            } else if (sortedMedia.isEmpty() && (loading || media.isNotEmpty())) {
                 item(key = "home_loading_skeleton", contentType = "home_skeleton") {
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,

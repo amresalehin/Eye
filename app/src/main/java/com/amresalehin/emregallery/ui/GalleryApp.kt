@@ -170,7 +170,10 @@ fun GalleryApp(
             if (userInitiated) {
                 isRefreshing = true
                 mediaLoadError = false
-            } else if (media.isEmpty()) {
+            } else {
+                // Reconcile cached media with MediaStore on every cold launch. Keep existing
+                // rows on screen; this flag only holds the empty state while an empty/stale
+                // snapshot is being checked against the authoritative MediaStore result.
                 loading = true
                 mediaLoadError = false
             }
@@ -209,7 +212,7 @@ fun GalleryApp(
                 } else {
                     // A failed query is not evidence that the library is empty. Keep the last
                     // successful snapshot when available, otherwise show an explicit retry state.
-                    mediaLoadError = media.isEmpty()
+                    mediaLoadError = true
                     if (media.isNotEmpty()) loading = false
                 }
 
@@ -241,6 +244,13 @@ fun GalleryApp(
             if (!cachedMedia.isNullOrEmpty()) {
                 media = cachedMedia
                 loading = false
+                // Warm the first visible rows from the persistent snapshot before the live
+                // MediaStore query finishes. This prepares the shared disk thumbnail files;
+                // Coil then serves its visible AsyncImage requests without bulk RAM preloading.
+                ThumbnailPrewarmManager.start(
+                    context.applicationContext,
+                    cachedMedia.take(36)
+                )
             }
             refreshMedia()
         }

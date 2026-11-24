@@ -158,6 +158,23 @@ object AiSettings {
         )
     }
 
+    /** True only when the selected VLM runtime has the required model files or remote settings. */
+    fun isVlmConfigured(context: Context): Boolean {
+        val config = load(context)
+        return when (config.provider) {
+            AiProviderType.ON_DEVICE_VLM -> {
+                if (config.localVlmEngineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
+                    LocalVlmModelManager.resolveInstalledGgufPair(context) != null
+                } else {
+                    LocalVlmModelManager.isInstalled(context)
+                }
+            }
+            AiProviderType.OLLAMA -> config.isRemoteConfigured &&
+                config.baseUrl.trim() != AiProviderType.OLLAMA.defaultBaseUrl
+            AiProviderType.GEMINI, AiProviderType.OPENAI_COMPATIBLE -> config.isRemoteConfigured
+        }
+    }
+
     fun save(context: Context, config: AiConfig) {
         val p = prefs(context)
         val previousCloud = AiProviderType.fromId(p.getString(KEY_CLOUD_PROVIDER, AiProviderType.OLLAMA.id))

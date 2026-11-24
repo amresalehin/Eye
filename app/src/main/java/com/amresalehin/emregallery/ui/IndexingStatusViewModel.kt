@@ -191,7 +191,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val aiConfig = AiSettings.load(context)
                 val clipInstalled = ClipOnnxModelManager.isInstalled(context)
                 val vlmLabel = if (aiConfig.provider == AiProviderType.ON_DEVICE_VLM) {
-                    LocalVlmModelManager.installedModelSummary(context) ?: "no .task model imported"
+                    if (aiConfig.localVlmEngineId == com.amresalehin.emregallery.ai.LocalVlmRegistry.ENGINE_LLAMACPP) {
+                        LocalVlmModelManager.installedGgufSummary(context) ?: "no GGUF + mmproj imported"
+                    } else {
+                        LocalVlmModelManager.installedModelSummary(context) ?: "no .task model imported"
+                    }
                 } else {
                     "${aiConfig.provider.label} (${aiConfig.modelName})"
                 }

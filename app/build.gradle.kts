@@ -54,6 +54,17 @@ android {
     }
     buildFeatures { compose = true }
 
+    // Opt-in native llama.cpp + libmtmd build for on-device GGUF + mmproj VLM inference.
+    // Pass `-PbuildLlamaNative=true` (requires Android NDK + CMake 3.22+) to bundle libemre_llama_vlm.so.
+    if (project.findProperty("buildLlamaNative")?.toString()?.toBoolean() == true) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
+    }
+
     // Robolectric downloads Android framework jars at test runtime. Use the
     // Google-hosted Maven Central mirror instead of repo1.maven.org, which
     // is intermittently unreachable from hosted CI runners.

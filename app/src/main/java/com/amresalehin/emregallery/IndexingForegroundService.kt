@@ -107,6 +107,7 @@ class IndexingForegroundService : Service() {
             ACTION_START_VLM -> "VLM descriptions & tagging"
             ACTION_DOWNLOAD_AI_MODEL -> "Downloading CLIP AI model"
             ACTION_DOWNLOAD_VLM_MODEL -> "Downloading VLM model"
+            ACTION_DOWNLOAD_GGUF_VLM_PAIR -> "Downloading GGUF + mmproj VLM"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -142,6 +143,7 @@ class IndexingForegroundService : Service() {
                         force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
                     )
                     ACTION_DOWNLOAD_VLM_MODEL -> downloadVlmModel()
+                    ACTION_DOWNLOAD_GGUF_VLM_PAIR -> downloadGgufVlmPair()
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
@@ -646,6 +648,39 @@ class IndexingForegroundService : Service() {
         }
     }
 
+    private suspend fun downloadGgufVlmPair() {
+        val config = AiSettings.load(this)
+        updateState(
+            task = TASK_AI_MODEL,
+            running = true,
+            paused = false,
+            bytes = 0L,
+            bytesTotal = 0L,
+            stage = "downloading",
+            error = null
+        )
+        postProgress("Downloading GGUF + mmproj", "Starting download…", 0, 100)
+        LocalVlmModelManager.downloadGgufPair(
+            context = this,
+            modelUrl = config.ggufModelDownloadUrl,
+            mmprojUrl = config.ggufMmprojDownloadUrl,
+            bearerToken = config.hfToken,
+            onProgress = { received, total, stage ->
+                updateState(
+                    task = TASK_AI_MODEL,
+                    running = true,
+                    bytes = received,
+                    bytesTotal = total,
+                    stage = stage
+                )
+                val pct = if (total > 0L) ((received * 100L) / total).toInt().coerceIn(0, 100) else 0
+                val label = if (stage == "downloading_mmproj") "mmproj.gguf" else "model.gguf"
+                postProgress("Downloading GGUF + mmproj", "$label ($pct%)", pct, 100)
+            },
+            awaitIfResumed = { awaitResume() }
+        )
+    }
+
     private suspend fun downloadVlmModel() {
         val config = AiSettings.load(this)
         updateState(
@@ -757,6 +792,7 @@ class IndexingForegroundService : Service() {
         private const val ACTION_START_VLM = "com.amresalehin.emregallery.indexing.START_VLM"
         private const val ACTION_DOWNLOAD_AI_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_AI_MODEL"
         private const val ACTION_DOWNLOAD_VLM_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_VLM_MODEL"
+        private const val ACTION_DOWNLOAD_GGUF_VLM_PAIR = "com.amresalehin.emregallery.indexing.DOWNLOAD_GGUF_VLM_PAIR"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
@@ -847,6 +883,9 @@ class IndexingForegroundService : Service() {
 
         fun downloadVlmModel(context: Context) =
             command(context, ACTION_DOWNLOAD_VLM_MODEL)
+
+        fun downloadGgufVlmPair(context: Context) =
+            command(context, ACTION_DOWNLOAD_GGUF_VLM_PAIR)
 
         fun downloadModel(
             context: Context,

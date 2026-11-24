@@ -46,32 +46,80 @@ fun AiSettingsScreen(
     var savedBanner by remember { mutableStateOf(false) }
     var clipInstalled by remember { mutableStateOf(ClipOnnxModelManager.isInstalled(context)) }
     var vlmModelSummary by remember { mutableStateOf(LocalVlmModelManager.installedModelSummary(context)) }
+    var ggufSummary by remember { mutableStateOf(LocalVlmModelManager.installedGgufSummary(context)) }
     var importingVlm by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf<String?>(null) }
 
-    val pickVlmLauncher = rememberLauncherForActivityResult(
+    val pickMediaPipeLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             importingVlm = true
-            importStatus = "Importing VLM model into app storage…"
+            importStatus = "Importing MediaPipe .task model…"
             scope.launch {
                 val res = LocalVlmModelManager.importModelFromUri(context, uri) { copied, total ->
                     val mb = copied / (1024 * 1024)
                     importStatus = if (total > 0L) {
-                        val pct = ((copied * 100L) / total).toInt().coerceIn(0, 100)
-                        "Importing model ($pct% · ${mb} MB)…"
-                    } else {
-                        "Importing model (${mb} MB)…"
-                    }
+                        "Importing (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
+                    } else "Importing (${mb} MB)…"
                 }
                 importingVlm = false
                 res.onSuccess {
                     config = AiSettings.load(context)
                     vlmModelSummary = LocalVlmModelManager.installedModelSummary(context)
-                    importStatus = "Model installed: ${vlmModelSummary.orEmpty()}"
+                    importStatus = "Installed: ${vlmModelSummary.orEmpty()}"
                 }.onFailure { err ->
                     importStatus = err.localizedMessage ?: "Import failed"
+                }
+            }
+        }
+    }
+
+    val pickGgufModelLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importingVlm = true
+            importStatus = "Importing GGUF language model…"
+            scope.launch {
+                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = false) { copied, total ->
+                    val mb = copied / (1024 * 1024)
+                    importStatus = if (total > 0L) {
+                        "Importing GGUF (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
+                    } else "Importing GGUF (${mb} MB)…"
+                }
+                importingVlm = false
+                res.onSuccess {
+                    config = AiSettings.load(context)
+                    ggufSummary = LocalVlmModelManager.installedGgufSummary(context)
+                    importStatus = "GGUF model imported."
+                }.onFailure { err ->
+                    importStatus = err.localizedMessage ?: "GGUF import failed"
+                }
+            }
+        }
+    }
+
+    val pickGgufMmprojLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importingVlm = true
+            importStatus = "Importing mmproj.gguf vision projector…"
+            scope.launch {
+                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = true) { copied, total ->
+                    val mb = copied / (1024 * 1024)
+                    importStatus = if (total > 0L) {
+                        "Importing mmproj (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
+                    } else "Importing mmproj (${mb} MB)…"
+                }
+                importingVlm = false
+                res.onSuccess {
+                    config = AiSettings.load(context)
+                    ggufSummary = LocalVlmModelManager.installedGgufSummary(context)
+                    importStatus = "mmproj.gguf imported."
+                }.onFailure { err ->
+                    importStatus = err.localizedMessage ?: "mmproj import failed"
                 }
             }
         }
@@ -249,7 +297,7 @@ fun AiSettingsScreen(
                                     )
                                     Text(
                                         when (provider) {
-                                            AiProviderType.ON_DEVICE_VLM -> "100% offline on-phone VLM (Gemma 3n / Gemma 4 .task via MediaPipe; pluggable for llama.cpp)."
+                                            AiProviderType.ON_DEVICE_VLM -> "100% offline on-phone VLM via llama.cpp (GGUF + mmproj) or MediaPipe (.task)."
                                             AiProviderType.OLLAMA -> "Self-hosted vision models on your PC/server (e.g. qwen2.5vl:3b, llava)."
                                             AiProviderType.GEMINI -> "Google Gemini OpenAI-compatible vision API."
                                             AiProviderType.OPENAI_COMPATIBLE -> "OpenAI, OpenRouter, LM Studio, or vLLM."
@@ -265,17 +313,7 @@ fun AiSettingsScreen(
                     if (config.provider == AiProviderType.ON_DEVICE_VLM) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
-                        Text(
-                            text = if (vlmModelSummary != null) {
-                                "Installed VLM: $vlmModelSummary"
-                            } else {
-                                "No on-device VLM installed yet. Import a MediaPipe/LiteRT-LM multimodal model (e.g. gemma-3n-E2B-it-int4.task) or download by URL."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (vlmModelSummary != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        // Pluggable Local VLM Engine selector
+                        // On-device runtime selector: llama.cpp (GGUF + mmproj) vs MediaPipe (.task)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -289,125 +327,249 @@ fun AiSettingsScreen(
                                     },
                                     label = {
                                         Text(
-                                            if (engine.engineId == LocalVlmRegistry.ENGINE_MEDIAPIPE) "MediaPipe" else "llama.cpp (stub)"
+                                            if (engine.engineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
+                                                "llama.cpp (GGUF + mmproj)"
+                                            } else {
+                                                "MediaPipe (.task)"
+                                            }
                                         )
                                     }
                                 )
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Prefer GPU acceleration", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "Automatically falls back to CPU if GPU delegate is unavailable.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = config.vlmUseGpu,
-                                onCheckedChange = {
-                                    config = config.copy(vlmUseGpu = it)
-                                    AiSettings.save(context, config)
+                        if (config.localVlmEngineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
+                            Text(
+                                text = if (LlamaCppNativeBridge.isNativeLibraryLoaded) {
+                                    "Native engine: libemre_llama_vlm.so loaded (llama.cpp + libmtmd)"
+                                } else {
+                                    "Native libemre_llama_vlm.so not bundled in this APK — build with `-PbuildLlamaNative=true` (NDK + CMake) to enable."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (LlamaCppNativeBridge.isNativeLibraryLoaded) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
                                 }
                             )
-                        }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Button(
-                                onClick = { pickVlmLauncher.launch(arrayOf("*/*")) },
-                                enabled = !importingVlm,
-                                modifier = Modifier.weight(1f)
+                            Text(
+                                text = ggufSummary?.let { "Installed GGUF Pair: $it" }
+                                    ?: "No GGUF + mmproj.gguf pair installed yet. Import both files or download from Hugging Face (e.g. LFM2.5-VL-450M, SmolVLM2-500M, Qwen3-VL-2B).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (LocalVlmModelManager.resolveInstalledGgufPair(context) != null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Import .task")
-                            }
-
-                            if (vlmModelSummary != null) {
-                                OutlinedButton(
-                                    onClick = {
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) { LocalVlmModelManager.deleteInstalledModels(context) }
-                                            vlmModelSummary = null
-                                            importStatus = "Removed on-device VLM model."
-                                        }
-                                    },
+                                Button(
+                                    onClick = { pickGgufModelLauncher.launch(arrayOf("*/*")) },
                                     enabled = !importingVlm,
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Remove")
+                                    Text("Import Model .gguf")
+                                }
+                                Button(
+                                    onClick = { pickGgufMmprojLauncher.launch(arrayOf("*/*")) },
+                                    enabled = !importingVlm,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Import mmproj .gguf")
                                 }
                             }
-                        }
 
-                        OutlinedTextField(
-                            value = config.localVlmDownloadUrl,
-                            onValueChange = {
-                                config = config.copy(localVlmDownloadUrl = it)
-                                savedBanner = false
-                            },
-                            label = { Text("Direct Model URL (.task / .litertlm)") },
-                            placeholder = { Text("https://huggingface.co/.../gemma-3n-E2B-it-int4.task") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                            OutlinedTextField(
+                                value = config.ggufModelDownloadUrl,
+                                onValueChange = {
+                                    config = config.copy(ggufModelDownloadUrl = it)
+                                    savedBanner = false
+                                },
+                                label = { Text("GGUF Model URL (.gguf)") },
+                                placeholder = { Text("https://huggingface.co/.../model-Q4_K_M.gguf") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
 
-                        OutlinedTextField(
-                            value = config.hfToken,
-                            onValueChange = {
-                                config = config.copy(hfToken = it)
-                                savedBanner = false
-                            },
-                            label = { Text("HuggingFace Token (optional for gated Gemma repos)") },
-                            singleLine = true,
-                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                            trailingIcon = {
-                                IconButton(onClick = { showApiKey = !showApiKey }) {
-                                    Icon(
-                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "Toggle token visibility"
+                            OutlinedTextField(
+                                value = config.ggufMmprojDownloadUrl,
+                                onValueChange = {
+                                    config = config.copy(ggufMmprojDownloadUrl = it)
+                                    savedBanner = false
+                                },
+                                label = { Text("Vision Projector URL (mmproj-*.gguf)") },
+                                placeholder = { Text("https://huggingface.co/.../mmproj-model-Q8_0.gguf") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = config.hfToken,
+                                onValueChange = {
+                                    config = config.copy(hfToken = it)
+                                    savedBanner = false
+                                },
+                                label = { Text("HuggingFace Token (optional for gated repos)") },
+                                singleLine = true,
+                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                                        Icon(
+                                            if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = "Toggle token visibility"
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        AiSettings.save(context, config)
+                                        IndexingForegroundService.downloadGgufVlmPair(context)
+                                        onOpenIndexingStatus()
+                                    },
+                                    enabled = config.ggufModelDownloadUrl.isNotBlank() &&
+                                        config.ggufMmprojDownloadUrl.isNotBlank() &&
+                                        !importingVlm,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Download Pair")
+                                }
+                                Button(
+                                    onClick = {
+                                        AiSettings.save(context, config)
+                                        savedBanner = true
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Save")
+                                }
+                            }
+
+                            if (ggufSummary != null) {
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) { LocalVlmModelManager.deleteGgufModels(context) }
+                                            ggufSummary = null
+                                            importStatus = "Removed GGUF + mmproj models."
+                                        }
+                                    },
+                                    enabled = !importingVlm
+                                ) {
+                                    Text("Remove GGUF Pair")
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = if (vlmModelSummary != null) {
+                                    "Installed MediaPipe VLM: $vlmModelSummary"
+                                } else {
+                                    "No MediaPipe .task model installed yet. Import a Gemma 3n / Gemma 4 .task file or download by URL."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (vlmModelSummary != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Prefer GPU acceleration", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "Automatically falls back to CPU if GPU delegate is unavailable.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    AiSettings.save(context, config)
-                                    IndexingForegroundService.downloadVlmModel(context)
-                                    onOpenIndexingStatus()
-                                },
-                                enabled = config.localVlmDownloadUrl.isNotBlank() && !importingVlm,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Download URL")
+                                Switch(
+                                    checked = config.vlmUseGpu,
+                                    onCheckedChange = {
+                                        config = config.copy(vlmUseGpu = it)
+                                        AiSettings.save(context, config)
+                                    }
+                                )
                             }
 
-                            Button(
-                                onClick = {
-                                    AiSettings.save(context, config)
-                                    savedBanner = true
-                                },
-                                modifier = Modifier.weight(1f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Save Settings")
+                                Button(
+                                    onClick = { pickMediaPipeLauncher.launch(arrayOf("*/*")) },
+                                    enabled = !importingVlm,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Import .task")
+                                }
+                                if (vlmModelSummary != null) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { LocalVlmModelManager.deleteInstalledModels(context) }
+                                                vlmModelSummary = null
+                                                importStatus = "Removed MediaPipe VLM model."
+                                            }
+                                        },
+                                        enabled = !importingVlm,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Remove")
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = config.localVlmDownloadUrl,
+                                onValueChange = {
+                                    config = config.copy(localVlmDownloadUrl = it)
+                                    savedBanner = false
+                                },
+                                label = { Text("Direct Model URL (.task / .litertlm)") },
+                                placeholder = { Text("https://huggingface.co/.../gemma-3n-E2B-it-int4.task") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        AiSettings.save(context, config)
+                                        IndexingForegroundService.downloadVlmModel(context)
+                                        onOpenIndexingStatus()
+                                    },
+                                    enabled = config.localVlmDownloadUrl.isNotBlank() && !importingVlm,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Download URL")
+                                }
+                                Button(
+                                    onClick = {
+                                        AiSettings.save(context, config)
+                                        savedBanner = true
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Save")
+                                }
                             }
                         }
 

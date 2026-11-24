@@ -11,9 +11,9 @@ enum class AiProviderType(
 ) {
     ON_DEVICE_VLM(
         id = "on_device_vlm",
-        label = "On-Device VLM (MediaPipe / LiteRT-LM)",
+        label = "On-Device VLM (llama.cpp GGUF / MediaPipe)",
         defaultBaseUrl = "",
-        defaultModel = "gemma-3n-E2B",
+        defaultModel = "gguf-vlm",
         requiresApiKey = false
     ),
     OLLAMA(
@@ -47,14 +47,23 @@ enum class AiProviderType(
 
 data class AiConfig(
     val provider: AiProviderType = AiProviderType.ON_DEVICE_VLM,
-    val localVlmEngineId: String = LocalVlmRegistry.ENGINE_MEDIAPIPE,
+    val localVlmEngineId: String = LocalVlmRegistry.ENGINE_LLAMACPP,
+    // llama.cpp GGUF + mmproj settings
+    val ggufModelPath: String = "",
+    val ggufMmprojPath: String = "",
+    val ggufModelDownloadUrl: String = "",
+    val ggufMmprojDownloadUrl: String = "",
+    val ggufThreads: Int = 4,
+    val ggufContextLength: Int = 2048,
+    // MediaPipe / LiteRT-LM .task settings
     val localVlmModelPath: String = "",
     val localVlmDownloadUrl: String = "",
-    val hfToken: String = "",
     val vlmUseGpu: Boolean = true,
+    // Shared auth & remote Vision API settings
+    val hfToken: String = "",
     val baseUrl: String = "",
     val apiKey: String = "",
-    val modelName: String = "gemma-3n-E2B",
+    val modelName: String = "gguf-vlm",
     val includeOcrContext: Boolean = true,
     val excludeLockedVaultFromCloud: Boolean = true,
     val batchUseCloudApi: Boolean = true
@@ -71,12 +80,18 @@ data class AiConfig(
 /**
  * SharedPreferences-backed configuration for Emre Gallery's dual-system AI architecture:
  * - System 1: CLIP ONNX semantic embeddings + dominant colors
- * - System 2: Real VLM (on-device MediaPipe/LiteRT-LM or optional Ollama/Cloud Vision API)
+ * - System 2: Real VLM (on-device llama.cpp GGUF+mmproj, MediaPipe .task, or optional Ollama/Cloud Vision API)
  */
 object AiSettings {
     private const val PREFS_NAME = "emre_ai_settings"
     private const val KEY_PROVIDER = "provider"
     private const val KEY_LOCAL_VLM_ENGINE = "local_vlm_engine"
+    private const val KEY_GGUF_MODEL_PATH = "gguf_model_path"
+    private const val KEY_GGUF_MMPROJ_PATH = "gguf_mmproj_path"
+    private const val KEY_GGUF_MODEL_URL = "gguf_model_download_url"
+    private const val KEY_GGUF_MMPROJ_URL = "gguf_mmproj_download_url"
+    private const val KEY_GGUF_THREADS = "gguf_threads"
+    private const val KEY_GGUF_CTX = "gguf_context_length"
     private const val KEY_LOCAL_VLM_PATH = "local_vlm_model_path"
     private const val KEY_LOCAL_VLM_URL = "local_vlm_download_url"
     private const val KEY_HF_TOKEN = "hf_token"
@@ -96,8 +111,14 @@ object AiSettings {
         val provider = AiProviderType.fromId(p.getString(KEY_PROVIDER, AiProviderType.ON_DEVICE_VLM.id))
         return AiConfig(
             provider = provider,
-            localVlmEngineId = p.getString(KEY_LOCAL_VLM_ENGINE, LocalVlmRegistry.ENGINE_MEDIAPIPE)
-                ?: LocalVlmRegistry.ENGINE_MEDIAPIPE,
+            localVlmEngineId = p.getString(KEY_LOCAL_VLM_ENGINE, LocalVlmRegistry.ENGINE_LLAMACPP)
+                ?: LocalVlmRegistry.ENGINE_LLAMACPP,
+            ggufModelPath = p.getString(KEY_GGUF_MODEL_PATH, "") ?: "",
+            ggufMmprojPath = p.getString(KEY_GGUF_MMPROJ_PATH, "") ?: "",
+            ggufModelDownloadUrl = p.getString(KEY_GGUF_MODEL_URL, "") ?: "",
+            ggufMmprojDownloadUrl = p.getString(KEY_GGUF_MMPROJ_URL, "") ?: "",
+            ggufThreads = p.getInt(KEY_GGUF_THREADS, 4).coerceIn(1, 8),
+            ggufContextLength = p.getInt(KEY_GGUF_CTX, 2048).coerceIn(1024, 8192),
             localVlmModelPath = p.getString(KEY_LOCAL_VLM_PATH, "") ?: "",
             localVlmDownloadUrl = p.getString(KEY_LOCAL_VLM_URL, "") ?: "",
             hfToken = p.getString(KEY_HF_TOKEN, "") ?: "",
@@ -115,6 +136,12 @@ object AiSettings {
         prefs(context).edit()
             .putString(KEY_PROVIDER, config.provider.id)
             .putString(KEY_LOCAL_VLM_ENGINE, config.localVlmEngineId)
+            .putString(KEY_GGUF_MODEL_PATH, config.ggufModelPath.trim())
+            .putString(KEY_GGUF_MMPROJ_PATH, config.ggufMmprojPath.trim())
+            .putString(KEY_GGUF_MODEL_URL, config.ggufModelDownloadUrl.trim())
+            .putString(KEY_GGUF_MMPROJ_URL, config.ggufMmprojDownloadUrl.trim())
+            .putInt(KEY_GGUF_THREADS, config.ggufThreads.coerceIn(1, 8))
+            .putInt(KEY_GGUF_CTX, config.ggufContextLength.coerceIn(1024, 8192))
             .putString(KEY_LOCAL_VLM_PATH, config.localVlmModelPath.trim())
             .putString(KEY_LOCAL_VLM_URL, config.localVlmDownloadUrl.trim())
             .putString(KEY_HF_TOKEN, config.hfToken.trim())

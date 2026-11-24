@@ -119,6 +119,13 @@ fun AiSettingsScreen(
     val currentSettings = AiSettings(providerMode, baseUrl, model, apiKey)
     val configured = currentSettings.isConfigured
     val localProvider = providerMode.isLocal
+    val localSetupInstructions = when (providerMode) {
+        AiProviderMode.MNN_LOCAL ->
+            "MNN: start a vision-capable model server with mnncli serve <model-name> --host 127.0.0.1 --port 8000. Eye uses its OpenAI-compatible /v1/models and /v1/chat/completions routes."
+        AiProviderMode.LLAMA_CPP_LOCAL ->
+            "llama.cpp: start llama-server with a multimodal GGUF and its matching projector, for example llama-server -m model.gguf --mmproj mmproj.gguf --host 127.0.0.1 --port 8080. Eye sends base64 JPEG frames to its OpenAI-compatible /v1 endpoint."
+        AiProviderMode.OPENAI_COMPATIBLE -> ""
+    }
 
     fun saveSettings() {
         if (!initialized || busy) return
@@ -264,7 +271,7 @@ fun AiSettingsScreen(
                                 visualTransformation = PasswordVisualTransformation()
                             )
                             Text(
-                                "Start the MNN Chat API service or llama.cpp server on this device. Eye connects to its local OpenAI-compatible /v1 endpoint; the vision model must be loaded by that runtime. For llama.cpp, use a multimodal GGUF model and its matching mmproj.",
+                                localSetupInstructions + " The selected model must support image input. Start the server before testing the connection.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

@@ -40,7 +40,7 @@ import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectAsState
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 

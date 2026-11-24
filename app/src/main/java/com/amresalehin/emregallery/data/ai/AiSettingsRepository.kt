@@ -31,8 +31,8 @@ enum class AiProviderMode(
     MNN_LOCAL(
         "mnn_local",
         "MNN local",
-        "http://127.0.0.1:8080/v1",
-        "Connect to the MNN Chat local API service running on this device."
+        "http://127.0.0.1:8000/v1",
+        "Connect to the MNN OpenAI-compatible local vision server (default port 8000)."
     ),
     LLAMA_CPP_LOCAL(
         "llama_cpp_local",

@@ -157,6 +157,22 @@ fun AiSettingsScreen(
         }
     }
 
+    fun startAiIndexing(rescanAll: Boolean) {
+        if (!initialized || !configured || busy || indexingRunning) return
+        scope.launch {
+            busy = true
+            try {
+                settingsRepository.save(currentSettings)
+                IndexingForegroundService.startAiIndexing(context, rescanAll = rescanAll)
+            } catch (error: Exception) {
+                message = error.localizedMessage ?: "Could not start AI indexing"
+                messageIsError = true
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun discoverModels() {
         if (!canConnect) return
         scope.launch {
@@ -493,7 +509,7 @@ fun AiSettingsScreen(
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
-                                    onClick = { IndexingForegroundService.startAiIndexing(context, rescanAll = false) },
+                                    onClick = { startAiIndexing(rescanAll = false) },
                                     enabled = initialized && configured && !busy
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = null)
@@ -501,7 +517,7 @@ fun AiSettingsScreen(
                                     Text("Index missing")
                                 }
                                 OutlinedButton(
-                                    onClick = { IndexingForegroundService.startAiIndexing(context, rescanAll = true) },
+                                    onClick = { startAiIndexing(rescanAll = true) },
                                     enabled = initialized && configured && !busy
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = null)

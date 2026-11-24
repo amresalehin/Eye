@@ -75,3 +75,6 @@
 # Media3 ExoPlayer
 -keep class androidx.media3.** { *; }
 -dontwarn androidx.media3.**
+
+# JNI entry points are resolved by fixed native symbol names.
+-keep class com.amresalehin.emregallery.data.ai.NativeVisionEngine { *; }

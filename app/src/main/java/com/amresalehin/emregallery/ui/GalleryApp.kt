@@ -1299,7 +1299,7 @@ fun GalleryApp(
                         onSettings = { label ->
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
-                                "AI & Semantic Search" -> navigateTo(Destination.AI_SETTINGS)
+                                "AI" -> navigateTo(Destination.AI_SETTINGS)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }

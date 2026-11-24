@@ -1,18 +1,24 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.NumberFormat
+import kotlin.math.roundToInt
 
 @Composable
 fun AiIndexingCard(
@@ -30,233 +36,346 @@ fun AiIndexingCard(
     onOpenAiSettings: () -> Unit,
     onClearAiIndex: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = cardBackground,
+    val clipProgress = if (totalPhotos > 0) (aiState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
+    val vlmProgress = if (totalPhotos > 0) (aiState.richCaptionedCount.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
+    val animClip by animateFloatAsState(targetValue = clipProgress, label = "clip_progress")
+    val animVlm by animateFloatAsState(targetValue = vlmProgress, label = "vlm_progress")
+    val clipPct = (clipProgress * 100f).roundToInt()
+    val vlmPct = (vlmProgress * 100f).roundToInt()
+
+    val clipRunning = aiState.isClipRunning && !aiState.isPaused
+    val clipPaused = aiState.isClipRunning && aiState.isPaused
+    val clipDone = totalPhotos > 0 && aiState.processed >= totalPhotos
+
+    val vlmRunning = aiState.isVlmRunning && !aiState.isPaused
+    val vlmPaused = aiState.isVlmRunning && aiState.isPaused
+    val vlmDone = totalPhotos > 0 && aiState.richCaptionedCount >= totalPhotos
+
+    var showClipMenu by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBackground),
         border = cardBorder,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Row 1: CLIP
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            "Dual AI: CLIP Search + VLM",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "CLIP",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
+                    )
+                    if (countsReady) {
                         Text(
-                            "CLIP: ${if (aiState.isClipInstalled) "ONNX ready" else "not downloaded"} · " +
-                                "VLM: ${aiState.vlmStatusLabel}",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                IconButton(onClick = onOpenAiSettings) {
-                    Icon(
-                        Icons.Default.Tune,
-                        contentDescription = "AI settings",
-                        tint = MaterialTheme.colorScheme.primary
+
+                if (aiState.isClipRunning) {
+                    IconButton(onClick = onStopAiIndexing, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = "Stop",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+
+                if (!aiState.isClipInstalled && !aiState.isDownloadingModel) {
+                    CompactActionPill(
+                        label = "Get CLIP",
+                        enabled = !aiState.isRunning,
+                        onClick = onDownloadClipModel
+                    )
+                } else {
+                    Box {
+                        CompactProgressPill(
+                            isRunning = clipRunning,
+                            isPaused = clipPaused,
+                            isDone = clipDone,
+                            percent = clipPct,
+                            hasPartial = aiState.processed > 0,
+                            enabled = countsReady && totalPhotos > 0 && !aiState.isVlmRunning && !aiState.isDownloadingModel,
+                            onClick = {
+                                if (clipDone) showClipMenu = true else onToggleClipIndexing()
+                            }
+                        )
+                        DropdownMenu(expanded = showClipMenu, onDismissRequest = { showClipMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Re-index") },
+                                onClick = { showClipMenu = false; onReindexClip() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Clear index") },
+                                onClick = { showClipMenu = false; onClearAiIndex() }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Divider with integrated CLIP progress
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+            ) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    thickness = 1.dp
+                )
+                if (clipProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { animClip },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.Transparent
                     )
                 }
             }
 
-            if (aiState.isDownloadingModel) {
-                val frac = if (aiState.downloadTotalBytes > 0L) {
-                    (aiState.downloadBytes.toFloat() / aiState.downloadTotalBytes.toFloat()).coerceIn(0f, 1f)
-                } else 0f
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Row 2: VLM
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Downloading AI model (${(frac * 100).toInt()}%)…",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium
-                    )
-                    LinearProgressIndicator(
-                        progress = { frac },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            } else {
-                // System 1 Progress: CLIP Semantic Index
-                val clipProgress = if (totalPhotos > 0) {
-                    (aiState.processed.toFloat() / totalPhotos.toFloat()).coerceIn(0f, 1f)
-                } else 0f
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            if (countsReady) {
-                                "1. CLIP Semantic: ${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}"
-                            } else "Calculating…",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
+                        text = "VLM",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        if (aiState.isClipRunning && aiState.itemsPerMinute > 0) {
-                            Text(
-                                "${aiState.itemsPerMinute}/min",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    LinearProgressIndicator(
-                        progress = { clipProgress },
-                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = if (countsReady) {
+                            "${numberFormat.format(aiState.richCaptionedCount)} / ${numberFormat.format(totalPhotos)} · ${aiState.vlmStatusLabel}"
+                        } else aiState.vlmStatusLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // System 2 Progress: VLM Descriptions & Tags
-                val vlmProgress = if (totalPhotos > 0) {
-                    (aiState.richCaptionedCount.toFloat() / totalPhotos.toFloat()).coerceIn(0f, 1f)
-                } else 0f
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            if (countsReady) {
-                                "2. VLM Descriptions & Tags: ${numberFormat.format(aiState.richCaptionedCount)} / ${numberFormat.format(totalPhotos)}"
-                            } else "Calculating…",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
+                Spacer(Modifier.width(8.dp))
+
+                if (aiState.isVlmRunning) {
+                    IconButton(onClick = onStopAiIndexing, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = "Stop",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
                         )
-                        if (aiState.isVlmRunning && aiState.itemsPerMinute > 0) {
-                            Text(
-                                "${aiState.itemsPerMinute}/min",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     }
-                    LinearProgressIndicator(
-                        progress = { vlmProgress },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        "${numberFormat.format(aiState.clipEmbeddedCount)} CLIP vectors · ${numberFormat.format(aiState.distinctTagCount)} VLM tags",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(Modifier.width(6.dp))
                 }
+
+                CompactActionPill(
+                    label = "Config",
+                    enabled = true,
+                    onClick = onOpenAiSettings
+                )
+                Spacer(Modifier.width(6.dp))
+                CompactProgressPill(
+                    isRunning = vlmRunning,
+                    isPaused = vlmPaused,
+                    isDone = vlmDone,
+                    percent = vlmPct,
+                    hasPartial = aiState.richCaptionedCount > 0,
+                    enabled = countsReady && totalPhotos > 0 && !aiState.isClipRunning && !aiState.isDownloadingModel,
+                    onClick = onToggleVlmIndexing
+                )
+            }
+
+            // Bottom integrated VLM or Download progress bar
+            if (aiState.isDownloadingModel) {
+                val dlFrac = if (aiState.downloadTotalBytes > 0L) {
+                    (aiState.downloadBytes.toFloat() / aiState.downloadTotalBytes.toFloat()).coerceIn(0f, 1f)
+                } else 0f
+                LinearProgressIndicator(
+                    progress = { dlFrac },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .height(2.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                )
+                Spacer(Modifier.height(10.dp))
+            } else if (vlmProgress > 0f) {
+                LinearProgressIndicator(
+                    progress = { animVlm },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .height(2.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.Transparent
+                )
+                Spacer(Modifier.height(6.dp))
             }
 
             if (!aiState.error.isNullOrBlank()) {
                 Text(
-                    aiState.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+                    text = aiState.error,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp)
                 )
             }
+        }
+    }
+}
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onToggleClipIndexing,
-                    enabled = !aiState.isDownloadingModel && !aiState.isVlmRunning && totalPhotos > 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (aiState.isClipRunning && !aiState.isPaused) Icons.Default.Pause else Icons.Default.ImageSearch,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        when {
-                            aiState.isClipRunning && !aiState.isPaused -> "Pause CLIP"
-                            aiState.isClipRunning && aiState.isPaused -> "Resume CLIP"
-                            else -> "Index CLIP"
-                        }
-                    )
-                }
+@Composable
+private fun CompactActionPill(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier.height(36.dp)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+    }
+}
 
-                Button(
-                    onClick = onToggleVlmIndexing,
-                    enabled = !aiState.isDownloadingModel && !aiState.isClipRunning && totalPhotos > 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (aiState.isVlmRunning && !aiState.isPaused) Icons.Default.Pause else Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        when {
-                            aiState.isVlmRunning && !aiState.isPaused -> "Pause VLM"
-                            aiState.isVlmRunning && aiState.isPaused -> "Resume VLM"
-                            else -> "Index VLM"
-                        }
-                    )
-                }
+@Composable
+private fun CompactProgressPill(
+    isRunning: Boolean,
+    isPaused: Boolean,
+    isDone: Boolean,
+    percent: Int,
+    hasPartial: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(14.dp),
+        color = when {
+            isRunning -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+            isPaused -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        border = BorderStroke(
+            1.dp,
+            when {
+                isRunning -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                isPaused -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (aiState.isClipRunning || aiState.isVlmRunning) {
-                    OutlinedButton(onClick = onStopAiIndexing, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Stop")
-                    }
-                } else {
-                    if (!aiState.isClipInstalled) {
-                        OutlinedButton(
-                            onClick = onDownloadClipModel,
-                            enabled = !aiState.isDownloadingModel,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Get CLIP")
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = onReindexClip,
-                            enabled = !aiState.isDownloadingModel && totalPhotos > 0,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Re-index CLIP")
-                        }
-                    }
-                    if (aiState.processed > 0) {
-                        TextButton(onClick = onClearAiIndex) {
-                            Text("Clear Index")
-                        }
-                    }
+        ),
+        modifier = Modifier
+            .height(36.dp)
+            .defaultMinSize(minWidth = 76.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            when {
+                isRunning -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "$percent% · Pause",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+                isPaused -> {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "$percent%",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    )
+                }
+                isDone -> {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Done",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                }
+                else -> {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (hasPartial) "$percent%" else "Start",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
                 }
             }
         }

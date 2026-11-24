@@ -11,25 +11,29 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.IndexingForegroundService
 import com.amresalehin.emregallery.ai.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiSettingsScreen(
     onBack: () -> Unit,
@@ -39,87 +43,70 @@ fun AiSettingsScreen(
     val scope = rememberCoroutineScope()
 
     var config by remember { mutableStateOf(AiSettings.load(context)) }
-    var showApiKey by remember { mutableStateOf(false) }
-    var testingConnection by remember { mutableStateOf(false) }
-    var testMessage by remember { mutableStateOf<String?>(null) }
-    var testIsError by remember { mutableStateOf(false) }
-    var savedBanner by remember { mutableStateOf(false) }
+    var showSecret by remember { mutableStateOf(false) }
+    var testing by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf<String?>(null) }
+    var statusIsError by remember { mutableStateOf(false) }
     var clipInstalled by remember { mutableStateOf(ClipOnnxModelManager.isInstalled(context)) }
-    var vlmModelSummary by remember { mutableStateOf(LocalVlmModelManager.installedModelSummary(context)) }
+    var mediaPipeSummary by remember { mutableStateOf(LocalVlmModelManager.installedModelSummary(context)) }
     var ggufSummary by remember { mutableStateOf(LocalVlmModelManager.installedGgufSummary(context)) }
-    var importingVlm by remember { mutableStateOf(false) }
-    var importStatus by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
 
-    val pickMediaPipeLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val pickMediaPipeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            importingVlm = true
-            importStatus = "Importing MediaPipe .task model…"
+            importing = true
+            statusIsError = false
+            statusText = "Importing…"
             scope.launch {
-                val res = LocalVlmModelManager.importModelFromUri(context, uri) { copied, total ->
-                    val mb = copied / (1024 * 1024)
-                    importStatus = if (total > 0L) {
-                        "Importing (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
-                    } else "Importing (${mb} MB)…"
-                }
-                importingVlm = false
+                val res = LocalVlmModelManager.importModelFromUri(context, uri)
+                importing = false
                 res.onSuccess {
                     config = AiSettings.load(context)
-                    vlmModelSummary = LocalVlmModelManager.installedModelSummary(context)
-                    importStatus = "Installed: ${vlmModelSummary.orEmpty()}"
+                    mediaPipeSummary = LocalVlmModelManager.installedModelSummary(context)
+                    statusText = "Imported"
                 }.onFailure { err ->
-                    importStatus = err.localizedMessage ?: "Import failed"
+                    statusIsError = true
+                    statusText = err.localizedMessage ?: "Import failed"
                 }
             }
         }
     }
 
-    val pickGgufModelLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val pickGgufModelLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            importingVlm = true
-            importStatus = "Importing GGUF language model…"
+            importing = true
+            statusIsError = false
+            statusText = "Importing…"
             scope.launch {
-                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = false) { copied, total ->
-                    val mb = copied / (1024 * 1024)
-                    importStatus = if (total > 0L) {
-                        "Importing GGUF (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
-                    } else "Importing GGUF (${mb} MB)…"
-                }
-                importingVlm = false
+                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = false)
+                importing = false
                 res.onSuccess {
                     config = AiSettings.load(context)
                     ggufSummary = LocalVlmModelManager.installedGgufSummary(context)
-                    importStatus = "GGUF model imported."
+                    statusText = "Imported"
                 }.onFailure { err ->
-                    importStatus = err.localizedMessage ?: "GGUF import failed"
+                    statusIsError = true
+                    statusText = err.localizedMessage ?: "Import failed"
                 }
             }
         }
     }
 
-    val pickGgufMmprojLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val pickGgufMmprojLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            importingVlm = true
-            importStatus = "Importing mmproj.gguf vision projector…"
+            importing = true
+            statusIsError = false
+            statusText = "Importing…"
             scope.launch {
-                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = true) { copied, total ->
-                    val mb = copied / (1024 * 1024)
-                    importStatus = if (total > 0L) {
-                        "Importing mmproj (${((copied * 100L) / total).toInt().coerceIn(0, 100)}% · ${mb} MB)…"
-                    } else "Importing mmproj (${mb} MB)…"
-                }
-                importingVlm = false
+                val res = LocalVlmModelManager.importGgufFromUri(context, uri, isMmproj = true)
+                importing = false
                 res.onSuccess {
                     config = AiSettings.load(context)
                     ggufSummary = LocalVlmModelManager.installedGgufSummary(context)
-                    importStatus = "mmproj.gguf imported."
+                    statusText = "Imported"
                 }.onFailure { err ->
-                    importStatus = err.localizedMessage ?: "mmproj import failed"
+                    statusIsError = true
+                    statusText = err.localizedMessage ?: "Import failed"
                 }
             }
         }
@@ -143,285 +130,183 @@ fun AiSettingsScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Spacer(Modifier.statusBarsPadding())
-            Spacer(Modifier.height(56.dp))
+            Spacer(Modifier.height(54.dp))
 
-            // SYSTEM 1: CLIP Semantic Search & Visual Embeddings
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = cardBackground,
+            // 1. CLIP Card
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
                 border = cardBorder,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.ImageSearch,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "System 1: CLIP Semantic Search (ONNX)",
-                                style = MaterialTheme.typography.titleMedium,
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "CLIP",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 17.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Text(
-                                if (clipInstalled) {
-                                    "CLIP ViT-B/32 installed (~154 MB) · Powers fast background natural-language & visually similar search."
-                                } else {
-                                    "Download CLIP ViT-B/32 (~154 MB) for fast background semantic search and visual similarity."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        )
+                        Text(
+                            text = if (clipInstalled) "ViT-B/32 · Ready" else "ViT-B/32 · 154 MB",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        if (!clipInstalled) {
-                            Button(
-                                onClick = {
-                                    IndexingForegroundService.downloadAiModel(context, force = false)
-                                    onOpenIndexingStatus()
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Download CLIP")
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { ClipOnnxModelManager.deleteModels(context) }
-                                        clipInstalled = false
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Remove CLIP")
+                    MinimalPillButton(
+                        text = if (clipInstalled) "Remove" else "Download",
+                        onClick = {
+                            if (clipInstalled) {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { ClipOnnxModelManager.deleteModels(context) }
+                                    clipInstalled = false
+                                }
+                            } else {
+                                IndexingForegroundService.downloadAiModel(context, force = false)
+                                onOpenIndexingStatus()
                             }
                         }
-                        OutlinedButton(
-                            onClick = onOpenIndexingStatus,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Indexing Status")
-                        }
-                    }
+                    )
                 }
             }
 
-            // SYSTEM 2: Real Vision-Language Model (VLM)
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = cardBackground,
+            // 2. VLM Card
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
                 border = cardBorder,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(18.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                    Text(
+                        text = "VLM",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                "System 2: Vision-Language Model (VLM)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                "Generates detailed descriptions, intelligent Karakeep/mymind tags, OCR-aware context, and answers questions about photos.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    )
 
-                    AiProviderType.entries.forEach { provider ->
-                        val selected = config.provider == provider
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                            },
-                            border = if (selected) {
-                                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                            } else {
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    config = config.copy(
-                                        provider = provider,
-                                        baseUrl = provider.defaultBaseUrl,
-                                        modelName = provider.defaultModel
-                                    )
-                                    savedBanner = false
-                                    testMessage = null
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(selected = selected, onClick = null)
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        provider.label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        when (provider) {
-                                            AiProviderType.ON_DEVICE_VLM -> "100% offline on-phone VLM via llama.cpp (GGUF + mmproj) or MediaPipe (.task)."
-                                            AiProviderType.OLLAMA -> "Self-hosted vision models on your PC/server (e.g. qwen2.5vl:3b, llava)."
-                                            AiProviderType.GEMINI -> "Google Gemini OpenAI-compatible vision API."
-                                            AiProviderType.OPENAI_COMPATIBLE -> "OpenAI, OpenRouter, LM Studio, or vLLM."
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+                    // Provider segmented bar: Local | Ollama | Gemini | OpenAI
+                    MinimalSegmentedBar(
+                        options = listOf(
+                            AiProviderType.ON_DEVICE_VLM to "Local",
+                            AiProviderType.OLLAMA to "Ollama",
+                            AiProviderType.GEMINI to "Gemini",
+                            AiProviderType.OPENAI_COMPATIBLE to "OpenAI"
+                        ),
+                        selected = config.provider,
+                        onSelect = { provider ->
+                            config = config.copy(
+                                provider = provider,
+                                baseUrl = provider.defaultBaseUrl,
+                                modelName = provider.defaultModel
+                            )
+                            AiSettings.save(context, config)
+                            statusText = null
                         }
-                    }
+                    )
 
                     if (config.provider == AiProviderType.ON_DEVICE_VLM) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                        MinimalSegmentedBar(
+                            options = listOf(
+                                LocalVlmRegistry.ENGINE_LLAMACPP to "llama.cpp",
+                                LocalVlmRegistry.ENGINE_MEDIAPIPE to "MediaPipe"
+                            ),
+                            selected = config.localVlmEngineId,
+                            onSelect = { engineId ->
+                                config = config.copy(localVlmEngineId = engineId)
+                                AiSettings.save(context, config)
+                                statusText = null
+                            }
+                        )
 
-                        // On-device runtime selector: llama.cpp (GGUF + mmproj) vs MediaPipe (.task)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            LocalVlmRegistry.all().forEach { engine ->
-                                FilterChip(
-                                    selected = config.localVlmEngineId == engine.engineId,
-                                    onClick = {
-                                        config = config.copy(localVlmEngineId = engine.engineId)
-                                        AiSettings.save(context, config)
-                                    },
-                                    label = {
-                                        Text(
-                                            if (engine.engineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
-                                                "llama.cpp (GGUF + mmproj)"
-                                            } else {
-                                                "MediaPipe (.task)"
-                                            }
-                                        )
+                        if (config.localVlmEngineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = ggufSummary ?: "No GGUF + mmproj",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = if (LlamaCppNativeBridge.isNativeLibraryLoaded) "Native OK" else "No .so",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (LlamaCppNativeBridge.isNativeLibraryLoaded) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.error
                                     }
                                 )
                             }
-                        }
-
-                        if (config.localVlmEngineId == LocalVlmRegistry.ENGINE_LLAMACPP) {
-                            Text(
-                                text = if (LlamaCppNativeBridge.isNativeLibraryLoaded) {
-                                    "Native engine: libemre_llama_vlm.so loaded (llama.cpp + libmtmd)"
-                                } else {
-                                    "Native libemre_llama_vlm.so not bundled in this APK — build with `-PbuildLlamaNative=true` (NDK + CMake) to enable."
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (LlamaCppNativeBridge.isNativeLibraryLoaded) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.error
-                                }
-                            )
-
-                            Text(
-                                text = ggufSummary?.let { "Installed GGUF Pair: $it" }
-                                    ?: "No GGUF + mmproj.gguf pair installed yet. Import both files or download from Hugging Face (e.g. LFM2.5-VL-450M, SmolVLM2-500M, Qwen3-VL-2B).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (LocalVlmModelManager.resolveInstalledGgufPair(context) != null) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Button(
+                                MinimalPillButton(
+                                    text = "Model .gguf",
+                                    enabled = !importing,
                                     onClick = { pickGgufModelLauncher.launch(arrayOf("*/*")) },
-                                    enabled = !importingVlm,
                                     modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Import Model .gguf")
-                                }
-                                Button(
+                                )
+                                MinimalPillButton(
+                                    text = "mmproj .gguf",
+                                    enabled = !importing,
                                     onClick = { pickGgufMmprojLauncher.launch(arrayOf("*/*")) },
-                                    enabled = !importingVlm,
                                     modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Import mmproj .gguf")
-                                }
+                                )
                             }
 
                             OutlinedTextField(
                                 value = config.ggufModelDownloadUrl,
-                                onValueChange = {
-                                    config = config.copy(ggufModelDownloadUrl = it)
-                                    savedBanner = false
-                                },
-                                label = { Text("GGUF Model URL (.gguf)") },
-                                placeholder = { Text("https://huggingface.co/.../model-Q4_K_M.gguf") },
+                                onValueChange = { config = config.copy(ggufModelDownloadUrl = it) },
+                                label = { Text("Model URL") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
                             OutlinedTextField(
                                 value = config.ggufMmprojDownloadUrl,
-                                onValueChange = {
-                                    config = config.copy(ggufMmprojDownloadUrl = it)
-                                    savedBanner = false
-                                },
-                                label = { Text("Vision Projector URL (mmproj-*.gguf)") },
-                                placeholder = { Text("https://huggingface.co/.../mmproj-model-Q8_0.gguf") },
+                                onValueChange = { config = config.copy(ggufMmprojDownloadUrl = it) },
+                                label = { Text("mmproj URL") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
                             OutlinedTextField(
                                 value = config.hfToken,
-                                onValueChange = {
-                                    config = config.copy(hfToken = it)
-                                    savedBanner = false
-                                },
-                                label = { Text("HuggingFace Token (optional for gated repos)") },
+                                onValueChange = { config = config.copy(hfToken = it) },
+                                label = { Text("HF Token") },
                                 singleLine = true,
-                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                visualTransformation = if (showSecret) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {
-                                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    IconButton(onClick = { showSecret = !showSecret }) {
                                         Icon(
-                                            if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = "Toggle token visibility"
+                                            if (showSecret) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 },
@@ -432,69 +317,58 @@ fun AiSettingsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                OutlinedButton(
+                                MinimalPillButton(
+                                    text = "Download",
+                                    enabled = config.ggufModelDownloadUrl.isNotBlank() &&
+                                        config.ggufMmprojDownloadUrl.isNotBlank() && !importing,
                                     onClick = {
                                         AiSettings.save(context, config)
                                         IndexingForegroundService.downloadGgufVlmPair(context)
                                         onOpenIndexingStatus()
                                     },
-                                    enabled = config.ggufModelDownloadUrl.isNotBlank() &&
-                                        config.ggufMmprojDownloadUrl.isNotBlank() &&
-                                        !importingVlm,
                                     modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Download Pair")
-                                }
-                                Button(
-                                    onClick = {
-                                        AiSettings.save(context, config)
-                                        savedBanner = true
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Save")
-                                }
-                            }
-
-                            if (ggufSummary != null) {
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) { LocalVlmModelManager.deleteGgufModels(context) }
-                                            ggufSummary = null
-                                            importStatus = "Removed GGUF + mmproj models."
-                                        }
-                                    },
-                                    enabled = !importingVlm
-                                ) {
-                                    Text("Remove GGUF Pair")
-                                }
-                            }
-                        } else {
-                            Text(
-                                text = if (vlmModelSummary != null) {
-                                    "Installed MediaPipe VLM: $vlmModelSummary"
-                                } else {
-                                    "No MediaPipe .task model installed yet. Import a Gemma 3n / Gemma 4 .task file or download by URL."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (vlmModelSummary != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Prefer GPU acceleration", style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        "Automatically falls back to CPU if GPU delegate is unavailable.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (ggufSummary != null) {
+                                    MinimalPillButton(
+                                        text = "Remove",
+                                        enabled = !importing,
+                                        onClick = {
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { LocalVlmModelManager.deleteGgufModels(context) }
+                                                ggufSummary = null
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
+                                MinimalPillButton(
+                                    text = "Save",
+                                    emphasized = true,
+                                    onClick = {
+                                        AiSettings.save(context, config)
+                                        statusIsError = false
+                                        statusText = "Saved"
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = mediaPipeSummary ?: "No .task model",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("GPU", style = MaterialTheme.typography.labelSmall)
+                                Spacer(Modifier.width(6.dp))
                                 Switch(
                                     checked = config.vlmUseGpu,
                                     onCheckedChange = {
@@ -504,220 +378,148 @@ fun AiSettingsScreen(
                                 )
                             }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Button(
-                                    onClick = { pickMediaPipeLauncher.launch(arrayOf("*/*")) },
-                                    enabled = !importingVlm,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Import .task")
-                                }
-                                if (vlmModelSummary != null) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            scope.launch {
-                                                withContext(Dispatchers.IO) { LocalVlmModelManager.deleteInstalledModels(context) }
-                                                vlmModelSummary = null
-                                                importStatus = "Removed MediaPipe VLM model."
-                                            }
-                                        },
-                                        enabled = !importingVlm,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Remove")
-                                    }
-                                }
-                            }
-
                             OutlinedTextField(
                                 value = config.localVlmDownloadUrl,
-                                onValueChange = {
-                                    config = config.copy(localVlmDownloadUrl = it)
-                                    savedBanner = false
-                                },
-                                label = { Text("Direct Model URL (.task / .litertlm)") },
-                                placeholder = { Text("https://huggingface.co/.../gemma-3n-E2B-it-int4.task") },
+                                onValueChange = { config = config.copy(localVlmDownloadUrl = it) },
+                                label = { Text(".task URL") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                OutlinedButton(
+                                MinimalPillButton(
+                                    text = "Import .task",
+                                    enabled = !importing,
+                                    onClick = { pickMediaPipeLauncher.launch(arrayOf("*/*")) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                MinimalPillButton(
+                                    text = "Download",
+                                    enabled = config.localVlmDownloadUrl.isNotBlank() && !importing,
                                     onClick = {
                                         AiSettings.save(context, config)
                                         IndexingForegroundService.downloadVlmModel(context)
                                         onOpenIndexingStatus()
                                     },
-                                    enabled = config.localVlmDownloadUrl.isNotBlank() && !importingVlm,
                                     modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Download URL")
-                                }
-                                Button(
-                                    onClick = {
-                                        AiSettings.save(context, config)
-                                        savedBanner = true
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Save")
+                                )
+                                if (mediaPipeSummary != null) {
+                                    MinimalPillButton(
+                                        text = "Remove",
+                                        enabled = !importing,
+                                        onClick = {
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { LocalVlmModelManager.deleteInstalledModels(context) }
+                                                mediaPipeSummary = null
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
-
-                        if (!importStatus.isNullOrBlank()) {
-                            Text(
-                                text = importStatus.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     } else {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-
                         OutlinedTextField(
                             value = config.baseUrl,
-                            onValueChange = {
-                                config = config.copy(baseUrl = it)
-                                savedBanner = false
-                            },
-                            label = { Text("Endpoint Base URL") },
-                            placeholder = { Text(config.provider.defaultBaseUrl) },
+                            onValueChange = { config = config.copy(baseUrl = it) },
+                            label = { Text("Base URL") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
-
                         OutlinedTextField(
                             value = config.modelName,
-                            onValueChange = {
-                                config = config.copy(modelName = it)
-                                savedBanner = false
-                            },
-                            label = { Text("Vision Model Name") },
-                            placeholder = { Text(config.provider.defaultModel) },
+                            onValueChange = { config = config.copy(modelName = it) },
+                            label = { Text("Model") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
-
                         OutlinedTextField(
                             value = config.apiKey,
-                            onValueChange = {
-                                config = config.copy(apiKey = it)
-                                savedBanner = false
-                            },
-                            label = {
-                                Text(if (config.provider.requiresApiKey) "API Key" else "API Key (optional)")
-                            },
+                            onValueChange = { config = config.copy(apiKey = it) },
+                            label = { Text("API Key") },
                             singleLine = true,
-                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            visualTransformation = if (showSecret) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
-                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                IconButton(onClick = { showSecret = !showSecret }) {
                                     Icon(
-                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "Toggle API key visibility"
+                                        if (showSecret) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
+                            MinimalPillButton(
+                                text = if (testing) "Testing…" else "Test",
+                                enabled = !testing,
                                 onClick = {
-                                    testingConnection = true
-                                    testMessage = null
+                                    testing = true
+                                    statusText = null
                                     scope.launch {
                                         val res = VisionApiClient.testConnection(config)
-                                        testingConnection = false
-                                        res.onSuccess { msg ->
-                                            testMessage = msg
-                                            testIsError = false
+                                        testing = false
+                                        res.onSuccess {
+                                            statusIsError = false
+                                            statusText = "Connected"
                                         }.onFailure { err ->
-                                            testMessage = err.localizedMessage ?: "Connection failed"
-                                            testIsError = true
+                                            statusIsError = true
+                                            statusText = err.localizedMessage ?: "Failed"
                                         }
                                     }
                                 },
-                                enabled = !testingConnection,
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                if (testingConnection) {
-                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Text("Test Connection")
-                            }
-
-                            Button(
+                            )
+                            MinimalPillButton(
+                                text = "Save",
+                                emphasized = true,
                                 onClick = {
                                     AiSettings.save(context, config)
-                                    savedBanner = true
+                                    statusIsError = false
+                                    statusText = "Saved"
                                 },
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Save Settings")
-                            }
-                        }
-
-                        if (testMessage != null) {
-                            Text(
-                                text = testMessage.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (testIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                             )
                         }
                     }
 
-                    if (savedBanner) {
+                    if (!statusText.isNullOrBlank()) {
                         Text(
-                            "AI configuration saved.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            text = statusText.orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (statusIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                         )
                     }
                 }
             }
 
-            // Privacy & Context Card
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = cardBackground,
+            // 3. Compact Toggle Card (No explanatory text)
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
                 border = cardBorder,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        "Privacy & Context",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Include OCR text in VLM prompts", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Combines extracted OCR text with visual understanding for receipts, screenshots, and documents.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "OCR context",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
                         Switch(
                             checked = config.includeOcrContext,
                             onCheckedChange = {
@@ -726,19 +528,22 @@ fun AiSettingsScreen(
                             }
                         )
                     }
-
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                        modifier = Modifier.padding(horizontal = 18.dp)
+                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Keep Locked Vault strictly on-device", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Never send encrypted Locked Vault media to external cloud/Ollama APIs.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "Vault local only",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
                         Switch(
                             checked = config.excludeLockedVaultFromCloud,
                             onCheckedChange = {
@@ -751,10 +556,10 @@ fun AiSettingsScreen(
             }
 
             Spacer(Modifier.navigationBarsPadding())
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
         }
 
-        // Floating Top Bar
+        // Minimal Floating Top Bar matching IndexingStatusScreen
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -776,9 +581,106 @@ fun AiSettingsScreen(
             }
             Spacer(Modifier.width(12.dp))
             Text(
-                "AI & Semantic Search",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
+                text = "AI",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun <T> MinimalSegmentedBar(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            options.forEachIndexed { idx, (value, label) ->
+                val active = value == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (active) MaterialTheme.colorScheme.surface else Color.Transparent
+                        )
+                        .clickable { onSelect(value) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (idx < options.lastIndex) {
+                    VerticalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.fillMaxHeight(0.55f).width(1.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MinimalPillButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    emphasized: Boolean = false
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(14.dp),
+        color = if (emphasized) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        border = BorderStroke(
+            1.dp,
+            if (emphasized) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = modifier.height(38.dp)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

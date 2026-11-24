@@ -52,8 +52,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import android.provider.DocumentsContract
-import android.database.Cursor
-import com.amresalehin.emregallery.data.ai.AiModelAsset
 import com.amresalehin.emregallery.data.ai.AiModelCatalog
 import com.amresalehin.emregallery.data.ai.AiModelStorage
 import com.amresalehin.emregallery.data.ai.AiProviderMode
@@ -269,7 +267,7 @@ fun LocalAiModelsSection(
                     val projector = asset.pairedProjectorId?.let { AiModelCatalog.byId(it) }
                     val projectorReady = projector?.let { AiModelStorage.isInstalled(context, it) } ?: false
                     AiModelPill(
-                        label = asset.modelName.substringBefore(" ·"),
+                        label = asset.modelName.replace(" · ", " "),
                         selected = selectedModel == asset.id && selection != null,
                         status = when { selectedModel == asset.id && selection != null -> "Active"; ready && !projectorReady -> "Vision"; ready -> "Ready"; else -> "Get" },
                         onClick = {

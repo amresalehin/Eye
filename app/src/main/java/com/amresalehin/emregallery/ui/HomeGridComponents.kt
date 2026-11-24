@@ -145,49 +145,6 @@ fun HomeFastScrollbar(
 }
 
 @Composable
-private fun MemoriesStripSkeleton() {
-    val shimmerTransition = rememberInfiniteTransition(label = "memory_story_skeleton")
-    val shimmerAlpha by shimmerTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "memory_story_skeleton_alpha"
-    )
-    val cardColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
-    val footerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha * 0.72f)
-
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(
-            count = 4,
-            key = { index -> "memory_story_skeleton_$index" }
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(118.dp)
-                    .height(174.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cardColor)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(footerColor)
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun MemoriesStrip(
     media: List<MediaItem>,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
@@ -248,11 +205,7 @@ fun MemoriesStrip(
         stories = withContext(Dispatchers.Default) { computeStories(media) }
     }
 
-    val resolvedStories = stories
-    if (resolvedStories == null) {
-        MemoriesStripSkeleton()
-        return
-    }
+    val resolvedStories = stories ?: return
     if (resolvedStories.isEmpty()) return
 
     Column {
@@ -374,105 +327,6 @@ fun HomeGroupHeader(group: DayGroup) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-    }
-}
-
-@Composable
-fun HomeScreenSkeleton(
-    gridColumns: Int,
-    gridStyle: String,
-    showMemories: Boolean,
-    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>,
-    containerWidth: Dp
-) {
-    val columns = gridColumns.coerceIn(1, 6)
-    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
-    val placeholderShape = RoundedCornerShape(10.dp)
-    val isSquare = gridStyle == "square"
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        if (showMemories) {
-            MemoriesStripSkeleton()
-        }
-
-        if (groupedRows.isEmpty()) {
-            // Before the first media query returns, no real aspect ratios or group boundaries
-            // exist yet. Use a stable neutral fallback, then switch to exact grouped rows as
-            // soon as the same background preparation used by the real grid publishes them.
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(
-                    Modifier.width(104.dp).height(18.dp)
-                        .clip(RoundedCornerShape(5.dp)).background(placeholderColor)
-                )
-                Box(
-                    Modifier.width(38.dp).height(13.dp)
-                        .clip(RoundedCornerShape(4.dp)).background(placeholderColor.copy(alpha = 0.78f))
-                )
-            }
-            repeat(4) { rowIndex ->
-                val aspects = List(columns) { index ->
-                    if (isSquare) 1f else when ((rowIndex * columns + index).mod(4)) {
-                        0 -> 0.72f
-                        1 -> 0.9f
-                        2 -> 1.0f
-                        else -> 1.35f
-                    }
-                }
-                val rowHeight = mosaicRowHeight(containerWidth, aspects.size, aspects)
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    aspects.forEach { aspect ->
-                        Box(
-                            modifier = Modifier
-                                .weight(aspect)
-                                .height(rowHeight)
-                                .clip(placeholderShape)
-                                .background(placeholderColor)
-                        )
-                    }
-                }
-            }
-        } else {
-            // Keep the skeleton bounded: this whole placeholder is one LazyColumn item,
-            // whereas the real gallery virtualizes each row independently.
-            var remainingRows = 6
-            for ((group, rowChunks) in groupedRows) {
-                if (remainingRows <= 0) break
-                if (rowChunks.isEmpty()) continue
-                if (group.dayLabel.isNotBlank()) {
-                    HomeGroupHeader(group)
-                }
-                val visibleChunks = rowChunks.take(remainingRows)
-                visibleChunks.forEachIndexed { rowIndex, rowItems ->
-                    val aspects = mosaicAspectRatios(rowItems, isSquare, rowIndex)
-                    val rowHeight = mosaicRowHeight(containerWidth, rowItems.size, aspects)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        aspects.forEach { aspect ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(aspect)
-                                    .height(rowHeight)
-                                    .clip(placeholderShape)
-                                    .background(placeholderColor)
-                            )
-                        }
-                    }
-                }
-                remainingRows -= visibleChunks.size
-            }
-        }
     }
 }
 

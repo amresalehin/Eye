@@ -3,6 +3,9 @@ package com.amresalehin.emregallery.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,6 +14,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,10 +43,19 @@ fun AiIndexingCard(
     onReindexClip: () -> Unit,
     onDownloadClipModel: () -> Unit,
     onOpenAiSettings: () -> Unit,
-    onClearAiIndex: () -> Unit
+    onClearAiIndex: () -> Unit,
+    availableFolders: List<FaceFolderInfo>,
+    onToggleClipFolder: (String) -> Unit,
+    onSelectAllClipFolders: () -> Unit,
+    onToggleVlmFolder: (String) -> Unit,
+    onSelectAllVlmFolders: () -> Unit
 ) {
-    val clipProgress = if (totalPhotos > 0) (aiState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
-    val vlmProgress = if (totalPhotos > 0) (aiState.richCaptionedCount.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
+    val clipTotalPhotos = if (aiState.clipIsAllFolders || aiState.clipSelectedFolders.isEmpty()) totalPhotos
+        else availableFolders.filter { it.path in aiState.clipSelectedFolders }.sumOf { it.photoCount }
+    val vlmTotalPhotos = if (aiState.vlmIsAllFolders || aiState.vlmSelectedFolders.isEmpty()) totalPhotos
+        else availableFolders.filter { it.path in aiState.vlmSelectedFolders }.sumOf { it.photoCount }
+    val clipProgress = if (clipTotalPhotos > 0) (aiState.processed.toFloat() / clipTotalPhotos).coerceIn(0f, 1f) else 0f
+    val vlmProgress = if (vlmTotalPhotos > 0) (aiState.richCaptionedCount.toFloat() / vlmTotalPhotos).coerceIn(0f, 1f) else 0f
     val animClip by animateFloatAsState(targetValue = clipProgress, label = "clip_progress")
     val animVlm by animateFloatAsState(targetValue = vlmProgress, label = "vlm_progress")
     val clipPct = (clipProgress * 100f).roundToInt()
@@ -49,11 +63,11 @@ fun AiIndexingCard(
 
     val clipRunning = aiState.isClipRunning && !aiState.isPaused
     val clipPaused = aiState.isClipRunning && aiState.isPaused
-    val clipDone = totalPhotos > 0 && aiState.processed >= totalPhotos
+    val clipDone = clipTotalPhotos > 0 && aiState.processed >= clipTotalPhotos
 
     val vlmRunning = aiState.isVlmRunning && !aiState.isPaused
     val vlmPaused = aiState.isVlmRunning && aiState.isPaused
-    val vlmDone = totalPhotos > 0 && aiState.richCaptionedCount >= totalPhotos
+    val vlmDone = vlmTotalPhotos > 0 && aiState.richCaptionedCount >= vlmTotalPhotos
 
     var showClipMenu by remember { mutableStateOf(false) }
 
@@ -135,7 +149,7 @@ fun AiIndexingCard(
                             isDone = clipDone,
                             percent = clipPct,
                             hasPartial = aiState.processed > 0,
-                            enabled = countsReady && totalPhotos > 0 && !aiState.isVlmRunning,
+                            enabled = countsReady && clipTotalPhotos > 0 && !aiState.isVlmRunning,
                             onClick = {
                                 if (clipDone) showClipMenu = true else onToggleClipIndexing()
                             }
@@ -182,22 +196,28 @@ fun AiIndexingCard(
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (countsReady) {
-                        "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}"
-                    } else "Preparing index",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+            if (availableFolders.isNotEmpty()) {
+                AiFolderSelector(
+                    folders = availableFolders,
+                    isAllFolders = aiState.clipIsAllFolders,
+                    selectedFolders = aiState.clipSelectedFolders,
+                    onToggleFolder = onToggleClipFolder,
+                    onSelectAll = onSelectAllClipFolders,
+                    testTag = "clip_folders"
                 )
+            }
+
+            if (clipRunning || clipPaused) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(clipTotalPhotos)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             if (!aiState.error.isNullOrBlank() &&
@@ -279,7 +299,7 @@ fun AiIndexingCard(
                     isDone = vlmDone,
                     percent = vlmPct,
                     hasPartial = aiState.richCaptionedCount > 0,
-                    enabled = countsReady && totalPhotos > 0 &&
+                    enabled = countsReady && vlmTotalPhotos > 0 &&
                         !aiState.isClipRunning && !aiState.isDownloadingModel,
                     onClick = onToggleVlmIndexing
                 )
@@ -308,6 +328,17 @@ fun AiIndexingCard(
                 }
             }
 
+            if (availableFolders.isNotEmpty()) {
+                AiFolderSelector(
+                    folders = availableFolders,
+                    isAllFolders = aiState.vlmIsAllFolders,
+                    selectedFolders = aiState.vlmSelectedFolders,
+                    onToggleFolder = onToggleVlmFolder,
+                    onSelectAll = onSelectAllVlmFolders,
+                    testTag = "vlm_folders"
+                )
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -315,18 +346,18 @@ fun AiIndexingCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = if (countsReady) {
-                        "${numberFormat.format(aiState.richCaptionedCount)} / ${numberFormat.format(totalPhotos)} · ${aiState.vlmStatusLabel}"
-                    } else {
-                        aiState.vlmStatusLabel
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                if (vlmRunning || vlmPaused) {
+                    Text(
+                        text = "${numberFormat.format(aiState.richCaptionedCount)} / ${numberFormat.format(vlmTotalPhotos)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
 
                 CompactActionPill(
                     label = "Config",
@@ -347,6 +378,79 @@ fun AiIndexingCard(
                         .padding(horizontal = 18.dp)
                         .padding(bottom = 14.dp)
                 )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun AiFolderSelector(
+    folders: List<FaceFolderInfo>,
+    isAllFolders: Boolean,
+    selectedFolders: Set<String>,
+    onToggleFolder: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    testTag: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = "Folders",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isAllFolders) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier.height(32.dp).clickable(onClick = onSelectAll)
+            ) {
+                Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "All folders",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isAllFolders) FontWeight.SemiBold else FontWeight.Normal),
+                        color = if (isAllFolders) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp).testTag(testTag),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            folders.forEach { folder ->
+                val selected = !isAllFolders && folder.path in selectedFolders
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    modifier = Modifier.height(34.dp).clickable { onToggleFolder(folder.path) }
+                ) {
+                    Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            folder.name,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal),
+                            color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }

@@ -559,7 +559,7 @@ class SearchEngine(private val context: Context) {
             .map { it.trim().lowercase(Locale.ROOT) }
             .filter { it.isNotBlank() }
             .toSet()
-        val matchingTags = allTagPool.filter { it.contains(q, ignoreCase = true) }.take(3)
+        val matchingTags = allTagPool.filter { it.contains(q, ignoreCase = true) }.take(2)
         for (tag in matchingTags) {
             val tagMedia = media.filter { item ->
                 customTagsMap[item.uri]?.any { it.equals(tag, ignoreCase = true) } == true ||
@@ -878,7 +878,7 @@ class SearchEngine(private val context: Context) {
             else if (aiRecord.tags.any { it.contains(q, ignoreCase = true) }) score += 45
             if (aiRecord.colors.any { it.name.equals(q, ignoreCase = true) }) score += 60
             // Multi-word token matching for natural-language queries against caption + tags
-            val tokens = q.split(Regex("\s+")).filter { it.length >= 3 }
+            val tokens = q.split(Regex("\\s+")).filter { it.length >= 3 }
             if (tokens.size >= 2) {
                 val haystack = "${aiRecord.title} ${aiRecord.caption} ${aiRecord.tags.joinToString(" ")} ${aiRecord.colors.joinToString(" ") { it.name }}".lowercase(Locale.ROOT)
                 val matchedTokens = tokens.count { haystack.contains(it) }

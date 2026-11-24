@@ -4,7 +4,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class AiIntegrationUnitTest {
 
     @Test
@@ -48,8 +53,8 @@ class AiIntegrationUnitTest {
     @Test
     fun aiConfig_remoteConfigurationRules() {
         assertFalse(AiConfig(provider = AiProviderType.ON_DEVICE_VLM).isRemoteConfigured)
-        assertEquals(LocalVlmRegistry.ENGINE_MEDIAPIPE, LocalVlmRegistry.get("mediapipe").engineId)
         assertEquals(LocalVlmRegistry.ENGINE_LLAMACPP, LocalVlmRegistry.get("llamacpp").engineId)
+        assertEquals(LocalVlmRegistry.ENGINE_MEDIAPIPE, LocalVlmRegistry.get("mediapipe").engineId)
         assertTrue(
             AiConfig(
                 provider = AiProviderType.OLLAMA,

@@ -106,6 +106,7 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     // On-device Vision-Language Model (VLM) runtime (MediaPipe / LiteRT-LM for Gemma 3n / Gemma 4).
     implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    implementation("com.google.mediapipe:tasks-vision:0.10.26")
     // Native Tesseract engine and its JNI libraries are packaged in the APK.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     // On-device Google ML Kit Text Recognition with multiple language script support

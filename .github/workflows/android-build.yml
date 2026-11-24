@@ -58,7 +58,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # Run tests and build
-      - name: Run unit tests and assemble debug APK
+      - name: Run tests and assemble debug APK
         run: |
           bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
@@ -71,7 +71,8 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      # Permanently archive successful builds as GitHub Releases
+      # Permanently archive successful builds as GitHub Releases.
+      # Reuse an existing tag and replace its APK instead of failing on duplicates.
       - name: Publish permanent APK release
         if: success() && github.event_name == 'push'
         env:
@@ -80,6 +81,8 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          set -euo pipefail
+
           APK_PATH=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
 
           if [ -z "$APK_PATH" ]; then
@@ -90,14 +93,27 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:12}"
           SAFE_BRANCH=$(echo "$GITHUB_REF_NAME" | tr '/ ' '--')
           TAG="build-${SAFE_BRANCH}-${SHORT_SHA}"
-
-          gh release create "$TAG" "$APK_PATH" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Emre Gallery - ${GITHUB_REF_NAME} - ${SHORT_SHA}" \
-            --notes "Automated successful Android debug build.
+          TITLE="Emre Gallery - ${GITHUB_REF_NAME} - ${SHORT_SHA}"
+          NOTES="Automated successful Android debug build.
 
           Branch: ${GITHUB_REF_NAME}
           Commit: ${GITHUB_SHA}
           Workflow: Android Build"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing its APK asset."
+            gh release upload "$TAG" "$APK_PATH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK_PATH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes "$NOTES"
+          fi
 
           echo "Successfully published APK release: $TAG"

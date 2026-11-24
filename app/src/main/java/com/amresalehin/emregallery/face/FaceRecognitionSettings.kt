@@ -140,25 +140,29 @@ object FaceRecognitionSettings {
         }
     }
 
+    /**
+     * Turbo is enforced for every installation, including devices with an older saved
+     * Eco/Balanced preference. The preference is migrated so any UI reading it also sees Turbo.
+     */
     fun cpuThrottleMode(context: Context): String {
-        return preferences(context).getString(KEY_CPU_THROTTLE_MODE, THROTTLE_UNCONSTRAINED) ?: THROTTLE_UNCONSTRAINED
+        val prefs = preferences(context)
+        if (prefs.getString(KEY_CPU_THROTTLE_MODE, null) != THROTTLE_TURBO) {
+            prefs.edit().putString(KEY_CPU_THROTTLE_MODE, THROTTLE_TURBO).apply()
+        }
+        return THROTTLE_TURBO
     }
 
+    /** Retained for compatibility with existing callers; requests cannot lower the mode. */
     fun setCpuThrottleMode(context: Context, mode: String) {
-        preferences(context).edit().putString(KEY_CPU_THROTTLE_MODE, mode).apply()
+        preferences(context).edit().putString(KEY_CPU_THROTTLE_MODE, THROTTLE_TURBO).apply()
     }
 
     /**
-     * Emre never limits itself when Android is not limiting it.
-     * Default unconstrained mode operates with 0ms artificial cooldown for maximum continuous throughput.
+     * No artificial per-item cooldowns: indexing runs at full application-level throughput.
+     * Android and device firmware retain control of hardware thermal protection.
      */
     fun cpuThrottleCooldownMillis(context: Context): Long {
-        return when (cpuThrottleMode(context)) {
-            THROTTLE_ECO -> 40L
-            THROTTLE_BALANCED -> 10L
-            THROTTLE_TURBO -> 0L
-            THROTTLE_UNCONSTRAINED -> 0L
-            else -> 0L
-        }
+        cpuThrottleMode(context)
+        return 0L
     }
 }

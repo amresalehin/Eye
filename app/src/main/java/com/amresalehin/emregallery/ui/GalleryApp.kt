@@ -193,6 +193,7 @@ fun GalleryApp(
                 // the remaining cursor rows are still being read.
                 val progressiveItems = LinkedHashMap<String, MediaItem>(media.size + 128)
                 media.forEach { progressiveItems[it.uri] = it }
+                var firstPageSnapshotWritten = false
                 var loadedResult: MediaLoadResult? = null
 
                 try {
@@ -203,6 +204,24 @@ fun GalleryApp(
                                 media = progressiveItems.values.toList()
                                 loading = false
                                 mediaLoadError = false
+
+                                // Save the first real page as soon as it arrives. Even if the
+                                // app is killed before the full catalogue scan completes, the
+                                // next cold launch has a usable snapshot to render immediately.
+                                if (!firstPageSnapshotWritten) {
+                                    firstPageSnapshotWritten = true
+                                    val firstPageSnapshot = progressiveItems.values
+                                        .sortedWith(
+                                            compareByDescending<MediaItem> {
+                                                if (it.dateTakenMillis > 0L) it.dateTakenMillis
+                                                else it.dateAddedSeconds * 1000L
+                                            }.thenByDescending { it.id }
+                                        )
+                                        .take(180)
+                                    withContext(Dispatchers.IO) {
+                                        MediaSnapshotCache.write(mediaSnapshotContext, firstPageSnapshot)
+                                    }
+                                }
                             }
                             is MediaLoadEvent.Completed -> loadedResult = event.result
                         }
@@ -219,9 +238,15 @@ fun GalleryApp(
                     loading = false
                     mediaLoadError = false
 
-                    // Persist the authoritative, complete metadata list for the next cold launch.
+                    // Persist the most recent metadata page from the authoritative final result.
+                    val recentSnapshot = loadedMedia.sortedWith(
+                        compareByDescending<MediaItem> {
+                            if (it.dateTakenMillis > 0L) it.dateTakenMillis
+                            else it.dateAddedSeconds * 1000L
+                        }.thenByDescending { it.id }
+                    ).take(180)
                     withContext(Dispatchers.IO) {
-                        MediaSnapshotCache.write(mediaSnapshotContext, loadedMedia)
+                        MediaSnapshotCache.write(mediaSnapshotContext, recentSnapshot)
                     }
 
                     // Continue background preparation after the initial visible batches were shown.

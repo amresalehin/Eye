@@ -145,6 +145,49 @@ fun HomeFastScrollbar(
 }
 
 @Composable
+private fun MemoriesStripSkeleton() {
+    val shimmerTransition = rememberInfiniteTransition(label = "memory_story_skeleton")
+    val shimmerAlpha by shimmerTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "memory_story_skeleton_alpha"
+    )
+    val cardColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
+    val footerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha * 0.72f)
+
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(vertical = 4.dp)
+    ) {
+        items(
+            count = 4,
+            key = { index -> "memory_story_skeleton_$index" }
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(118.dp)
+                    .height(174.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(cardColor)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(footerColor)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun MemoriesStrip(
     media: List<MediaItem>,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
@@ -196,18 +239,21 @@ fun MemoriesStrip(
         return result.filter { it.second.isNotEmpty() }.take(10)
     }
 
-    var stories by remember {
-        mutableStateOf(if (media.size <= 150) computeStories(media) else emptyList())
+    // Resolve story groups off the main thread. A null value means calculation is in
+    // progress; an empty list means the library has no eligible memories to display.
+    var stories by remember(media, currentYear, todayMonth, todayDay) {
+        mutableStateOf<List<Pair<String, List<MediaItem>>>?>(null)
     }
     LaunchedEffect(media, currentYear, todayMonth, todayDay) {
-        stories = if (media.size <= 150) {
-            computeStories(media)
-        } else {
-            withContext(Dispatchers.Default) { computeStories(media) }
-        }
+        stories = withContext(Dispatchers.Default) { computeStories(media) }
     }
 
-    if (stories.isEmpty()) return
+    val resolvedStories = stories
+    if (resolvedStories == null) {
+        MemoriesStripSkeleton()
+        return
+    }
+    if (resolvedStories.isEmpty()) return
 
     Column {
         LazyRow(
@@ -215,8 +261,8 @@ fun MemoriesStrip(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(vertical = 4.dp)
         ) {
-            items(stories.size, key = { index -> stories[index].first }) { index ->
-                val (title, storyMedia) = stories[index]
+            items(resolvedStories.size, key = { index -> resolvedStories[index].first }) { index ->
+                val (title, storyMedia) = resolvedStories[index]
                 val cover = storyMedia.first()
                 val memInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 val isMemPressed by memInteractionSource.collectIsPressedAsState()
@@ -237,7 +283,7 @@ fun MemoriesStrip(
                             interactionSource = memInteractionSource,
                             indication = ripple(bounded = true),
                             onClick = {
-                                val storyGroups = stories.map { StoryGroup(it.first, it.second) }
+                                val storyGroups = resolvedStories.map { StoryGroup(it.first, it.second) }
                                 onOpenMemory(storyGroups, index)
                             }
                         )
@@ -349,20 +395,7 @@ fun HomeScreenSkeleton(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (showMemories) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                repeat(3) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(150.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(placeholderColor)
-                    )
-                }
-            }
+            MemoriesStripSkeleton()
         }
 
         if (groupedRows.isEmpty()) {

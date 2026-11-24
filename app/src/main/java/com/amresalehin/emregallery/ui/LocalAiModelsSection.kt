@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +49,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import android.provider.DocumentsContract
+import android.database.Cursor
 import com.amresalehin.emregallery.data.ai.AiModelAsset
 import com.amresalehin.emregallery.data.ai.AiModelCatalog
 import com.amresalehin.emregallery.data.ai.AiModelStorage
@@ -106,6 +112,28 @@ fun LocalAiModelsSection(
             }.onFailure {
                 notice = it.localizedMessage ?: "Could not select model"
                 noticeIsError = true
+            }
+        }
+    }
+
+    val folderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            scope.launch {
+                runCatching {
+                    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                    runCatching { context.contentResolver.takePersistableUriPermission(treeUri, flags) }
+                    withContext(Dispatchers.IO) { importGgufTree(context, treeUri) }
+                }.onSuccess { count ->
+                    notice = if (count > 0) "$count GGUF file(s) imported" else "No GGUF files found in that folder"
+                    noticeIsError = false
+                    refresh()
+                }.onFailure {
+                    notice = it.localizedMessage ?: "Folder import failed"
+                    noticeIsError = true
+                }
             }
         }
     }
@@ -230,14 +258,54 @@ fun LocalAiModelsSection(
                 Text("Downloaded · ${activeAsset.modelName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
 
+            Text("Models", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AiModelCatalog.models().forEach { asset ->
+                    val ready = AiModelStorage.isInstalled(context, asset)
+                    val projector = asset.pairedProjectorId?.let { AiModelCatalog.byId(it) }
+                    val projectorReady = projector?.let { AiModelStorage.isInstalled(context, it) } ?: false
+                    AiModelPill(
+                        label = asset.modelName.substringBefore(" ·"),
+                        selected = selectedModel == asset.id && selection != null,
+                        status = when { selectedModel == asset.id && selection != null -> "Active"; ready && !projectorReady -> "Vision"; ready -> "Ready"; else -> "Get" },
+                        onClick = {
+                            scope.launch {
+                                when {
+                                    !ready -> AiModelStorage.start(context, asset)
+                                    !projectorReady && projector != null -> AiModelStorage.start(context, projector)
+                                    else -> activateModel(asset.id)
+                                }
+                            }
+                        }
+                    )
+                }
+                storedFiles.filterNot { it.name.startsWith("mmproj", true) }.forEach { file ->
+                    AiModelPill(
+                        label = file.nameWithoutExtension.take(18),
+                        selected = selectedModel == file.name && selection != null,
+                        status = if (selectedModel == file.name && selection != null) "Active" else "Imported",
+                        onClick = { activateModel(file.name) }
+                    )
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { showLibrary = true }) { Text("Models") }
+                OutlinedButton(onClick = { showLibrary = true }) { Text("Library") }
                 OutlinedButton(onClick = {
                     importLauncher.launch(arrayOf("application/octet-stream", "application/*"))
                 }) {
                     Icon(Icons.Default.FolderOpen, contentDescription = null)
-                    Spacer(Modifier.width(5.dp))
-                    Text("Import")
+                    Spacer(Modifier.width(4.dp))
+                    Text("File")
+                }
+                OutlinedButton(onClick = { folderLauncher.launch(null) }) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Folder")
                 }
             }
 
@@ -371,4 +439,73 @@ private fun formatModelBytes(bytes: Long): String {
         index++
     } while (value >= 1024.0 && index < units.lastIndex)
     return String.format(java.util.Locale.US, "%.1f %s", value, units[index])
+}
+
+
+@Composable
+private fun AiModelPill(
+    label: String,
+    selected: Boolean,
+    status: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            androidx.compose.foundation.Canvas(Modifier.size(6.dp)) {
+                drawCircle(if (selected) androidx.compose.ui.graphics.Color(0xFF27865B) else androidx.compose.ui.graphics.Color.Gray)
+            }
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+            Text(status, style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun importGgufTree(context: Context, treeUri: Uri): Int {
+    val resolver = context.contentResolver
+    val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+    var imported = 0
+    fun visit(parentId: String) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        resolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            ),
+            null, null, null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(idCol)
+                val name = cursor.getString(nameCol).orEmpty()
+                val mime = cursor.getString(mimeCol)
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    visit(id)
+                } else if (name.endsWith(".gguf", true)) {
+                    val documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+                    val input = resolver.openInputStream(documentUri) ?: continue
+                    AiModelStorage.importFile(context, input, name)
+                    imported++
+                }
+            }
+        }
+    }
+    visit(rootId)
+    return imported
 }

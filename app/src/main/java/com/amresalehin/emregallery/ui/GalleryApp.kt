@@ -181,22 +181,9 @@ fun GalleryApp(
             if (hasMediaPermission(context)) {
                 var completedMediaQuery = false
 
-                if (!userInitiated && media.isEmpty()) {
-                    val initialResult = withContext(Dispatchers.IO) {
-                        runCatching { mediaRepository.loadMediaInitialResult() }.getOrNull()
-                    }
-                    if (initialResult != null &&
-                        initialResult.successfulCollections > 0 &&
-                        initialResult.items.isNotEmpty()
-                    ) {
-                        // Show the first usable batch immediately. An empty initial batch is not
-                        // treated as proof that the complete library is empty.
-                        media = initialResult.items
-                        loading = false
-                        completedMediaQuery = true
-                    }
-                }
-
+                // A cached snapshot has already populated the recent Home rows. On a true
+                // first launch without a snapshot, run one complete MediaStore query instead
+                // of issuing separate limited and complete queries for both image/video stores.
                 val loadedResult = withContext(Dispatchers.IO) {
                     runCatching { mediaRepository.loadMediaResult() }.getOrNull()
                 }

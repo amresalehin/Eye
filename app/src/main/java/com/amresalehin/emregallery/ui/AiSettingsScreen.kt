@@ -232,6 +232,10 @@ fun AiSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
+                LocalAiModelsSection()
+            }
+
+            item {
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),

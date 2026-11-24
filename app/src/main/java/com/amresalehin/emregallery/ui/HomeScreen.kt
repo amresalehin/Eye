@@ -140,8 +140,7 @@ fun HomeScreen(
     onSelectionChange: (Set<String>) -> Unit = {},
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit,
-    isVisible: Boolean = true,
-    isPrewarmActive: Boolean = isVisible
+    isVisible: Boolean = true
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
@@ -197,18 +196,6 @@ fun HomeScreen(
     val groupedRows = gridData.groupedRows
     val predictivePrefetchRows = gridData.predictivePrefetchRows
     val predictivePrefetchIndex = gridData.predictivePrefetchIndex
-    LaunchedEffect(isPrewarmActive, listState) {
-        if (!isPrewarmActive) {
-            ThumbnailPrewarmManager.updateHomeActivity(isVisible = false, isScrolling = false)
-            return@LaunchedEffect
-        }
-        snapshotFlow { listState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                ThumbnailPrewarmManager.updateHomeActivity(isVisible = true, isScrolling = scrolling)
-            }
-    }
-
     var observedScrollDirection by remember(listState) { mutableIntStateOf(1) }
 
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
@@ -224,7 +211,6 @@ fun HomeScreen(
 
                 val anchor = (if (forward) visibleIndices.maxOrNull() else visibleIndices.minOrNull()) ?: return Velocity.Zero
                 val rowsSnapshot = predictivePrefetchRows
-                val appCtx = context.applicationContext
                 homeScope.launch(Dispatchers.Default) {
                     val lastIndex = rowsSnapshot.lastIndex
                     val predictedRows = (kotlin.math.abs(available.y) * 0.32f / 180f)
@@ -237,7 +223,9 @@ fun HomeScreen(
                     val visibleItems = visibleIndices.flatMap { rowsSnapshot[it].second }
                     val lookAheadItems = targetRange.flatMap { rowsSnapshot[it].second }
                         .asSequence().distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS).toList()
-                    ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, appCtx)
+                    ThumbnailPrewarmManager.prioritize(
+                        (visibleItems + lookAheadItems).distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS)
+                    )
                 }
                 return Velocity.Zero
             }
@@ -280,12 +268,11 @@ fun HomeScreen(
             val movedEnough = previousAnchor < 0 || anchor != previousAnchor
             if (movedEnough || direction != previousDirection) {
                 val rowsSnapshot = predictivePrefetchRows
-                val appCtx = context.applicationContext
                 withContext(Dispatchers.Default) {
                     val lastIndex = rowsSnapshot.lastIndex
-                    val backwardCount = 4
                     val moving = listState.isScrollInProgress
                     val forwardCount = if (moving) PREFETCH_LOOK_AHEAD_ROWS else PREFETCH_IDLE_LOOK_AHEAD_ROWS
+                    val backwardCount = if (moving) 2 else 4
                     val targetIndices = if (direction > 0) {
                         (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
                             (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
@@ -296,7 +283,9 @@ fun HomeScreen(
                     val visibleItems = visibleRows.flatMap { rowsSnapshot[it].second }
                     val lookAheadItems = targetIndices.flatMap { rowsSnapshot[it].second }
                         .asSequence().distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS).toList()
-                    ThumbnailPrewarmManager.prioritize(visibleItems, lookAheadItems, appCtx)
+                    ThumbnailPrewarmManager.prioritize(
+                        (visibleItems + lookAheadItems).distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS)
+                    )
                 }
                 previousAnchor = anchor
                 previousDirection = direction
@@ -418,7 +407,17 @@ fun HomeScreen(
                 }
             }
 
-            if (!loading && sortedMedia.isEmpty()) {
+            if (sortedMedia.isEmpty() && (loading || media.isNotEmpty())) {
+                item(key = "home_loading_skeleton", contentType = "home_skeleton") {
+                    HomeScreenSkeleton(
+                        gridColumns = pinchGridColumns,
+                        gridStyle = gridStyle,
+                        showMemories = albumTitle == null,
+                        media = media,
+                        containerWidth = containerWidth
+                    )
+                }
+            } else if (sortedMedia.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier

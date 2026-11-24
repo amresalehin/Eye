@@ -163,13 +163,16 @@ fun GalleryApp(
     }
 
     var isRefreshing by remember { mutableStateOf(false) }
+    var mediaLoadError by remember { mutableStateOf(false) }
 
     fun refreshMedia(userInitiated: Boolean = false) {
         scope.launch {
             if (userInitiated) {
                 isRefreshing = true
+                mediaLoadError = false
             } else if (media.isEmpty()) {
                 loading = true
+                mediaLoadError = false
             }
             val startTime = System.currentTimeMillis()
             // Refresh locked vault items concurrently so disk scanning never delays the home grid.
@@ -191,6 +194,7 @@ fun GalleryApp(
                     val loadedMedia = loadedResult.items
                     media = loadedMedia
                     loading = false
+                    mediaLoadError = false
                     completedMediaQuery = true
 
                     // Persist a small metadata-only first-page snapshot for instant next launch.
@@ -202,10 +206,11 @@ fun GalleryApp(
                     scope.launch(Dispatchers.Default) {
                         ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                     }
-                } else if (media.isNotEmpty()) {
-                    // Transient or permission-limited failures must not replace valid media with an
-                    // empty list or flash the empty-library message.
-                    loading = false
+                } else {
+                    // A failed query is not evidence that the library is empty. Keep the last
+                    // successful snapshot when available, otherwise show an explicit retry state.
+                    mediaLoadError = media.isEmpty()
+                    if (media.isNotEmpty()) loading = false
                 }
 
                 if (completedMediaQuery && media.isEmpty()) {
@@ -785,16 +790,18 @@ fun GalleryApp(
         }
     }
 
-    var visibleMedia by remember {
-        mutableStateOf(if (media.size <= 150) filterVisibleMedia() else emptyList())
-    }
-    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
-        visibleMedia = if (media.size <= 150) {
+    val visibleMediaResult by produceState<List<MediaItem>?>(
+        initialValue = if (media.size <= 150) filterVisibleMedia() else null,
+        media, hidden, inBin, archive, favourites, albumFilter, customAlbums
+    ) {
+        value = if (media.size <= 150) {
             filterVisibleMedia()
         } else {
             withContext(Dispatchers.Default) { filterVisibleMedia() }
         }
     }
+    val visibleMedia = visibleMediaResult.orEmpty()
+    val visibleMediaLoading = visibleMediaResult == null
 
     var peopleMedia by remember {
         mutableStateOf(
@@ -988,7 +995,8 @@ fun GalleryApp(
                             isVisible = homeVisible,
                         listState = homeListState,
                         media = visibleMedia,
-                        loading = loading,
+                        loading = loading || visibleMediaLoading,
+                        mediaLoadError = mediaLoadError,
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },
@@ -1064,6 +1072,7 @@ fun GalleryApp(
                         HomeScreen(
                             media = videoItems,
                             loading = loading,
+                            mediaLoadError = mediaLoadError,
                             isRefreshing = isRefreshing,
                             onRefresh = { refreshMedia(userInitiated = true) },
                             onPermissionGranted = { refreshMedia() },
@@ -1093,6 +1102,7 @@ fun GalleryApp(
                         HomeScreen(
                             media = recentItems,
                             loading = loading,
+                            mediaLoadError = mediaLoadError,
                             isRefreshing = isRefreshing,
                             onRefresh = { refreshMedia(userInitiated = true) },
                             onPermissionGranted = { refreshMedia() },

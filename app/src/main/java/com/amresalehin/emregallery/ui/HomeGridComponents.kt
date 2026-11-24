@@ -453,26 +453,12 @@ fun JustifiedMosaicRow(
 ) {
     if (items.isEmpty()) return
 
-    val aspects = remember(items, isSquare) {
-        items.mapIndexed { index, item ->
-            if (isSquare) 1f else if (item.width > 0 && item.height > 0) {
-                (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
-            } else {
-                when ((item.id.hashCode() + rowIndex + index).mod(4)) {
-                    0 -> 0.72f
-                    1 -> 0.9f
-                    2 -> 1.0f
-                    else -> 1.35f
-                }
-            }
-        }
+    val aspects = remember(items, isSquare, rowIndex) {
+        mosaicAspectRatios(items, isSquare, rowIndex)
     }
-
     val gap = 4.dp
-    val totalGap = gap * (items.size - 1)
-    val aspectsSum = remember(aspects) { aspects.sum().coerceAtLeast(0.1f) }
-    val rowHeight = remember(containerWidth, totalGap, aspectsSum) {
-        ((containerWidth - totalGap) / aspectsSum).coerceIn(72.dp, 220.dp)
+    val rowHeight = remember(containerWidth, items.size, aspects) {
+        mosaicRowHeight(containerWidth, items.size, aspects)
     }
 
     Row(

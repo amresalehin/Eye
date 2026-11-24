@@ -195,9 +195,12 @@ class AiModelDownloadWorker(
                 } else body.contentLength().coerceAtLeast(0L)
                 AiModelStorage.writeState(applicationContext, ModelDownloadState(asset.id, "downloading", existing, total))
                 body.byteStream().use { input ->
-                    partial.outputStream().buffered(128 * 1024).let { raw ->
-                        val output = if (existing > 0L) java.io.FileOutputStream(partial, true).buffered(128 * 1024) else raw
-                        output.use { sink ->
+                    val output = if (existing > 0L) {
+                        java.io.FileOutputStream(partial, true).buffered(128 * 1024)
+                    } else {
+                        partial.outputStream().buffered(128 * 1024)
+                    }
+                    output.use { sink ->
                             val buffer = ByteArray(128 * 1024)
                             var downloaded = existing
                             var lastUpdate = 0L
@@ -220,7 +223,6 @@ class AiModelDownloadWorker(
                             }
                             sink.flush()
                             if (total > 0L && downloaded != total) throw IOException("Download was incomplete ($downloaded of $total bytes).")
-                        }
                     }
                 }
             }

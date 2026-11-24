@@ -217,19 +217,15 @@ fun AiSettingsScreen(
                             AiProviderType.OLLAMA
                         },
                         onSelect = { selected ->
-                            val nextProvider = if (selected == AiProviderType.ON_DEVICE_VLM) {
-                                AiProviderType.ON_DEVICE_VLM
+                            if (selected == AiProviderType.ON_DEVICE_VLM) {
+                                AiSettings.save(context, config)
+                                config = config.copy(provider = AiProviderType.ON_DEVICE_VLM)
                             } else {
-                                config.provider.takeIf { it != AiProviderType.ON_DEVICE_VLM } ?: AiProviderType.OLLAMA
+                                val cloud = config.provider.takeIf { it != AiProviderType.ON_DEVICE_VLM }
+                                    ?: AiProviderType.OLLAMA
+                                AiSettings.save(context, config)
+                                config = AiSettings.load(context).copy(provider = cloud)
                             }
-                            val switchingToCloud = config.provider == AiProviderType.ON_DEVICE_VLM &&
-                                nextProvider != AiProviderType.ON_DEVICE_VLM
-                            config = config.copy(
-                                provider = nextProvider,
-                                baseUrl = if (switchingToCloud) AiProviderType.OLLAMA.defaultBaseUrl else config.baseUrl,
-                                modelName = if (switchingToCloud) AiProviderType.OLLAMA.defaultModel else config.modelName
-                            )
-                            AiSettings.save(context, config)
                             statusText = null
                         }
                     )
@@ -444,12 +440,24 @@ fun AiSettingsScreen(
                             ),
                             selected = config.provider,
                             onSelect = { provider ->
-                                config = config.copy(
-                                    provider = provider,
-                                    baseUrl = provider.defaultBaseUrl,
-                                    modelName = provider.defaultModel
-                                )
                                 AiSettings.save(context, config)
+                                val saved = context.getSharedPreferences("emre_ai_settings", android.content.Context.MODE_PRIVATE)
+                                val nextConfig = when (provider) {
+                                    AiProviderType.OLLAMA -> config.copy(provider = provider,
+                                        baseUrl = saved.getString("ollama_base_url", null) ?: provider.defaultBaseUrl,
+                                        modelName = saved.getString("ollama_model", null) ?: provider.defaultModel,
+                                        apiKey = "")
+                                    AiProviderType.GEMINI -> config.copy(provider = provider,
+                                        baseUrl = saved.getString("gemini_base_url", null) ?: provider.defaultBaseUrl,
+                                        modelName = saved.getString("gemini_model", null) ?: provider.defaultModel,
+                                        apiKey = saved.getString("gemini_key", "") ?: "")
+                                    else -> config.copy(provider = provider,
+                                        baseUrl = saved.getString("openai_base_url", null) ?: provider.defaultBaseUrl,
+                                        modelName = saved.getString("openai_model", null) ?: provider.defaultModel,
+                                        apiKey = saved.getString("openai_key", "") ?: "")
+                                }
+                                config = nextConfig
+                                AiSettings.save(context, nextConfig)
                                 statusText = null
                             }
                         )
@@ -498,9 +506,10 @@ fun AiSettingsScreen(
                                     scope.launch {
                                         val res = VisionApiClient.testConnection(config)
                                         testing = false
-                                        res.onSuccess {
+                                        res.onSuccess { message ->
                                             statusIsError = false
-                                            statusText = "Connected"
+                                            statusText = message
+                                            AiSettings.save(context, config)
                                         }.onFailure { err ->
                                             statusIsError = true
                                             statusText = err.localizedMessage ?: "Failed"

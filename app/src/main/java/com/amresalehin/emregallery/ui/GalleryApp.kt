@@ -1087,7 +1087,6 @@ fun GalleryApp(
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
-                        onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
                     }

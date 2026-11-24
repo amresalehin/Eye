@@ -274,6 +274,107 @@ fun MemoriesStrip(
 
 
 
+/**
+ * Lightweight first-frame placeholders that use the same justified-row geometry as the
+ * real gallery grid. When a cached/partial media list exists, use its aspect ratios; on a
+ * true cold start, use a stable fallback pattern rather than a column-masonry approximation.
+ */
+@Composable
+fun HomeScreenSkeleton(
+    gridColumns: Int,
+    gridStyle: String,
+    showMemories: Boolean,
+    media: List<MediaItem>,
+    containerWidth: Dp
+) {
+    val columns = gridColumns.coerceIn(1, 6)
+    val placeholderCount = if (media.isEmpty()) {
+        columns * 4
+    } else {
+        media.size.coerceAtMost(columns * 4).coerceAtLeast(1)
+    }
+    val rows = (0 until placeholderCount).toList().chunked(columns)
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
+    val placeholderShape = RoundedCornerShape(10.dp)
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (showMemories) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(150.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(placeholderColor)
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                Modifier.width(104.dp).height(18.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(placeholderColor)
+            )
+            Box(
+                Modifier.width(38.dp).height(13.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(placeholderColor.copy(alpha = 0.78f))
+            )
+        }
+
+        rows.forEachIndexed { rowIndex, rowItems ->
+            val aspects = rowItems.mapIndexed { indexInRow, mediaIndex ->
+                val item = media.getOrNull(mediaIndex)
+                when {
+                    gridStyle == "square" -> 1f
+                    item != null && item.width > 0 && item.height > 0 ->
+                        (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
+                    item != null -> when ((item.id.hashCode() + rowIndex + indexInRow).mod(4)) {
+                        0 -> 0.72f
+                        1 -> 0.9f
+                        2 -> 1.0f
+                        else -> 1.35f
+                    }
+                    else -> when ((mediaIndex + rowIndex + indexInRow).mod(4)) {
+                        0 -> 0.72f
+                        1 -> 0.9f
+                        2 -> 1.0f
+                        else -> 1.35f
+                    }
+                }
+            }
+            val aspectSum = aspects.sum().coerceAtLeast(0.1f)
+            val totalGap = 4.dp * (rowItems.size - 1)
+            val rowHeight = ((containerWidth - totalGap) / aspectSum).coerceIn(72.dp, 220.dp)
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                aspects.forEach { aspect ->
+                    Box(
+                        modifier = Modifier
+                            .weight(aspect)
+                            .height(rowHeight)
+                            .clip(placeholderShape)
+                            .background(placeholderColor)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun JustifiedMosaicRow(
     items: List<MediaItem>,

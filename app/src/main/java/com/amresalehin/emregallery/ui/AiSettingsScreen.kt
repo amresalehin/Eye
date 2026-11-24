@@ -10,14 +10,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -25,9 +25,14 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -35,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -49,11 +55,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import com.amresalehin.emregallery.IndexingForegroundService
 import com.amresalehin.emregallery.data.ai.AiMetadataStore
 import com.amresalehin.emregallery.data.ai.AiProviderMode
@@ -86,7 +93,11 @@ fun AiSettingsScreen(
     var showApiKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var messageIsError by remember { mutableStateOf(false) }
     var discoveredModels by remember { mutableStateOf<List<String>>(emptyList()) }
+    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var connectionReady by remember { mutableStateOf(false) }
+
     var indexedCount by remember { mutableIntStateOf(0) }
     var processed by remember { mutableIntStateOf(0) }
     var indexingRunning by remember { mutableStateOf(false) }
@@ -101,6 +112,7 @@ fun AiSettingsScreen(
         model = saved.model
         apiKey = saved.apiKey
         initialized = true
+
         while (isActive) {
             val state = context.getSharedPreferences(
                 IndexingForegroundService.STATE_PREFS,
@@ -110,24 +122,22 @@ fun AiSettingsScreen(
             indexingRunning = isAiTask && state.getBoolean(IndexingForegroundService.KEY_RUNNING, false)
             indexingPaused = isAiTask && state.getBoolean(IndexingForegroundService.KEY_PAUSED, false)
             processed = if (isAiTask) state.getInt(IndexingForegroundService.KEY_PROCESSED, 0) else 0
-            currentItemName = if (isAiTask) state.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "").orEmpty() else ""
+            currentItemName = if (isAiTask) {
+                state.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "").orEmpty()
+            } else {
+                ""
+            }
             taskError = if (isAiTask) state.getString(IndexingForegroundService.KEY_ERROR, null) else null
             indexedCount = withContext(Dispatchers.IO) { metadataStore.count() }
-            delay(1800)
+            delay(2500)
         }
     }
 
+    val localProvider = providerMode.isLocal
     val currentSettings = AiSettings(providerMode, baseUrl, model, apiKey)
     val configured = currentSettings.isConfigured
-    val localProvider = providerMode.isLocal
-    val canTestConnection = baseUrl.isNotBlank() && (localProvider || apiKey.isNotBlank())
-    val localSetupInstructions = when (providerMode) {
-        AiProviderMode.MNN_LOCAL ->
-            "MNN: start a vision-capable model server with mnncli serve <model-name> --host 127.0.0.1 --port 8000. Eye uses its OpenAI-compatible /v1/models and /v1/chat/completions routes."
-        AiProviderMode.LLAMA_CPP_LOCAL ->
-            "llama.cpp: start llama-server with a multimodal GGUF and its matching projector, for example llama-server -m model.gguf --mmproj mmproj.gguf --host 127.0.0.1 --port 8080. Eye sends base64 JPEG frames to its OpenAI-compatible /v1 endpoint."
-        AiProviderMode.OPENAI_COMPATIBLE -> ""
-    }
+    val canConnect = initialized && !busy && baseUrl.isNotBlank() &&
+        (localProvider || apiKey.isNotBlank())
 
     fun saveSettings() {
         if (!initialized || busy) return
@@ -135,32 +145,56 @@ fun AiSettingsScreen(
             busy = true
             try {
                 settingsRepository.save(currentSettings)
-                message = "AI provider settings saved. API keys are encrypted in app-private storage."
+                message = "Saved"
+                messageIsError = false
             } catch (error: Exception) {
-                message = error.localizedMessage ?: "Could not save AI settings."
+                message = error.localizedMessage ?: "Could not save settings"
+                messageIsError = true
             } finally {
                 busy = false
             }
         }
     }
 
-    fun testConnection() {
-        if (busy) return
+    fun discoverModels() {
+        if (!canConnect) return
         scope.launch {
             busy = true
-            message = "Connecting to the selected vision endpoint…"
+            message = null
+            messageIsError = false
             try {
                 val models = AiVisionRepository(context.applicationContext).testConnection(currentSettings)
                 discoveredModels = models
-                message = if (models.isEmpty()) {
-                    "Endpoint responded, but it did not return a model list. Enter the model ID manually."
-                } else {
-                    "Connected. Found ${models.size} model(s). Select a model below."
+                connectionReady = true
+                if (models.isNotEmpty() && model !in models) {
+                    model = models.first()
                 }
+                message = if (models.isEmpty()) "Connected" else "${models.size} models found"
+                messageIsError = false
             } catch (error: Exception) {
-                message = error.localizedMessage ?: "Could not connect to the AI endpoint."
+                discoveredModels = emptyList()
+                connectionReady = false
+                message = error.localizedMessage ?: "Connection failed"
+                messageIsError = true
             } finally {
                 busy = false
+            }
+        }
+    }
+
+    fun chooseModel(modelId: String) {
+        model = modelId
+        modelMenuExpanded = false
+        message = null
+        scope.launch {
+            runCatching {
+                settingsRepository.save(currentSettings.copy(model = modelId))
+            }.onSuccess {
+                message = "Model selected"
+                messageIsError = false
+            }.onFailure { error ->
+                message = error.localizedMessage ?: "Could not save model"
+                messageIsError = true
             }
         }
     }
@@ -169,9 +203,17 @@ fun AiSettingsScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("AI & Models", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Descriptions and automatic tags", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            "AI & Models",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Vision descriptions and tags",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 },
                 navigationIcon = {
@@ -179,23 +221,34 @@ fun AiSettingsScreen(
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
                 ElevatedCard(
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
                 ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Inference provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Provider",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                             val modes = AiProviderMode.entries
                             modes.forEachIndexed { index, mode ->
@@ -204,8 +257,15 @@ fun AiSettingsScreen(
                                     onClick = {
                                         val previousDefault = providerMode.defaultBaseUrl
                                         providerMode = mode
-                                        if (baseUrl.isBlank() || baseUrl == previousDefault) baseUrl = mode.defaultBaseUrl
-                                        if (mode == AiProviderMode.OPENAI_COMPATIBLE && model.isBlank()) model = "gpt-4.1-mini"
+                                        if (baseUrl.isBlank() || baseUrl == previousDefault) {
+                                            baseUrl = mode.defaultBaseUrl
+                                        }
+                                        if (mode == AiProviderMode.OPENAI_COMPATIBLE && model.isBlank()) {
+                                            model = "gpt-4.1-mini"
+                                        }
+                                        discoveredModels = emptyList()
+                                        connectionReady = false
+                                        message = null
                                     },
                                     shape = SegmentedButtonDefaults.itemShape(index, modes.size),
                                     icon = {}
@@ -216,36 +276,26 @@ fun AiSettingsScreen(
                                             AiProviderMode.MNN_LOCAL -> "MNN"
                                             AiProviderMode.LLAMA_CPP_LOCAL -> "llama.cpp"
                                         },
+                                        maxLines = 1,
                                         style = MaterialTheme.typography.labelMedium
                                     )
                                 }
                             }
                         }
-                        Text(
-                            providerMode.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+
                         OutlinedTextField(
                             value = baseUrl,
-                            onValueChange = { baseUrl = it },
+                            onValueChange = {
+                                baseUrl = it
+                                discoveredModels = emptyList()
+                                connectionReady = false
+                            },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("API base URL") },
+                            label = { Text("Endpoint URL") },
                             singleLine = true,
-                            supportingText = {
-                                Text("Use the /v1 base URL, not the full chat-completions path.")
-                            }
+                            shape = RoundedCornerShape(14.dp)
                         )
-                        OutlinedTextField(
-                            value = model,
-                            onValueChange = { model = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Vision model ID") },
-                            singleLine = true,
-                            supportingText = {
-                                Text("Choose a model that accepts image input, not a text-only model.")
-                            }
-                        )
+
                         if (!localProvider) {
                             OutlinedTextField(
                                 value = apiKey,
@@ -253,107 +303,282 @@ fun AiSettingsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("API key") },
                                 singleLine = true,
-                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                visualTransformation = if (showApiKey) {
+                                    VisualTransformation.None
+                                } else {
+                                    PasswordVisualTransformation()
+                                },
                                 trailingIcon = {
                                     TextButton(onClick = { showApiKey = !showApiKey }) {
                                         Text(if (showApiKey) "Hide" else "Show")
                                     }
                                 },
-                                supportingText = {
-                                    Text("Stored encrypted using Android Keystore. Never included in logs.")
-                                }
+                                shape = RoundedCornerShape(14.dp)
                             )
-                        } else {
+                        } else if (apiKey.isNotBlank()) {
                             OutlinedTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Local server token (optional)") },
+                                label = { Text("Server token") },
                                 singleLine = true,
-                                visualTransformation = PasswordVisualTransformation()
-                            )
-                            Text(
-                                localSetupInstructions + " The selected model must support image input. Start the server before testing the connection.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = RoundedCornerShape(14.dp)
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { saveSettings() }, enabled = initialized && !busy) {
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { saveSettings() },
+                                enabled = initialized && !busy
+                            ) {
                                 Text("Save")
                             }
-                            OutlinedButton(onClick = { testConnection() }, enabled = initialized && !busy && canTestConnection) {
+                            OutlinedButton(
+                                onClick = { discoverModels() },
+                                enabled = canConnect
+                            ) {
                                 if (busy) {
-                                    CircularProgressIndicator(modifier = Modifier.height(16.dp).width(16.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(7.dp))
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
                                 } else {
                                     Icon(Icons.Default.Refresh, contentDescription = null)
-                                    Spacer(Modifier.width(5.dp))
                                 }
-                                Text("Test / fetch models")
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (connectionReady) "Refresh models" else "Connect")
                             }
                         }
-                        if (discoveredModels.isNotEmpty()) {
-                            Text("Models reported by endpoint", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                            discoveredModels.take(20).forEach { modelId ->
-                                TextButton(
-                                    onClick = { model = modelId },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text(if (model == modelId) "✓ $modelId" else modelId)
-                                }
-                            }
-                        }
+
                         if (message != null) {
-                            Text(message.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                message.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (messageIsError) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
                         }
                     }
                 }
             }
 
+            if (localProvider || discoveredModels.isNotEmpty()) {
+                item {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    if (localProvider) "Local models" else "Models",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (discoveredModels.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = MaterialTheme.colorScheme.secondaryContainer
+                                    ) {
+                                        Text(
+                                            "${discoveredModels.size} available",
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                            }
+
+                            ExposedDropdownMenuBox(
+                                expanded = modelMenuExpanded && discoveredModels.isNotEmpty(),
+                                onExpandedChange = {
+                                    if (discoveredModels.isNotEmpty()) modelMenuExpanded = it
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                OutlinedTextField(
+                                    value = model,
+                                    onValueChange = { if (!localProvider || discoveredModels.isEmpty()) model = it },
+                                    readOnly = localProvider && discoveredModels.isNotEmpty(),
+                                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                    label = { Text("Vision model") },
+                                    placeholder = { Text(if (localProvider) "Connect to list local models" else "Enter model ID") },
+                                    trailingIcon = {
+                                        if (discoveredModels.isNotEmpty()) {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded)
+                                        }
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = modelMenuExpanded && discoveredModels.isNotEmpty(),
+                                    onDismissRequest = { modelMenuExpanded = false }
+                                ) {
+                                    discoveredModels.forEach { modelId ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    modelId,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                if (modelId == model) {
+                                                    Icon(Icons.Default.Check, contentDescription = null)
+                                                }
+                                            },
+                                            onClick = { chooseModel(modelId) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (discoveredModels.isEmpty() && localProvider) {
+                                Text(
+                                    "No models loaded",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Vision model ID") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                }
+            }
+
             item {
                 ElevatedCard(
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
                 ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Text("Automatic descriptions & tags", modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                "Automatic descriptions & tags",
+                                modifier = Modifier.padding(start = 8.dp),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
-                        Text(
-                            "Eye analyses photos and representative video frames. It creates a natural-language description and separate tags for people, objects, activities, locations, events, scenes, and visual attributes. Original files and EXIF metadata are never modified.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Column {
-                                Text("Enriched media", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(indexedCount.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Enriched media",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    indexedCount.toString(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text("Library items", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(totalMedia.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Library",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    totalMedia.toString(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
+
                         if (indexingRunning || indexingPaused) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    if (totalMedia > 0) {
+                                        (processed.toFloat() / totalMedia.toFloat()).coerceIn(0f, 1f)
+                                    } else 0f
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
                             Text(
-                                if (indexingPaused) "Paused at $processed of $totalMedia" else "Processing $processed of $totalMedia",
-                                style = MaterialTheme.typography.bodySmall,
+                                if (indexingPaused) "Paused · $processed / $totalMedia"
+                                else "Processing · $processed / $totalMedia",
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             if (currentItemName.isNotBlank()) {
-                                Text(currentItemName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                Text(
+                                    currentItemName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { if (indexingPaused) IndexingForegroundService.resume(context) else IndexingForegroundService.pause(context) }) {
-                                    Icon(if (indexingPaused) Icons.Default.PlayArrow else Icons.Default.Pause, contentDescription = null)
-                                    Text(if (indexingPaused) "Resume" else "Pause", modifier = Modifier.padding(start = 5.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        if (indexingPaused) IndexingForegroundService.resume(context)
+                                        else IndexingForegroundService.pause(context)
+                                    }
+                                ) {
+                                    Icon(
+                                        if (indexingPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                        contentDescription = null
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(if (indexingPaused) "Resume" else "Pause")
                                 }
                                 OutlinedButton(onClick = { IndexingForegroundService.cancel(context) }) {
                                     Icon(Icons.Default.Stop, contentDescription = null)
-                                    Text("Cancel", modifier = Modifier.padding(start = 5.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Cancel")
                                 }
                             }
                         } else {
@@ -363,25 +588,27 @@ fun AiSettingsScreen(
                                     enabled = initialized && configured && !busy
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                    Text("Index missing", modifier = Modifier.padding(start = 5.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Index missing")
                                 }
                                 OutlinedButton(
                                     onClick = { IndexingForegroundService.startAiIndexing(context, rescanAll = true) },
                                     enabled = initialized && configured && !busy
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = null)
-                                    Text("Reprocess all", modifier = Modifier.padding(start = 5.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Reprocess")
                                 }
                             }
                         }
+
                         if (taskError != null && taskError != "Cancelled") {
-                            Text("Last indexing error: $taskError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            Text(
+                                taskError.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
-                        Text(
-                            "Indexing runs in the background and can be paused or cancelled. Eye caches results locally and skips unchanged media on the next run.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }

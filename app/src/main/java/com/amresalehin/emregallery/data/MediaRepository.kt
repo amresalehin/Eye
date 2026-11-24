@@ -35,12 +35,8 @@ class MediaRepository(private val resolver: ContentResolver) {
             successfulCollections++
         }
 
-        rows.sortWith { a, b ->
-            val aTs = if (a.dateTakenMillis > 0) a.dateTakenMillis else a.dateAddedSeconds * 1000L
-            val bTs = if (b.dateTakenMillis > 0) b.dateTakenMillis else b.dateAddedSeconds * 1000L
-            val cmp = bTs.compareTo(aTs)
-            if (cmp != 0) cmp else a.id.compareTo(b.id)
-        }
+        // The Home screen applies the user's selected sort order before grouping. Avoid
+        // sorting the complete result here as well; preserve the MediaStore query's ordering.
         return MediaLoadResult(rows, successfulCollections)
     }
 

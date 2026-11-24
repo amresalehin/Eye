@@ -235,66 +235,53 @@ fun AiSettingsScreen(
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    )
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            "Provider",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("AI provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            val modes = AiProviderMode.entries
-                            modes.forEachIndexed { index, mode ->
-                                SegmentedButton(
-                                    selected = providerMode == mode,
-                                    onClick = {
-                                        val previousDefault = providerMode.defaultBaseUrl
-                                        providerMode = mode
-                                        if (baseUrl.isBlank() || baseUrl == previousDefault) {
-                                            baseUrl = mode.defaultBaseUrl
-                                        }
-                                        if (mode == AiProviderMode.OPENAI_COMPATIBLE && model.isBlank()) {
-                                            model = "gpt-4.1-mini"
-                                        }
-                                        discoveredModels = emptyList()
-                                        connectionReady = false
-                                        message = null
-                                    },
-                                    shape = SegmentedButtonDefaults.itemShape(index, modes.size),
-                                    icon = {}
-                                ) {
-                                    Text(
-                                        when (mode) {
-                                            AiProviderMode.OPENAI_COMPATIBLE -> "BYOK"
-                                            AiProviderMode.MNN_LOCAL -> "MNN"
-                                            AiProviderMode.LLAMA_CPP_LOCAL -> "llama.cpp"
-                                        },
-                                        maxLines = 1,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                            }
+                            SegmentedButton(
+                                selected = providerMode == AiProviderMode.OPENAI_COMPATIBLE,
+                                onClick = {
+                                    providerMode = AiProviderMode.OPENAI_COMPATIBLE
+                                    baseUrl = AiProviderMode.OPENAI_COMPATIBLE.defaultBaseUrl
+                                    if (model.isBlank()) model = "gpt-4.1-mini"
+                                    discoveredModels = emptyList()
+                                    connectionReady = false
+                                    message = null
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(0, 2),
+                                icon = {}
+                            ) { Text("BYOK") }
+                            SegmentedButton(
+                                selected = providerMode.isLocal,
+                                onClick = {
+                                    providerMode = AiProviderMode.EXTERNAL_LOCAL
+                                    baseUrl = AiProviderMode.EXTERNAL_LOCAL.defaultBaseUrl
+                                    model = ""
+                                    discoveredModels = emptyList()
+                                    connectionReady = false
+                                    message = null
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(1, 2),
+                                icon = {}
+                            ) { Text("External server") }
                         }
-
+                        if (providerMode.isLocal) {
+                            Text(
+                                "Connect a vision server already running on your device or network. Eye does not currently bundle a local vision-language runtime or download runnable local models.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         OutlinedTextField(
                             value = baseUrl,
-                            onValueChange = {
-                                baseUrl = it
-                                discoveredModels = emptyList()
-                                connectionReady = false
-                            },
+                            onValueChange = { baseUrl = it; discoveredModels = emptyList(); connectionReady = false },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Endpoint URL") },
                             singleLine = true,
                             shape = RoundedCornerShape(14.dp)
                         )
-
                         if (!localProvider) {
                             OutlinedTextField(
                                 value = apiKey,
@@ -302,15 +289,9 @@ fun AiSettingsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("API key") },
                                 singleLine = true,
-                                visualTransformation = if (showApiKey) {
-                                    VisualTransformation.None
-                                } else {
-                                    PasswordVisualTransformation()
-                                },
+                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {
-                                    TextButton(onClick = { showApiKey = !showApiKey }) {
-                                        Text(if (showApiKey) "Hide" else "Show")
-                                    }
+                                    TextButton(onClick = { showApiKey = !showApiKey }) { Text(if (showApiKey) "Hide" else "Show") }
                                 },
                                 shape = RoundedCornerShape(14.dp)
                             )
@@ -325,154 +306,57 @@ fun AiSettingsScreen(
                                 shape = RoundedCornerShape(14.dp)
                             )
                         }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { saveSettings() },
-                                enabled = initialized && !busy
-                            ) {
-                                Text("Save")
-                            }
-                            OutlinedButton(
-                                onClick = { discoverModels() },
-                                enabled = canConnect
-                            ) {
-                                if (busy) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(Icons.Default.Refresh, contentDescription = null)
-                                }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { saveSettings() }, enabled = initialized && !busy) { Text("Save") }
+                            OutlinedButton(onClick = { discoverModels() }, enabled = canConnect) {
+                                if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Default.Refresh, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (connectionReady) "Refresh models" else "Connect")
                             }
                         }
-
-                        if (message != null) {
-                            Text(
-                                message.orEmpty(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (messageIsError) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (localProvider || discoveredModels.isNotEmpty()) {
-                item {
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        if (message != null) Text(
+                            message.orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    if (localProvider) "Local models" else "Models",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                if (discoveredModels.isNotEmpty()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(50),
-                                        color = MaterialTheme.colorScheme.secondaryContainer
-                                    ) {
-                                        Text(
-                                            "${discoveredModels.size} available",
-                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    }
-                                }
-                            }
-
+                        if (discoveredModels.isNotEmpty()) {
                             ExposedDropdownMenuBox(
-                                expanded = modelMenuExpanded && discoveredModels.isNotEmpty(),
-                                onExpandedChange = {
-                                    if (discoveredModels.isNotEmpty()) modelMenuExpanded = it
-                                },
+                                expanded = modelMenuExpanded,
+                                onExpandedChange = { modelMenuExpanded = it },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 OutlinedTextField(
                                     value = model,
-                                    onValueChange = { if (!localProvider || discoveredModels.isEmpty()) model = it },
-                                    readOnly = localProvider && discoveredModels.isNotEmpty(),
+                                    onValueChange = {},
+                                    readOnly = true,
                                     modifier = Modifier.menuAnchor().fillMaxWidth(),
                                     label = { Text("Vision model") },
-                                    placeholder = { Text(if (localProvider) "Connect to list local models" else "Enter model ID") },
-                                    trailingIcon = {
-                                        if (discoveredModels.isNotEmpty()) {
-                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded)
-                                        }
-                                    },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp)
                                 )
-                                ExposedDropdownMenu(
-                                    expanded = modelMenuExpanded && discoveredModels.isNotEmpty(),
-                                    onDismissRequest = { modelMenuExpanded = false }
-                                ) {
+                                ExposedDropdownMenu(expanded = modelMenuExpanded, onDismissRequest = { modelMenuExpanded = false }) {
                                     discoveredModels.forEach { modelId ->
                                         DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    modelId,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                if (modelId == model) {
-                                                    Icon(Icons.Default.Check, contentDescription = null)
-                                                }
-                                            },
+                                            text = { Text(modelId, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                            leadingIcon = { if (modelId == model) Icon(Icons.Default.Check, contentDescription = null) },
                                             onClick = { chooseModel(modelId) }
                                         )
                                     }
                                 }
                             }
-
-                            if (discoveredModels.isEmpty() && localProvider) {
-                                Text(
-                                    "No models loaded",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        } else if (!localProvider) {
+                            OutlinedTextField(
+                                value = model,
+                                onValueChange = { model = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Vision model ID") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp)
+                            )
                         }
                     }
-                }
-            } else {
-                item {
-                    OutlinedTextField(
-                        value = model,
-                        onValueChange = { model = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Vision model ID") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp)
-                    )
                 }
             }
 

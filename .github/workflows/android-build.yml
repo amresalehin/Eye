@@ -21,7 +21,7 @@ jobs:
   assemble-debug:
     name: Unit Tests and Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       # Checkout the exact branch that triggered the workflow
@@ -56,8 +56,13 @@ jobs:
       # Native llama.cpp toolchain and pinned source for on-device VLM inference
       - name: Install Android NDK and CMake
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | sort | tail -n 1)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Fetch pinned llama.cpp source
         run: bash ./scripts/fetch_llama_cpp.sh

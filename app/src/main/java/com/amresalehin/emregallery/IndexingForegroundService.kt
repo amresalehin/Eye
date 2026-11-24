@@ -15,7 +15,7 @@ import androidx.core.content.ContextCompat
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.ai.AiMetadataStore
 import com.amresalehin.emregallery.data.ai.AiModelStorage
-import com.amresalehin.emregallery.data.ai.NativeVisionEngine
+import com.amresalehin.emregallery.data.ai.LocalVisionRuntime
 import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import com.amresalehin.emregallery.data.MediaItem
@@ -68,7 +68,7 @@ class IndexingForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_STATUS
         if (action == ACTION_CANCEL) {
-            runCatching { NativeVisionEngine.cancel() }
+            LocalVisionRuntime.cancel()
             taskJob?.cancel()
             taskJob = null
             pauseSignal.value = false

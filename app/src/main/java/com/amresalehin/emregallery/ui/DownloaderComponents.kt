@@ -2334,12 +2334,21 @@ fun DownloaderResultsPage(
                         }
                     }
                 } else if (extractorState.isRunning) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp)
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        item {
-                            ThreeColumnSkeletonGrid()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                extractorState.statusMessage.ifBlank { "Scanning for media…" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
                 } else {

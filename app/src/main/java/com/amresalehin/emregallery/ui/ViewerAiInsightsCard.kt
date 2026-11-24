@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,10 +28,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Karakeep / mymind-style AI Insights card rendered inside ViewerDetailsDrawer:
- * - On-demand single-photo analysis (local colors/CLIP + optional Vision API)
- * - Displays AI title, description/summary, auto-tags, and dominant color swatches
- * - "Find Similar" action launches visual similarity search
+ * Dual-system AI Insights card rendered inside ViewerDetailsDrawer:
+ * - System 2 (Real VLM): Generates detailed descriptions, titles, intelligent tags, and answers
+ *   contextual questions about this photo using On-Device MediaPipe VLM or configured Vision API.
+ * - System 1 (CLIP / Visual): Shows dominant color swatches and launches "Find Visually Similar".
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -51,6 +52,10 @@ fun ViewerAiInsightsCard(
     var record by remember(item.uri) { mutableStateOf<AiMediaRecord?>(null) }
     var isAnalyzing by remember(item.uri) { mutableStateOf(false) }
     var errorMsg by remember(item.uri) { mutableStateOf<String?>(null) }
+
+    var questionInput by remember(item.uri) { mutableStateOf("") }
+    var isAsking by remember(item.uri) { mutableStateOf(false) }
+    var qaAnswer by remember(item.uri) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(item.uri) {
         suspend fun load() {
@@ -78,29 +83,24 @@ fun ViewerAiInsightsCard(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "AI Insights",
+                        text = "AI Insights (VLM)",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-                if (record != null && !isAnalyzing) {
+                if (record?.hasRichCaption == true && !isAnalyzing) {
                     TextButton(
                         onClick = {
                             isAnalyzing = true
                             errorMsg = null
                             scope.launch {
-                                val res = AiIndexingOrchestrator.analyzePhoto(
+                                val res = AiIndexingOrchestrator.analyzeWithVlm(
                                     context = context,
                                     item = item,
-                                    allowCloudApi = true,
                                     isLockedVaultItem = isLockedVaultItem
                                 )
-                                res.onSuccess { rec ->
-                                    record = rec
-                                    errorMsg = rec.errorMessage
-                                }.onFailure { err ->
-                                    errorMsg = err.localizedMessage ?: "AI analysis failed"
-                                }
+                                res.onSuccess { rec -> record = rec }
+                                    .onFailure { err -> errorMsg = err.localizedMessage ?: "VLM analysis failed" }
                                 isAnalyzing = false
                             }
                         },
@@ -121,62 +121,65 @@ fun ViewerAiInsightsCard(
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     Text(
-                        "Analyzing image…",
+                        "Running VLM analysis…",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
                 val rec = record
-                if (rec == null) {
-                Text(
-                    "Extract AI tags, description, color palette, and visual embedding for semantic search.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = {
-                        isAnalyzing = true
-                        errorMsg = null
-                        scope.launch {
-                            val res = AiIndexingOrchestrator.analyzePhoto(
-                                context = context,
-                                item = item,
-                                allowCloudApi = true,
-                                isLockedVaultItem = isLockedVaultItem
-                            )
-                            res.onSuccess { rec ->
-                                record = rec
-                                errorMsg = rec.errorMessage
-                            }.onFailure { err ->
-                                errorMsg = err.localizedMessage ?: "AI analysis failed"
+                if (rec == null || !rec.hasRichCaption) {
+                    Text(
+                        "Run the Vision-Language Model to generate a detailed description and intelligent tags for this photo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = {
+                            isAnalyzing = true
+                            errorMsg = null
+                            scope.launch {
+                                val res = AiIndexingOrchestrator.analyzeWithVlm(
+                                    context = context,
+                                    item = item,
+                                    isLockedVaultItem = isLockedVaultItem
+                                )
+                                res.onSuccess { updated -> record = updated }
+                                    .onFailure { err -> errorMsg = err.localizedMessage ?: "VLM analysis failed" }
+                                isAnalyzing = false
                             }
-                            isAnalyzing = false
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Analyze with AI")
-                }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Describe & Tag with VLM")
+                    }
                 } else {
-                if (rec.title.isNotBlank()) {
-                    Text(
-                        text = rec.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                if (rec.caption.isNotBlank()) {
-                    Text(
-                        text = rec.caption,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    if (rec.title.isNotBlank()) {
+                        Text(
+                            text = rec.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (rec.caption.isNotBlank()) {
+                        Text(
+                            text = rec.caption,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    if (rec.captionModel.isNotBlank()) {
+                        Text(
+                            text = "Model: ${rec.captionModel}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
-                if (rec.colors.isNotEmpty()) {
+                if (rec != null && rec.colors.isNotEmpty()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -203,7 +206,7 @@ fun ViewerAiInsightsCard(
                     }
                 }
 
-                if (rec.tags.isNotEmpty()) {
+                if (rec != null && rec.tags.isNotEmpty()) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -226,7 +229,64 @@ fun ViewerAiInsightsCard(
                     }
                 }
 
-                if (onFindSimilar != null && rec.embeddingDim > 0) {
+                // Contextual VLM Q&A
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = questionInput,
+                        onValueChange = { questionInput = it },
+                        placeholder = { Text("Ask VLM about this photo…", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            val q = questionInput.trim()
+                            if (q.isNotBlank() && !isAsking) {
+                                isAsking = true
+                                errorMsg = null
+                                scope.launch {
+                                    val res = AiIndexingOrchestrator.askAboutPhoto(
+                                        context = context,
+                                        item = item,
+                                        question = q,
+                                        isLockedVaultItem = isLockedVaultItem
+                                    )
+                                    res.onSuccess { ans -> qaAnswer = ans }
+                                        .onFailure { err -> errorMsg = err.localizedMessage ?: "VLM Q&A failed" }
+                                    isAsking = false
+                                }
+                            }
+                        },
+                        enabled = questionInput.isNotBlank() && !isAsking
+                    ) {
+                        if (isAsking) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Send, contentDescription = "Ask VLM")
+                        }
+                    }
+                }
+
+                if (!qaAnswer.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = qaAnswer.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
+                if (onFindSimilar != null && rec != null && rec.embeddingDim > 0) {
                     OutlinedButton(
                         onClick = { onFindSimilar(item) },
                         modifier = Modifier.fillMaxWidth()
@@ -235,7 +295,6 @@ fun ViewerAiInsightsCard(
                         Spacer(Modifier.width(8.dp))
                         Text("Find Visually Similar")
                     }
-                }
                 }
             }
 

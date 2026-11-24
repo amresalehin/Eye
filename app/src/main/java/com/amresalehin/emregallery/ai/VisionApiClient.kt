@@ -87,9 +87,36 @@ Rules for tags:
         }
     }
 
+    suspend fun askQuestion(
+        bitmap: Bitmap,
+        config: AiConfig,
+        question: String,
+        ocrText: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(config.isRemoteConfigured) { "AI Vision API provider is not configured." }
+            val base64Jpeg = encodeBitmapToBase64Jpeg(bitmap, maxSide = 1024, quality = 80)
+            val userPrompt = buildString {
+                append(question.trim())
+                if (config.includeOcrContext && !ocrText.isNullOrBlank()) {
+                    append("\n\nExtracted OCR text from this image:\n")
+                    append(ocrText.trim().take(1200))
+                }
+            }
+            val normalizedBase = config.baseUrl.trim().trimEnd('/')
+            val isNativeOllama = config.provider == AiProviderType.OLLAMA &&
+                !normalizedBase.endsWith("/v1", ignoreCase = true)
+            if (isNativeOllama) {
+                callNativeOllamaChat(normalizedBase, config, userPrompt, base64Jpeg).trim()
+            } else {
+                callOpenAiCompatibleChat(normalizedBase, config, userPrompt, base64Jpeg).trim()
+            }
+        }
+    }
+
     suspend fun testConnection(config: AiConfig): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            require(config.provider != AiProviderType.ON_DEVICE_ONLY) { "Select a remote or Ollama provider to test." }
+            require(config.provider != AiProviderType.ON_DEVICE_VLM) { "Select a remote or Ollama provider to test." }
             require(config.baseUrl.isNotBlank()) { "Base URL is required." }
             if (config.provider.requiresApiKey) {
                 require(config.apiKey.isNotBlank()) { "API key is required for ${config.provider.label}." }

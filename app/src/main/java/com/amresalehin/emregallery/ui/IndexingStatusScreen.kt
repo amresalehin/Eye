@@ -171,9 +171,10 @@ fun IndexingStatusScreen(
                 cardBackground = cardBackground,
                 cardBorder = cardBorder,
                 numberFormat = numberFormat,
-                onToggleAiIndexing = viewModel::toggleAiIndexing,
+                onToggleClipIndexing = viewModel::toggleClipIndexing,
+                onToggleVlmIndexing = viewModel::toggleVlmIndexing,
                 onStopAiIndexing = viewModel::stopAiIndexing,
-                onReindexAi = viewModel::clearAndReindexAi,
+                onReindexClip = viewModel::clearAndReindexClip,
                 onDownloadClipModel = viewModel::startAiModelDownload,
                 onOpenAiSettings = { onOpenAiSettings?.invoke() },
                 onClearAiIndex = viewModel::clearAiIndex

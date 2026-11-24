@@ -27,6 +27,7 @@ import com.amresalehin.emregallery.ai.AiIndexStore
 import com.amresalehin.emregallery.ai.AiIndexingOrchestrator
 import com.amresalehin.emregallery.ai.AiSettings
 import com.amresalehin.emregallery.ai.ClipOnnxModelManager
+import com.amresalehin.emregallery.ai.LocalVlmModelManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -102,8 +103,10 @@ class IndexingForegroundService : Service() {
             ACTION_START_OCR -> "OCR indexing"
             ACTION_START_FACE -> "Face indexing"
             ACTION_START_LOCATION -> "Map location indexing"
-            ACTION_START_AI -> "AI tagging & semantic indexing"
+            ACTION_START_AI -> "CLIP semantic indexing"
+            ACTION_START_VLM -> "VLM descriptions & tagging"
             ACTION_DOWNLOAD_AI_MODEL -> "Downloading CLIP AI model"
+            ACTION_DOWNLOAD_VLM_MODEL -> "Downloading VLM model"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -129,13 +132,16 @@ class IndexingForegroundService : Service() {
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
-                    ACTION_START_AI -> runAi(
-                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        includeCloudApi = intent?.getBooleanExtra(EXTRA_INCLUDE_CLOUD_API, true) != false
+                    ACTION_START_AI -> runClipSemantic(
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                    )
+                    ACTION_START_VLM -> runVlmBatch(
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
                     ACTION_DOWNLOAD_AI_MODEL -> downloadAiModel(
                         force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
                     )
+                    ACTION_DOWNLOAD_VLM_MODEL -> downloadVlmModel()
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
@@ -555,18 +561,11 @@ class IndexingForegroundService : Service() {
         return b.build()
     }
 
-    private suspend fun runAi(rescanAll: Boolean, includeCloudApi: Boolean) {
+    private suspend fun runClipSemantic(rescanAll: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val store = AiIndexStore.getInstance(this)
-        val config = AiSettings.load(this)
         val photos = loadPhotos()
-        if (rescanAll) {
-            withContext(Dispatchers.IO) { store.clearAll() }
-        }
-        val useRemote = includeCloudApi && config.batchUseCloudApi && config.isRemoteConfigured
-        val alreadyDone = withContext(Dispatchers.IO) {
-            if (useRemote) store.getFullyCaptionedUris() else store.getIndexedUris()
-        }
+        val alreadyDone = if (rescanAll) emptySet() else withContext(Dispatchers.IO) { store.getIndexedUris() }
         val pending = photos.filterNot { it.uri in alreadyDone }
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
         pauseSignal.value = initialPaused
@@ -579,31 +578,103 @@ class IndexingForegroundService : Service() {
             total = photos.size,
             error = null
         )
-        postProgress("AI indexing", "Preparing ${pending.size} photos", completed, photos.size)
+        postProgress("CLIP semantic indexing", "Preparing ${pending.size} photos", completed, photos.size)
         val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this)
         for (item in pending) {
             awaitResume()
             currentCoroutineContext().ensureActive()
             try {
-                AiIndexingOrchestrator.analyzePhoto(
-                    context = this,
-                    item = item,
-                    allowCloudApi = useRemote,
-                    isLockedVaultItem = false
-                )
+                AiIndexingOrchestrator.indexSemanticOnly(this, item)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Skip individual failures and continue indexing the remaining library.
+                // Skip individual decode errors and continue.
             }
             completed++
             updateState(processed = completed, total = photos.size)
-            if (completed % 2 == 0 || completed == photos.size) {
-                postProgress("AI indexing", "Indexed $completed of ${photos.size} photos", completed, photos.size)
+            if (completed % 3 == 0 || completed == photos.size) {
+                postProgress("CLIP semantic indexing", "Indexed $completed of ${photos.size} photos", completed, photos.size)
             }
             if (cooldown > 0L) delay(cooldown)
             kotlinx.coroutines.yield()
         }
+    }
+
+    private suspend fun runVlmBatch(rescanAll: Boolean) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        val store = AiIndexStore.getInstance(this)
+        val photos = loadPhotos()
+        val alreadyDone = if (rescanAll) emptySet() else withContext(Dispatchers.IO) { store.getFullyCaptionedUris() }
+        val pending = photos.filterNot { it.uri in alreadyDone }
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
+        var completed = photos.size - pending.size
+        updateState(
+            task = TASK_AI_VLM,
+            running = true,
+            paused = initialPaused,
+            processed = completed,
+            total = photos.size,
+            error = null
+        )
+        postProgress("VLM indexing", "Describing ${pending.size} photos", completed, photos.size)
+        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this)
+        for (item in pending) {
+            awaitResume()
+            currentCoroutineContext().ensureActive()
+            val res = AiIndexingOrchestrator.analyzeWithVlm(
+                context = this,
+                item = item,
+                isLockedVaultItem = false
+            )
+            if (res.isFailure) {
+                val err = res.exceptionOrNull()
+                if (err is CancellationException) throw err
+                // Abort batch immediately on missing model / unconfigured provider errors
+                val msg = err?.localizedMessage.orEmpty()
+                if (msg.contains("No on-device VLM", ignoreCase = true) ||
+                    msg.contains("not configured", ignoreCase = true)
+                ) {
+                    error(msg)
+                }
+            }
+            completed++
+            updateState(processed = completed, total = photos.size)
+            postProgress("VLM indexing", "Described $completed of ${photos.size} photos", completed, photos.size)
+            if (cooldown > 0L) delay(cooldown)
+            kotlinx.coroutines.yield()
+        }
+    }
+
+    private suspend fun downloadVlmModel() {
+        val config = AiSettings.load(this)
+        updateState(
+            task = TASK_AI_MODEL,
+            running = true,
+            paused = false,
+            bytes = 0L,
+            bytesTotal = 0L,
+            stage = "downloading",
+            error = null
+        )
+        postProgress("Downloading VLM model", "Starting download…", 0, 100)
+        LocalVlmModelManager.downloadModelFromUrl(
+            context = this,
+            downloadUrl = config.localVlmDownloadUrl,
+            bearerToken = config.hfToken,
+            onProgress = { received, total, stage ->
+                updateState(
+                    task = TASK_AI_MODEL,
+                    running = true,
+                    bytes = received,
+                    bytesTotal = total,
+                    stage = stage
+                )
+                val pct = if (total > 0L) ((received * 100L) / total).toInt().coerceIn(0, 100) else 0
+                postProgress("Downloading VLM model", "Downloaded $pct%", pct, 100)
+            },
+            awaitIfResumed = { awaitResume() }
+        )
     }
 
     private suspend fun downloadAiModel(force: Boolean) {
@@ -672,6 +743,7 @@ class IndexingForegroundService : Service() {
 
         const val TASK_LOCATION = "location"
         const val TASK_AI = "ai"
+        const val TASK_AI_VLM = "ai_vlm"
         const val TASK_AI_MODEL = "ai_model"
         private const val TASK_OCR = "ocr"
         private const val TASK_FACE = "face"
@@ -682,7 +754,9 @@ class IndexingForegroundService : Service() {
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
         private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
         private const val ACTION_START_AI = "com.amresalehin.emregallery.indexing.START_AI"
+        private const val ACTION_START_VLM = "com.amresalehin.emregallery.indexing.START_VLM"
         private const val ACTION_DOWNLOAD_AI_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_AI_MODEL"
+        private const val ACTION_DOWNLOAD_VLM_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_VLM_MODEL"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
@@ -761,10 +835,18 @@ class IndexingForegroundService : Service() {
                 putExtra(EXTRA_INCLUDE_CLOUD_API, includeCloudApi)
             }
 
+        fun startVlm(context: Context, rescanAll: Boolean = false) =
+            command(context, ACTION_START_VLM) {
+                putExtra(EXTRA_RESCAN_ALL, rescanAll)
+            }
+
         fun downloadAiModel(context: Context, force: Boolean = false) =
             command(context, ACTION_DOWNLOAD_AI_MODEL) {
                 putExtra(EXTRA_FORCE, force)
             }
+
+        fun downloadVlmModel(context: Context) =
+            command(context, ACTION_DOWNLOAD_VLM_MODEL)
 
         fun downloadModel(
             context: Context,

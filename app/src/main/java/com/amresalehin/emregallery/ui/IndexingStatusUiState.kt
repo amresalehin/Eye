@@ -75,16 +75,19 @@ data class AiIndexingState(
     val clipEmbeddedCount: Int = 0,
     val failedCount: Int = 0,
     val distinctTagCount: Int = 0,
-    val isRunning: Boolean = false,
+    val isClipRunning: Boolean = false,
+    val isVlmRunning: Boolean = false,
     val isPaused: Boolean = false,
     val isDownloadingModel: Boolean = false,
     val downloadBytes: Long = 0L,
     val downloadTotalBytes: Long = 0L,
     val isClipInstalled: Boolean = false,
-    val providerLabel: String = "On-Device Only",
+    val vlmStatusLabel: String = "MediaPipe VLM",
     val itemsPerMinute: Int = 0,
     val error: String? = null
-)
+) {
+    val isRunning: Boolean get() = isClipRunning || isVlmRunning
+}
 
 data class EngineState(
     val isBuffaloLInstalled: Boolean = false,

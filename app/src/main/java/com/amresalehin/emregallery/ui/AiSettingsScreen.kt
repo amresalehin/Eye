@@ -1,5 +1,7 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,6 +45,37 @@ fun AiSettingsScreen(
     var testIsError by remember { mutableStateOf(false) }
     var savedBanner by remember { mutableStateOf(false) }
     var clipInstalled by remember { mutableStateOf(ClipOnnxModelManager.isInstalled(context)) }
+    var vlmModelSummary by remember { mutableStateOf(LocalVlmModelManager.installedModelSummary(context)) }
+    var importingVlm by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf<String?>(null) }
+
+    val pickVlmLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importingVlm = true
+            importStatus = "Importing VLM model into app storage…"
+            scope.launch {
+                val res = LocalVlmModelManager.importModelFromUri(context, uri) { copied, total ->
+                    val mb = copied / (1024 * 1024)
+                    importStatus = if (total > 0L) {
+                        val pct = ((copied * 100L) / total).toInt().coerceIn(0, 100)
+                        "Importing model ($pct% · ${mb} MB)…"
+                    } else {
+                        "Importing model (${mb} MB)…"
+                    }
+                }
+                importingVlm = false
+                res.onSuccess {
+                    config = AiSettings.load(context)
+                    vlmModelSummary = LocalVlmModelManager.installedModelSummary(context)
+                    importStatus = "Model installed: ${vlmModelSummary.orEmpty()}"
+                }.onFailure { err ->
+                    importStatus = err.localizedMessage ?: "Import failed"
+                }
+            }
+        }
+    }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -67,7 +100,84 @@ fun AiSettingsScreen(
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(56.dp))
 
-            // 1. Hybrid Provider Selection Card
+            // SYSTEM 1: CLIP Semantic Search & Visual Embeddings
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = cardBackground,
+                border = cardBorder,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.ImageSearch,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "System 1: CLIP Semantic Search (ONNX)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                if (clipInstalled) {
+                                    "CLIP ViT-B/32 installed (~154 MB) · Powers fast background natural-language & visually similar search."
+                                } else {
+                                    "Download CLIP ViT-B/32 (~154 MB) for fast background semantic search and visual similarity."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (!clipInstalled) {
+                            Button(
+                                onClick = {
+                                    IndexingForegroundService.downloadAiModel(context, force = false)
+                                    onOpenIndexingStatus()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Download CLIP")
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { ClipOnnxModelManager.deleteModels(context) }
+                                        clipInstalled = false
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Remove CLIP")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = onOpenIndexingStatus,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Indexing Status")
+                        }
+                    }
+                }
+            }
+
+            // SYSTEM 2: Real Vision-Language Model (VLM)
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = cardBackground,
@@ -87,12 +197,12 @@ fun AiSettingsScreen(
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(
-                                "AI Vision Provider",
+                                "System 2: Vision-Language Model (VLM)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                "On-device colors & embeddings always run locally. Optionally connect Ollama or a Vision API for Karakeep/mymind-style titles, descriptions, and rich tags.",
+                                "Generates detailed descriptions, intelligent Karakeep/mymind tags, OCR-aware context, and answers questions about photos.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -139,8 +249,8 @@ fun AiSettingsScreen(
                                     )
                                     Text(
                                         when (provider) {
-                                            AiProviderType.ON_DEVICE_ONLY -> "Zero network calls. Uses local palette & CLIP ONNX."
-                                            AiProviderType.OLLAMA -> "Self-hosted vision models (e.g. qwen2.5vl:3b, llava)."
+                                            AiProviderType.ON_DEVICE_VLM -> "100% offline on-phone VLM (Gemma 3n / Gemma 4 .task via MediaPipe; pluggable for llama.cpp)."
+                                            AiProviderType.OLLAMA -> "Self-hosted vision models on your PC/server (e.g. qwen2.5vl:3b, llava)."
                                             AiProviderType.GEMINI -> "Google Gemini OpenAI-compatible vision API."
                                             AiProviderType.OPENAI_COMPATIBLE -> "OpenAI, OpenRouter, LM Studio, or vLLM."
                                         },
@@ -152,7 +262,163 @@ fun AiSettingsScreen(
                         }
                     }
 
-                    if (config.provider != AiProviderType.ON_DEVICE_ONLY) {
+                    if (config.provider == AiProviderType.ON_DEVICE_VLM) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                        Text(
+                            text = if (vlmModelSummary != null) {
+                                "Installed VLM: $vlmModelSummary"
+                            } else {
+                                "No on-device VLM installed yet. Import a MediaPipe/LiteRT-LM multimodal model (e.g. gemma-3n-E2B-it-int4.task) or download by URL."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (vlmModelSummary != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Pluggable Local VLM Engine selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            LocalVlmRegistry.all().forEach { engine ->
+                                FilterChip(
+                                    selected = config.localVlmEngineId == engine.engineId,
+                                    onClick = {
+                                        config = config.copy(localVlmEngineId = engine.engineId)
+                                        AiSettings.save(context, config)
+                                    },
+                                    label = {
+                                        Text(
+                                            if (engine.engineId == LocalVlmRegistry.ENGINE_MEDIAPIPE) "MediaPipe" else "llama.cpp (stub)"
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Prefer GPU acceleration", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Automatically falls back to CPU if GPU delegate is unavailable.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = config.vlmUseGpu,
+                                onCheckedChange = {
+                                    config = config.copy(vlmUseGpu = it)
+                                    AiSettings.save(context, config)
+                                }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { pickVlmLauncher.launch(arrayOf("*/*")) },
+                                enabled = !importingVlm,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Import .task")
+                            }
+
+                            if (vlmModelSummary != null) {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) { LocalVlmModelManager.deleteInstalledModels(context) }
+                                            vlmModelSummary = null
+                                            importStatus = "Removed on-device VLM model."
+                                        }
+                                    },
+                                    enabled = !importingVlm,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Remove")
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = config.localVlmDownloadUrl,
+                            onValueChange = {
+                                config = config.copy(localVlmDownloadUrl = it)
+                                savedBanner = false
+                            },
+                            label = { Text("Direct Model URL (.task / .litertlm)") },
+                            placeholder = { Text("https://huggingface.co/.../gemma-3n-E2B-it-int4.task") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = config.hfToken,
+                            onValueChange = {
+                                config = config.copy(hfToken = it)
+                                savedBanner = false
+                            },
+                            label = { Text("HuggingFace Token (optional for gated Gemma repos)") },
+                            singleLine = true,
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(
+                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = "Toggle token visibility"
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    AiSettings.save(context, config)
+                                    IndexingForegroundService.downloadVlmModel(context)
+                                    onOpenIndexingStatus()
+                                },
+                                enabled = config.localVlmDownloadUrl.isNotBlank() && !importingVlm,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Download URL")
+                            }
+
+                            Button(
+                                onClick = {
+                                    AiSettings.save(context, config)
+                                    savedBanner = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Save Settings")
+                            }
+                        }
+
+                        if (!importStatus.isNullOrBlank()) {
+                            Text(
+                                text = importStatus.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
                         OutlinedTextField(
@@ -186,9 +452,7 @@ fun AiSettingsScreen(
                                 savedBanner = false
                             },
                             label = {
-                                Text(
-                                    if (config.provider.requiresApiKey) "API Key" else "API Key (optional)"
-                                )
+                                Text(if (config.provider.requiresApiKey) "API Key" else "API Key (optional)")
                             },
                             singleLine = true,
                             visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
@@ -251,16 +515,6 @@ fun AiSettingsScreen(
                                 color = if (testIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                             )
                         }
-                    } else {
-                        Button(
-                            onClick = {
-                                AiSettings.save(context, config)
-                                savedBanner = true
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Save Settings")
-                        }
                     }
 
                     if (savedBanner) {
@@ -273,7 +527,7 @@ fun AiSettingsScreen(
                 }
             }
 
-            // 2. Privacy & Indexing Behavior Card
+            // Privacy & Context Card
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = cardBackground,
@@ -295,9 +549,9 @@ fun AiSettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Include OCR text in AI prompts", style = MaterialTheme.typography.bodyMedium)
+                            Text("Include OCR text in VLM prompts", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "Passes extracted text from receipts, screenshots, and documents for richer summaries & tags.",
+                                "Combines extracted OCR text with visual understanding for receipts, screenshots, and documents.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -316,9 +570,9 @@ fun AiSettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Exclude Locked Vault from Cloud API", style = MaterialTheme.typography.bodyMedium)
+                            Text("Keep Locked Vault strictly on-device", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "Never upload encrypted Locked Vault media to external APIs (on-device only).",
+                                "Never send encrypted Locked Vault media to external cloud/Ollama APIs.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -330,106 +584,6 @@ fun AiSettingsScreen(
                                 AiSettings.save(context, config)
                             }
                         )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Use Vision API during background batch", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Turn off to run only free on-device colors/CLIP in background and use API on-demand in Viewer.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = config.batchUseCloudApi,
-                            onCheckedChange = {
-                                config = config.copy(batchUseCloudApi = it)
-                                AiSettings.save(context, config)
-                            }
-                        )
-                    }
-                }
-            }
-
-            // 3. On-Device CLIP Semantic Model Card
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = cardBackground,
-                border = cardBorder,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Memory,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "On-Device CLIP ViT-B/32 (ONNX)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                if (clipInstalled) {
-                                    "Installed (~154 MB) · Offline semantic search & zero-shot tagging active."
-                                } else {
-                                    "Optional (~154 MB) · Enables offline natural-language visual search and CLIP similarity."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        if (!clipInstalled) {
-                            Button(
-                                onClick = {
-                                    IndexingForegroundService.downloadAiModel(context, force = false)
-                                    onOpenIndexingStatus()
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Download CLIP Model")
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) {
-                                            ClipOnnxModelManager.deleteModels(context)
-                                        }
-                                        clipInstalled = false
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Remove Model")
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = onOpenIndexingStatus,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Indexing Status")
-                        }
                     }
                 }
             }

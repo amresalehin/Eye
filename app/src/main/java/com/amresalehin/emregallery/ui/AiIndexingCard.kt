@@ -22,9 +22,10 @@ fun AiIndexingCard(
     cardBackground: Color,
     cardBorder: BorderStroke,
     numberFormat: NumberFormat,
-    onToggleAiIndexing: () -> Unit,
+    onToggleClipIndexing: () -> Unit,
+    onToggleVlmIndexing: () -> Unit,
     onStopAiIndexing: () -> Unit,
-    onReindexAi: () -> Unit,
+    onReindexClip: () -> Unit,
     onDownloadClipModel: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onClearAiIndex: () -> Unit
@@ -65,13 +66,13 @@ fun AiIndexingCard(
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
-                            "AI Tagging & Semantic Search",
+                            "Dual AI: CLIP Search + VLM",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "Provider: ${aiState.providerLabel}" +
-                                if (aiState.isClipInstalled) " · CLIP ONNX ready" else " · Color + visual index",
+                            "CLIP: ${if (aiState.isClipInstalled) "ONNX ready" else "not downloaded"} · " +
+                                "VLM: ${aiState.vlmStatusLabel}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -92,7 +93,7 @@ fun AiIndexingCard(
                 } else 0f
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Downloading CLIP ONNX model (${(frac * 100).toInt()}%)…",
+                        "Downloading AI model (${(frac * 100).toInt()}%)…",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium
                     )
@@ -102,23 +103,23 @@ fun AiIndexingCard(
                     )
                 }
             } else {
-                val progress = if (totalPhotos > 0) {
+                // System 1 Progress: CLIP Semantic Index
+                val clipProgress = if (totalPhotos > 0) {
                     (aiState.processed.toFloat() / totalPhotos.toFloat()).coerceIn(0f, 1f)
                 } else 0f
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
                             if (countsReady) {
-                                "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)} photos indexed"
+                                "1. CLIP Semantic: ${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}"
                             } else "Calculating…",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium
                         )
-                        if (aiState.isRunning && aiState.itemsPerMinute > 0) {
+                        if (aiState.isClipRunning && aiState.itemsPerMinute > 0) {
                             Text(
                                 "${aiState.itemsPerMinute}/min",
                                 style = MaterialTheme.typography.bodySmall,
@@ -126,17 +127,43 @@ fun AiIndexingCard(
                             )
                         }
                     }
-
                     LinearProgressIndicator(
-                        progress = { progress },
+                        progress = { clipProgress },
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
 
+                // System 2 Progress: VLM Descriptions & Tags
+                val vlmProgress = if (totalPhotos > 0) {
+                    (aiState.richCaptionedCount.toFloat() / totalPhotos.toFloat()).coerceIn(0f, 1f)
+                } else 0f
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            if (countsReady) {
+                                "2. VLM Descriptions & Tags: ${numberFormat.format(aiState.richCaptionedCount)} / ${numberFormat.format(totalPhotos)}"
+                            } else "Calculating…",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (aiState.isVlmRunning && aiState.itemsPerMinute > 0) {
+                            Text(
+                                "${aiState.itemsPerMinute}/min",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    LinearProgressIndicator(
+                        progress = { vlmProgress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Text(
-                        "${numberFormat.format(aiState.richCaptionedCount)} AI descriptions · " +
-                            "${numberFormat.format(aiState.clipEmbeddedCount)} CLIP vectors · " +
-                            "${numberFormat.format(aiState.distinctTagCount)} tags",
-                        style = MaterialTheme.typography.bodySmall,
+                        "${numberFormat.format(aiState.clipEmbeddedCount)} CLIP vectors · ${numberFormat.format(aiState.distinctTagCount)} VLM tags",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -155,43 +182,43 @@ fun AiIndexingCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = onToggleAiIndexing,
-                    enabled = !aiState.isDownloadingModel && totalPhotos > 0,
+                    onClick = onToggleClipIndexing,
+                    enabled = !aiState.isDownloadingModel && !aiState.isVlmRunning && totalPhotos > 0,
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
-                        when {
-                            aiState.isRunning && !aiState.isPaused -> Icons.Default.Pause
-                            aiState.isRunning && aiState.isPaused -> Icons.Default.PlayArrow
-                            else -> Icons.Default.AutoAwesome
-                        },
+                        if (aiState.isClipRunning && !aiState.isPaused) Icons.Default.Pause else Icons.Default.ImageSearch,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
                         when {
-                            aiState.isRunning && !aiState.isPaused -> "Pause"
-                            aiState.isRunning && aiState.isPaused -> "Resume"
-                            aiState.processed in 1 until totalPhotos -> "Continue"
-                            else -> "Index AI"
+                            aiState.isClipRunning && !aiState.isPaused -> "Pause CLIP"
+                            aiState.isClipRunning && aiState.isPaused -> "Resume CLIP"
+                            else -> "Index CLIP"
                         }
                     )
                 }
 
-                if (aiState.isRunning) {
-                    OutlinedButton(onClick = onStopAiIndexing) {
-                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Stop")
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = onReindexAi,
-                        enabled = totalPhotos > 0 && !aiState.isDownloadingModel
-                    ) {
-                        Text("Re-index")
-                    }
+                Button(
+                    onClick = onToggleVlmIndexing,
+                    enabled = !aiState.isDownloadingModel && !aiState.isClipRunning && totalPhotos > 0,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        if (aiState.isVlmRunning && !aiState.isPaused) Icons.Default.Pause else Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            aiState.isVlmRunning && !aiState.isPaused -> "Pause VLM"
+                            aiState.isVlmRunning && aiState.isPaused -> "Resume VLM"
+                            else -> "Index VLM"
+                        }
+                    )
                 }
             }
 
@@ -199,20 +226,36 @@ fun AiIndexingCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (!aiState.isClipInstalled) {
-                    OutlinedButton(
-                        onClick = onDownloadClipModel,
-                        enabled = !aiState.isDownloadingModel && !aiState.isRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Download CLIP (~154 MB)")
+                if (aiState.isClipRunning || aiState.isVlmRunning) {
+                    OutlinedButton(onClick = onStopAiIndexing, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Stop")
                     }
-                }
-                if (aiState.processed > 0 && !aiState.isRunning) {
-                    TextButton(onClick = onClearAiIndex) {
-                        Text("Clear AI Index")
+                } else {
+                    if (!aiState.isClipInstalled) {
+                        OutlinedButton(
+                            onClick = onDownloadClipModel,
+                            enabled = !aiState.isDownloadingModel,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Get CLIP")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onReindexClip,
+                            enabled = !aiState.isDownloadingModel && totalPhotos > 0,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Re-index CLIP")
+                        }
+                    }
+                    if (aiState.processed > 0) {
+                        TextButton(onClick = onClearAiIndex) {
+                            Text("Clear Index")
+                        }
                     }
                 }
             }

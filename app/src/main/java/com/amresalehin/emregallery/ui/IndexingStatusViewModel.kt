@@ -25,7 +25,9 @@ import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ai.AiIndexStats
 import com.amresalehin.emregallery.ai.AiIndexStore
 import com.amresalehin.emregallery.ai.AiSettings
+import com.amresalehin.emregallery.ai.AiProviderType
 import com.amresalehin.emregallery.ai.ClipOnnxModelManager
+import com.amresalehin.emregallery.ai.LocalVlmModelManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -188,13 +190,18 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val aiStats = aiStore.getStats(photos.map { it.uri }.toSet())
                 val aiConfig = AiSettings.load(context)
                 val clipInstalled = ClipOnnxModelManager.isInstalled(context)
+                val vlmLabel = if (aiConfig.provider == AiProviderType.ON_DEVICE_VLM) {
+                    LocalVlmModelManager.installedModelSummary(context) ?: "no .task model imported"
+                } else {
+                    "${aiConfig.provider.label} (${aiConfig.modelName})"
+                }
 
                 FullCountsResult(
                     oCount, oFiles,
                     bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated,
-                    aiStats, aiConfig.provider.label, clipInstalled
+                    aiStats, vlmLabel, clipInstalled
                 )
             }
 
@@ -244,7 +251,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         clipEmbeddedCount = result.aiStats.clipEmbeddedCount,
                         failedCount = result.aiStats.failedCount,
                         distinctTagCount = result.aiStats.distinctTagCount,
-                        providerLabel = result.aiProviderLabel,
+                        vlmStatusLabel = result.aiProviderLabel,
                         isClipInstalled = result.isClipInstalled
                     )
                 )
@@ -450,9 +457,23 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 calculateRate(processed - aiStartProcessed, aiStartTimeMillis)
                             } else 0
                             newAi = newAi.copy(
-                                isRunning = running,
+                                isClipRunning = running,
+                                isVlmRunning = false,
                                 isPaused = paused,
                                 processed = if (total > 0) processed else newAi.processed,
+                                itemsPerMinute = ipm,
+                                error = error
+                            )
+                        }
+                        IndexingForegroundService.TASK_AI_VLM -> {
+                            val ipm = if (running && !paused) {
+                                calculateRate(processed - aiStartProcessed, aiStartTimeMillis)
+                            } else 0
+                            newAi = newAi.copy(
+                                isClipRunning = false,
+                                isVlmRunning = running,
+                                isPaused = paused,
+                                richCaptionedCount = if (total > 0) processed else newAi.richCaptionedCount,
                                 itemsPerMinute = ipm,
                                 error = error
                             )
@@ -470,7 +491,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                     if (!running) {
                         newOcr = newOcr.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
-                        newAi = newAi.copy(isRunning = false, isPaused = false, isDownloadingModel = false, itemsPerMinute = 0)
+                        newAi = newAi.copy(isClipRunning = false, isVlmRunning = false, isPaused = false, isDownloadingModel = false, itemsPerMinute = 0)
                         newFace = newFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newEnteFace = newEnteFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newLocation = newLocation.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
@@ -507,37 +528,57 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     // --- AI Tagging & Semantic Search Indexing Actions ---
 
-    fun toggleAiIndexing() {
+    fun toggleClipIndexing() {
         val state = _uiState.value
         if (!state.countsReady || currentPhotos.isEmpty()) return
-        if (state.ai.isRunning) {
+        if (state.ai.isClipRunning) {
             val paused = !state.ai.isPaused
             _uiState.update { it.copy(ai = it.ai.copy(isPaused = paused)) }
             if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
             return
         }
         if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
-            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading || state.ai.isDownloadingModel
+            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading ||
+            state.ai.isDownloadingModel || state.ai.isVlmRunning
         ) return
         aiStartTimeMillis = System.currentTimeMillis()
         aiStartProcessed = state.ai.processed
-        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, error = null)) }
-        IndexingForegroundService.startAi(context, rescanAll = false, includeCloudApi = true)
+        _uiState.update { it.copy(ai = it.ai.copy(isClipRunning = true, isPaused = false, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = false, includeCloudApi = false)
+    }
+
+    fun toggleVlmIndexing() {
+        val state = _uiState.value
+        if (!state.countsReady || currentPhotos.isEmpty()) return
+        if (state.ai.isVlmRunning) {
+            val paused = !state.ai.isPaused
+            _uiState.update { it.copy(ai = it.ai.copy(isPaused = paused)) }
+            if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
+            return
+        }
+        if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
+            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading ||
+            state.ai.isDownloadingModel || state.ai.isClipRunning
+        ) return
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = state.ai.richCaptionedCount
+        _uiState.update { it.copy(ai = it.ai.copy(isVlmRunning = true, isPaused = false, error = null)) }
+        IndexingForegroundService.startVlm(context, rescanAll = false)
     }
 
     fun stopAiIndexing() {
         IndexingForegroundService.cancel(context)
-        _uiState.update { it.copy(ai = it.ai.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)) }
+        _uiState.update { it.copy(ai = it.ai.copy(isClipRunning = false, isVlmRunning = false, isPaused = false, itemsPerMinute = 0)) }
         refreshCounts()
     }
 
-    fun clearAndReindexAi() {
+    fun clearAndReindexClip() {
         val state = _uiState.value
         if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning || state.ai.isRunning) return
         aiStartTimeMillis = System.currentTimeMillis()
         aiStartProcessed = 0
-        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, processed = 0, error = null)) }
-        IndexingForegroundService.startAi(context, rescanAll = true, includeCloudApi = true)
+        _uiState.update { it.copy(ai = it.ai.copy(isClipRunning = true, isPaused = false, processed = 0, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = true, includeCloudApi = false)
     }
 
     fun startAiModelDownload() {

@@ -47,7 +47,9 @@ class AiIntegrationUnitTest {
 
     @Test
     fun aiConfig_remoteConfigurationRules() {
-        assertFalse(AiConfig(provider = AiProviderType.ON_DEVICE_ONLY).isRemoteConfigured)
+        assertFalse(AiConfig(provider = AiProviderType.ON_DEVICE_VLM).isRemoteConfigured)
+        assertEquals(LocalVlmRegistry.ENGINE_MEDIAPIPE, LocalVlmRegistry.get("mediapipe").engineId)
+        assertEquals(LocalVlmRegistry.ENGINE_LLAMACPP, LocalVlmRegistry.get("llamacpp").engineId)
         assertTrue(
             AiConfig(
                 provider = AiProviderType.OLLAMA,

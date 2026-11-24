@@ -147,7 +147,7 @@ object AiModelStorage {
         if (selected.isBlank()) return null
         val catalogAsset = AiModelCatalog.byId(selected)?.takeIf { it.kind == "Model" }
         val modelFile = catalogAsset?.let { finalFile(context, it) } ?: File(directory(context), selected)
-        if (!modelFile.isFile || modelFile.length() <= 0L || modelFile.name.startsWith("mmproj", true)) return null
+        if (!hasGgufMagic(modelFile) || modelFile.name.startsWith("mmproj", true)) return null
 
         val projectorFile = if (catalogAsset?.pairedProjectorId != null) {
             AiModelCatalog.byId(catalogAsset.pairedProjectorId)?.let { finalFile(context, it) }
@@ -156,7 +156,7 @@ object AiModelStorage {
             selectedProjector.takeIf { it.isNotBlank() }?.let { File(directory(context), it) }
                 ?: File(directory(context), "mmproj-" + modelFile.name)
         }
-        if (projectorFile == null || !projectorFile.isFile || projectorFile.length() <= 0L) return null
+        if (projectorFile == null || !hasGgufMagic(projectorFile)) return null
         return AiModelSelection(modelFile, projectorFile, catalogAsset?.modelName ?: modelFile.nameWithoutExtension)
     }
 

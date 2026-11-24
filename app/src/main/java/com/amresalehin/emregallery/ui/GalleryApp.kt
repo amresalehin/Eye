@@ -105,6 +105,7 @@ fun GalleryApp(
     var showViewerControls by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
+    var searchInitialFilter by remember { mutableStateOf(com.amresalehin.emregallery.data.SearchFilterState()) }
     var searchQuery by remember { mutableStateOf("") }
     var submittedQuery by remember { mutableStateOf("") }
     var searchVideosOnly by remember { mutableStateOf(false) }
@@ -753,6 +754,7 @@ fun GalleryApp(
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
+                Destination.AI_SETTINGS,
                 Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS
@@ -1297,6 +1299,7 @@ fun GalleryApp(
                         onSettings = { label ->
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
+                                "AI & Semantic Search" -> navigateTo(Destination.AI_SETTINGS)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }
@@ -1348,7 +1351,14 @@ fun GalleryApp(
                         onOpenMap = {
                             navigateTo(Destination.MAP)
                         },
+                        onOpenAiSettings = {
+                            navigateTo(Destination.AI_SETTINGS)
+                        },
                         onBack = { performBackNavigation() }
+                    )
+                    Destination.AI_SETTINGS -> AiSettingsScreen(
+                        onBack = { performBackNavigation() },
+                        onOpenIndexingStatus = { navigateTo(Destination.INDEXING_STATUS) }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         currentEngine = ocrEnginePref,
@@ -1480,6 +1490,7 @@ fun GalleryApp(
                             customPeopleMap = customPeopleMap,
                             favourites = favourites,
                             themePref = themePref,
+                            initialFilter = searchInitialFilter,
                             onQueryChange = { newQuery ->
                                 searchQuery = newQuery
                                 searchStage = if (newQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
@@ -1497,6 +1508,7 @@ fun GalleryApp(
                             onBack = {
                                 searchQuery = ""
                                 searchStage = SearchStage.DISCOVERY
+                                searchInitialFilter = com.amresalehin.emregallery.data.SearchFilterState()
                                 performBackNavigation()
                             },
                             onOpenMedia = { item, currentList ->
@@ -1620,6 +1632,27 @@ fun GalleryApp(
                     }
                     activePersonId = personId
                     navigateTo(Destination.PEOPLE)
+                },
+                onFindSimilar = { targetItem ->
+                    showDetails = false
+                    searchQuery = ""
+                    searchInitialFilter = com.amresalehin.emregallery.data.SearchFilterState(similarToUri = targetItem.uri)
+                    searchStage = SearchStage.RESULTS
+                    navigateTo(Destination.SEARCH)
+                },
+                onSearchTag = { tag ->
+                    showDetails = false
+                    searchQuery = tag
+                    searchInitialFilter = com.amresalehin.emregallery.data.SearchFilterState(selectedTag = tag)
+                    searchStage = SearchStage.RESULTS
+                    navigateTo(Destination.SEARCH)
+                },
+                onSearchColor = { colorName ->
+                    showDetails = false
+                    searchQuery = ""
+                    searchInitialFilter = com.amresalehin.emregallery.data.SearchFilterState(selectedColorName = colorName)
+                    searchStage = SearchStage.RESULTS
+                    navigateTo(Destination.SEARCH)
                 },
                 transitionProgress = viewerTransitionProgress
             )

@@ -17,6 +17,7 @@ enum class Destination {
     LIBRARY_OVERVIEW,
     INDEXING_STATUS,
     OCR_SETTINGS,
+    AI_SETTINGS,
     ABOUT,
     SEARCH,
     VIEWER,

@@ -8,6 +8,10 @@ import android.os.Build
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.ai.AiIndexStore
+import com.amresalehin.emregallery.ai.AiMediaRecord
+import com.amresalehin.emregallery.ai.ClipOnnxEngine
+import com.amresalehin.emregallery.ai.ClipOnnxModelManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -117,6 +121,8 @@ data class SearchFilterState(
     val selectedPersonId: String? = null,
     val selectedPlace: String? = null,
     val selectedTag: String? = null,
+    val selectedColorName: String? = null,
+    val similarToUri: String? = null,
     val gpsFilter: GpsFilter = GpsFilter.ALL,
     val ocrTextFilter: OcrTextFilter = OcrTextFilter.ALL,
     val faceFilter: FaceFilter = FaceFilter.ALL
@@ -129,6 +135,8 @@ data class SearchFilterState(
                 selectedPersonId == null &&
                 selectedPlace == null &&
                 selectedTag == null &&
+                selectedColorName == null &&
+                similarToUri == null &&
                 gpsFilter == GpsFilter.ALL &&
                 ocrTextFilter == OcrTextFilter.ALL &&
                 faceFilter == FaceFilter.ALL
@@ -143,6 +151,8 @@ data class SearchFilterState(
             if (selectedPersonId != null) count++
             if (selectedPlace != null) count++
             if (selectedTag != null) count++
+            if (selectedColorName != null) count++
+            if (similarToUri != null) count++
             if (gpsFilter != GpsFilter.ALL) count++
             if (ocrTextFilter != OcrTextFilter.ALL) count++
             if (faceFilter != FaceFilter.ALL) count++
@@ -191,6 +201,7 @@ class SearchEngine(private val context: Context) {
 
     private val faceStore = FaceClusterStore(context.applicationContext)
     private val locationCache = PhotoMapLocationCache(context.applicationContext)
+    private val aiStore = AiIndexStore.getInstance(context.applicationContext)
 
     /**
      * Builds real discovery sections for State A (Search opened, no query entered).
@@ -313,14 +324,15 @@ class SearchEngine(private val context: Context) {
             }
         }
 
-        // 4. Things / Tags
+        // 4. Things / Tags (merged manual + AI auto-tags)
+        val aiMetadataMap = runCatching { aiStore.loadAllMetadataMap() }.getOrDefault(emptyMap())
         val tagCounts = mutableMapOf<String, MutableList<MediaItem>>()
         for (item in nonTrashMedia) {
-            val tags = customTagsMap[item.uri] ?: emptySet()
-            for (t in tags) {
-                if (t.isNotBlank()) {
-                    tagCounts.getOrPut(t) { mutableListOf() }.add(item)
-                }
+            val manualTags = customTagsMap[item.uri] ?: emptySet()
+            val aiTags = aiMetadataMap[item.uri]?.tags ?: emptyList()
+            val combined = (manualTags + aiTags).map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotBlank() }.toSet()
+            for (t in combined) {
+                tagCounts.getOrPut(t) { mutableListOf() }.add(item)
             }
         }
 
@@ -541,10 +553,18 @@ class SearchEngine(private val context: Context) {
             )
         }
 
-        // 6. Matching Tags
-        val matchingTags = customTagsMap.values.flatten().toSet().filter { it.contains(q, ignoreCase = true) }.take(2)
+        // 6. Matching Tags (manual + AI auto-tags)
+        val aiMetadataMap = runCatching { aiStore.loadAllMetadataMap() }.getOrDefault(emptyMap())
+        val allTagPool = (customTagsMap.values.flatten() + aiMetadataMap.values.flatMap { it.tags })
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .toSet()
+        val matchingTags = allTagPool.filter { it.contains(q, ignoreCase = true) }.take(3)
         for (tag in matchingTags) {
-            val tagMedia = media.filter { customTagsMap[it.uri]?.contains(tag) == true }
+            val tagMedia = media.filter { item ->
+                customTagsMap[item.uri]?.any { it.equals(tag, ignoreCase = true) } == true ||
+                    aiMetadataMap[item.uri]?.tags?.any { it.equals(tag, ignoreCase = true) } == true
+            }
             suggestions.add(
                 SearchSuggestion(
                     id = "tag_$tag",
@@ -663,9 +683,21 @@ class SearchEngine(private val context: Context) {
             }
         }
 
-        // Filter by Tag
+        val aiMetadataMap = runCatching { aiStore.loadAllMetadataMap() }.getOrDefault(emptyMap())
+
+        // Filter by Tag (manual or AI auto-tag)
         if (filter.selectedTag != null) {
-            candidateList = candidateList.filter { customTagsMap[it.uri]?.contains(filter.selectedTag) == true }
+            candidateList = candidateList.filter { item ->
+                customTagsMap[item.uri]?.any { it.equals(filter.selectedTag, ignoreCase = true) } == true ||
+                    aiMetadataMap[item.uri]?.tags?.any { it.equals(filter.selectedTag, ignoreCase = true) } == true
+            }
+        }
+
+        // Filter by Dominant Color (mymind-style)
+        if (filter.selectedColorName != null) {
+            candidateList = candidateList.filter { item ->
+                aiMetadataMap[item.uri]?.colors?.any { it.name.equals(filter.selectedColorName, ignoreCase = true) } == true
+            }
         }
 
         // Filter by GPS
@@ -733,17 +765,47 @@ class SearchEngine(private val context: Context) {
             }
         }
 
-        // Match query against fields
+        // Visually similar search (when triggered from Viewer "Find Visually Similar")
+        val similarScoreMap: Map<String, Float> = if (!filter.similarToUri.isNullOrBlank()) {
+            runCatching {
+                aiStore.findSimilarMedia(filter.similarToUri, limit = 120, minScore = 0.45f).toMap()
+            }.getOrDefault(emptyMap())
+        } else {
+            emptyMap()
+        }
+
+        if (!filter.similarToUri.isNullOrBlank()) {
+            candidateList = candidateList
+                .filter { it.uri in similarScoreMap }
+                .sortedByDescending { similarScoreMap[it.uri] ?: 0f }
+        }
+
+        // Semantic text-to-image CLIP vector search (when on-device CLIP ONNX is installed)
+        val semanticScoreMap: Map<String, Float> = if (q.isNotBlank() && ClipOnnxEngine.isReady(context)) {
+            runCatching {
+                val queryVec = ClipOnnxEngine.encodeText(context, q)
+                if (queryVec != null && queryVec.isNotEmpty()) {
+                    aiStore.searchByTextEmbedding(
+                        queryEmbedding = queryVec,
+                        embeddingModel = ClipOnnxModelManager.MODEL_ID,
+                        minScore = 0.21f,
+                        limit = 120
+                    ).toMap()
+                } else emptyMap()
+            }.getOrDefault(emptyMap())
+        } else {
+            emptyMap()
+        }
+
+        // Match query against fields + AI metadata + semantic embeddings
         val matchedList = if (q.isBlank()) {
             candidateList
         } else {
-            // Rank items:
-            // 1. Exact/prefix match on name or confirmed person/place/album
-            // 2. Token match on name/path
-            // 3. Match on OCR text or tags
             val scoredItems = candidateList.mapNotNull { item ->
-                val score = computeMatchScore(item, q, customAlbums, customTagsMap, customPeopleMap)
-                if (score > 0) item to score else null
+                val keywordScore = computeMatchScore(item, q, customAlbums, customTagsMap, customPeopleMap, aiMetadataMap[item.uri])
+                val semanticBoost = ((semanticScoreMap[item.uri] ?: 0f) * 140f).toInt()
+                val totalScore = keywordScore + semanticBoost
+                if (totalScore > 0) item to totalScore else null
             }
             scoredItems.sortedByDescending { it.second }.map { it.first }
         }
@@ -773,7 +835,8 @@ class SearchEngine(private val context: Context) {
         query: String,
         customAlbums: List<CustomAlbum>,
         customTagsMap: Map<String, Set<String>>,
-        customPeopleMap: Map<String, Set<String>>
+        customPeopleMap: Map<String, Set<String>>,
+        aiRecord: AiMediaRecord? = null
     ): Int {
         val q = query.lowercase(Locale.ROOT)
         val name = item.name.lowercase(Locale.ROOT)
@@ -806,6 +869,22 @@ class SearchEngine(private val context: Context) {
         // Cached OCR text
         val ocr = TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
         if (!ocr.isNullOrBlank() && ocr.contains(q, ignoreCase = true)) score += 40
+
+        // AI title, caption/description, auto-tags, and dominant colors (Karakeep/mymind-style)
+        if (aiRecord != null) {
+            if (aiRecord.title.contains(q, ignoreCase = true)) score += 75
+            if (aiRecord.caption.contains(q, ignoreCase = true)) score += 55
+            if (aiRecord.tags.any { it.equals(q, ignoreCase = true) }) score += 85
+            else if (aiRecord.tags.any { it.contains(q, ignoreCase = true) }) score += 45
+            if (aiRecord.colors.any { it.name.equals(q, ignoreCase = true) }) score += 60
+            // Multi-word token matching for natural-language queries against caption + tags
+            val tokens = q.split(Regex("\s+")).filter { it.length >= 3 }
+            if (tokens.size >= 2) {
+                val haystack = "${aiRecord.title} ${aiRecord.caption} ${aiRecord.tags.joinToString(" ")} ${aiRecord.colors.joinToString(" ") { it.name }}".lowercase(Locale.ROOT)
+                val matchedTokens = tokens.count { haystack.contains(it) }
+                if (matchedTokens > 0) score += matchedTokens * 22
+            }
+        }
 
         return score
     }

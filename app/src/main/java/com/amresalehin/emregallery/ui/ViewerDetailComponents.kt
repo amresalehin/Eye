@@ -734,6 +734,10 @@ fun OverviewTabContent(
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     onSelectEngine: (String) -> Unit = {},
+    isLockedVaultItem: Boolean = false,
+    onFindSimilar: ((MediaItem) -> Unit)? = null,
+    onSearchTag: ((String) -> Unit)? = null,
+    onSearchColor: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -776,6 +780,19 @@ fun OverviewTabContent(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // 0. AI Insights Section (Karakeep/mymind-style auto-tags, description, palette & Find Similar)
+        if (!item.isVideo) {
+            item(key = "overview_ai_insights") {
+                ViewerAiInsightsCard(
+                    item = item,
+                    isLockedVaultItem = isLockedVaultItem,
+                    onFindSimilar = onFindSimilar,
+                    onSearchTag = onSearchTag,
+                    onSearchColor = onSearchColor
+                )
+            }
+        }
+
         // 1. Albums Section
         item(key = "overview_albums") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

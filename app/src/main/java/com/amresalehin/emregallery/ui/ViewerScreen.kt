@@ -116,6 +116,9 @@ fun ViewerScreen(
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
+    onFindSimilar: ((MediaItem) -> Unit)? = null,
+    onSearchTag: ((String) -> Unit)? = null,
+    onSearchColor: ((String) -> Unit)? = null,
     transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) }
 ) {
     val context = LocalContext.current
@@ -729,7 +732,11 @@ fun ViewerScreen(
                     defaultOcrLanguages = defaultOcrLanguages,
                     defaultOcrModel = defaultOcrModel,
                     defaultMlKitLanguages = defaultMlKitLanguages,
-                    onOpenPerson = onOpenPerson
+                    onOpenPerson = onOpenPerson,
+                    isLockedVaultItem = isHidden,
+                    onFindSimilar = onFindSimilar,
+                    onSearchTag = onSearchTag,
+                    onSearchColor = onSearchColor
                 )
             }
 

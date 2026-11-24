@@ -53,6 +53,7 @@ fun SearchScreen(
     customPeopleMap: Map<String, Set<String>>,
     favourites: Set<String>,
     themePref: String = "system",
+    initialFilter: SearchFilterState = SearchFilterState(),
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
@@ -74,7 +75,7 @@ fun SearchScreen(
     val searchEngine = remember { SearchEngine(context) }
 
     // Search & Filter State
-    var filterState by remember { mutableStateOf(SearchFilterState()) }
+    var filterState by remember(initialFilter) { mutableStateOf(initialFilter) }
     var sortMode by remember { mutableStateOf(SearchSortMode.RELEVANCE) }
     var viewMode by remember { mutableStateOf(SearchViewMode.MASONRY) }
     var showFilterSheet by remember { mutableStateOf(false) }
@@ -232,6 +233,35 @@ fun SearchScreen(
                 focusRequester = focusRequester,
                 isDark = isDark
             )
+
+            // Active AI visual similarity or color filter banner
+            if (filterState.similarToUri != null || filterState.selectedColorName != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (filterState.similarToUri != null) {
+                        InputChip(
+                            selected = true,
+                            onClick = { filterState = filterState.copy(similarToUri = null) },
+                            label = { Text("Visually similar") },
+                            leadingIcon = { Icon(Icons.Default.ImageSearch, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp)) }
+                        )
+                    }
+                    if (filterState.selectedColorName != null) {
+                        InputChip(
+                            selected = true,
+                            onClick = { filterState = filterState.copy(selectedColorName = null) },
+                            label = { Text("Color: ${filterState.selectedColorName}") },
+                            leadingIcon = { Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp)) }
+                        )
+                    }
+                }
+            }
 
             // SINGLE SCROLLABLE ROW OF FILTER PILLS (State A, State B, and State C)
             // Hides as keyboard hides and appears as keyboard appears

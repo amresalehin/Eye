@@ -38,6 +38,7 @@ fun SettingsScreen(
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
         "Indexing Status" to Icons.Default.Storage,
+        "AI & Semantic Search" to Icons.Default.AutoAwesome,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
 

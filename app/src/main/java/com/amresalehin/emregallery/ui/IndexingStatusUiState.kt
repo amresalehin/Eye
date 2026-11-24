@@ -69,6 +69,23 @@ data class FaceClusteringState(
     val statusMessage: String? = null
 )
 
+data class AiIndexingState(
+    val processed: Int = 0,
+    val richCaptionedCount: Int = 0,
+    val clipEmbeddedCount: Int = 0,
+    val failedCount: Int = 0,
+    val distinctTagCount: Int = 0,
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val isDownloadingModel: Boolean = false,
+    val downloadBytes: Long = 0L,
+    val downloadTotalBytes: Long = 0L,
+    val isClipInstalled: Boolean = false,
+    val providerLabel: String = "On-Device Only",
+    val itemsPerMinute: Int = 0,
+    val error: String? = null
+)
+
 data class EngineState(
     val isBuffaloLInstalled: Boolean = false,
     val isEnteInstalled: Boolean = false,
@@ -82,6 +99,7 @@ data class IndexingStatusUiState(
     val totalPhotos: Int = 0,
     val countsReady: Boolean = false,
     val ocr: OcrState = OcrState(),
+    val ai: AiIndexingState = AiIndexingState(),
     val faceFinding: FaceFindingState = FaceFindingState(),
     val location: LocationIndexingState = LocationIndexingState(),
     val modelDownload: ModelDownloadState = ModelDownloadState(),

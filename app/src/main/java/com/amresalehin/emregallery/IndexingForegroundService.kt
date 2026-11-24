@@ -23,6 +23,10 @@ import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.ai.AiIndexStore
+import com.amresalehin.emregallery.ai.AiIndexingOrchestrator
+import com.amresalehin.emregallery.ai.AiSettings
+import com.amresalehin.emregallery.ai.ClipOnnxModelManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +102,8 @@ class IndexingForegroundService : Service() {
             ACTION_START_OCR -> "OCR indexing"
             ACTION_START_FACE -> "Face indexing"
             ACTION_START_LOCATION -> "Map location indexing"
+            ACTION_START_AI -> "AI tagging & semantic indexing"
+            ACTION_DOWNLOAD_AI_MODEL -> "Downloading CLIP AI model"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -122,6 +128,13 @@ class IndexingForegroundService : Service() {
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                    )
+                    ACTION_START_AI -> runAi(
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        includeCloudApi = intent?.getBooleanExtra(EXTRA_INCLUDE_CLOUD_API, true) != false
+                    )
+                    ACTION_DOWNLOAD_AI_MODEL -> downloadAiModel(
+                        force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
                     )
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
@@ -542,6 +555,86 @@ class IndexingForegroundService : Service() {
         return b.build()
     }
 
+    private suspend fun runAi(rescanAll: Boolean, includeCloudApi: Boolean) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        val store = AiIndexStore.getInstance(this)
+        val config = AiSettings.load(this)
+        val photos = loadPhotos()
+        if (rescanAll) {
+            withContext(Dispatchers.IO) { store.clearAll() }
+        }
+        val useRemote = includeCloudApi && config.batchUseCloudApi && config.isRemoteConfigured
+        val alreadyDone = withContext(Dispatchers.IO) {
+            if (useRemote) store.getFullyCaptionedUris() else store.getIndexedUris()
+        }
+        val pending = photos.filterNot { it.uri in alreadyDone }
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
+        var completed = photos.size - pending.size
+        updateState(
+            task = TASK_AI,
+            running = true,
+            paused = initialPaused,
+            processed = completed,
+            total = photos.size,
+            error = null
+        )
+        postProgress("AI indexing", "Preparing ${pending.size} photos", completed, photos.size)
+        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this)
+        for (item in pending) {
+            awaitResume()
+            currentCoroutineContext().ensureActive()
+            try {
+                AiIndexingOrchestrator.analyzePhoto(
+                    context = this,
+                    item = item,
+                    allowCloudApi = useRemote,
+                    isLockedVaultItem = false
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Skip individual failures and continue indexing the remaining library.
+            }
+            completed++
+            updateState(processed = completed, total = photos.size)
+            if (completed % 2 == 0 || completed == photos.size) {
+                postProgress("AI indexing", "Indexed $completed of ${photos.size} photos", completed, photos.size)
+            }
+            if (cooldown > 0L) delay(cooldown)
+            kotlinx.coroutines.yield()
+        }
+    }
+
+    private suspend fun downloadAiModel(force: Boolean) {
+        updateState(
+            task = TASK_AI_MODEL,
+            running = true,
+            paused = false,
+            bytes = 0L,
+            bytesTotal = 155L * 1024 * 1024,
+            stage = "downloading",
+            error = null
+        )
+        postProgress("Downloading CLIP AI model", "Starting download…", 0, 100)
+        ClipOnnxModelManager.downloadModels(
+            context = this,
+            force = force,
+            onProgress = { received, total, stage ->
+                updateState(
+                    task = TASK_AI_MODEL,
+                    running = true,
+                    bytes = received,
+                    bytesTotal = total,
+                    stage = stage
+                )
+                val pct = if (total > 0L) ((received * 100L) / total).toInt().coerceIn(0, 100) else 0
+                postProgress("Downloading CLIP AI model", "Downloaded $pct%", pct, 100)
+            },
+            awaitIfResumed = { awaitResume() }
+        )
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()
@@ -578,6 +671,8 @@ class IndexingForegroundService : Service() {
         const val KEY_PHOTOS_WITH_FACES = "photos_with_faces"
 
         const val TASK_LOCATION = "location"
+        const val TASK_AI = "ai"
+        const val TASK_AI_MODEL = "ai_model"
         private const val TASK_OCR = "ocr"
         private const val TASK_FACE = "face"
         private const val TASK_MODEL = "model"
@@ -586,6 +681,8 @@ class IndexingForegroundService : Service() {
         private const val ACTION_START_OCR = "com.amresalehin.emregallery.indexing.START_OCR"
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
         private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
+        private const val ACTION_START_AI = "com.amresalehin.emregallery.indexing.START_AI"
+        private const val ACTION_DOWNLOAD_AI_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_AI_MODEL"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
@@ -596,6 +693,7 @@ class IndexingForegroundService : Service() {
         private const val EXTRA_RESCAN_ALL = "rescan_all"
         private const val EXTRA_MODEL = "ocr_model"
         private const val EXTRA_FORCE = "force"
+        private const val EXTRA_INCLUDE_CLOUD_API = "include_cloud_api"
         const val EXTRA_ENGINE_ID = "engine_id"
         const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
         const val EXTRA_FOLDERS = "face_indexing_folders"
@@ -651,6 +749,21 @@ class IndexingForegroundService : Service() {
         fun startLocation(context: Context, rescanAll: Boolean = false) =
             command(context, ACTION_START_LOCATION) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
+            }
+
+        fun startAi(
+            context: Context,
+            rescanAll: Boolean = false,
+            includeCloudApi: Boolean = true
+        ) =
+            command(context, ACTION_START_AI) {
+                putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                putExtra(EXTRA_INCLUDE_CLOUD_API, includeCloudApi)
+            }
+
+        fun downloadAiModel(context: Context, force: Boolean = false) =
+            command(context, ACTION_DOWNLOAD_AI_MODEL) {
+                putExtra(EXTRA_FORCE, force)
             }
 
         fun downloadModel(

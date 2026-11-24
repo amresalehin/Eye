@@ -53,6 +53,7 @@ fun IndexingStatusScreen(
     onToggleLanguage: ((String) -> Unit)? = null,
     onToggleMlKitLanguage: ((String) -> Unit)? = null,
     onOpenMap: (() -> Unit)? = null,
+    onOpenAiSettings: (() -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
 ) {
@@ -162,7 +163,23 @@ fun IndexingStatusScreen(
                 }
             )
 
-            // 2. Face Recognition (Finding & Clustering) Card
+            // 2. Hybrid AI Tagging & Semantic Search Card
+            AiIndexingCard(
+                totalPhotos = uiState.totalPhotos,
+                aiState = uiState.ai,
+                countsReady = uiState.countsReady,
+                cardBackground = cardBackground,
+                cardBorder = cardBorder,
+                numberFormat = numberFormat,
+                onToggleAiIndexing = viewModel::toggleAiIndexing,
+                onStopAiIndexing = viewModel::stopAiIndexing,
+                onReindexAi = viewModel::clearAndReindexAi,
+                onDownloadClipModel = viewModel::startAiModelDownload,
+                onOpenAiSettings = { onOpenAiSettings?.invoke() },
+                onClearAiIndex = viewModel::clearAiIndex
+            )
+
+            // 3. Face Recognition (Finding & Clustering) Card
             FaceRecognitionCard(
                 totalPhotos = uiState.totalPhotos,
                 faceFindingState = uiState.faceFinding,

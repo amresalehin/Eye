@@ -22,6 +22,10 @@ import com.amresalehin.emregallery.face.StageState
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.ai.AiIndexStats
+import com.amresalehin.emregallery.ai.AiIndexStore
+import com.amresalehin.emregallery.ai.AiSettings
+import com.amresalehin.emregallery.ai.ClipOnnxModelManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,6 +46,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     private val context: Context get() = getApplication()
     private val faceStore = FaceClusterStore(context.applicationContext)
+    private val aiStore = AiIndexStore.getInstance(context.applicationContext)
 
     private val _uiState = MutableStateFlow(
         IndexingStatusUiState(
@@ -81,6 +86,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var enteFaceStartProcessed: Int = 0
     private var locationStartTimeMillis: Long = 0L
     private var locationStartProcessed: Int = 0
+    private var aiStartTimeMillis: Long = 0L
+    private var aiStartProcessed: Int = 0
 
     init {
         updateEngineState()
@@ -178,12 +185,16 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val locMap = locCache.loadAll()
                 val lProcessed = photos.count { locMap.containsKey(it.uri) }
                 val lLocated = locMap.values.count { it.point != null }
+                val aiStats = aiStore.getStats(photos.map { it.uri }.toSet())
+                val aiConfig = AiSettings.load(context)
+                val clipInstalled = ClipOnnxModelManager.isInstalled(context)
 
                 FullCountsResult(
                     oCount, oFiles,
                     bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
-                    lProcessed, lLocated
+                    lProcessed, lLocated,
+                    aiStats, aiConfig.provider.label, clipInstalled
                 )
             }
 
@@ -226,6 +237,15 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     location = state.location.copy(
                         processed = result.locProcessed.coerceIn(0, totalPhotos),
                         locatedCount = result.locLocated
+                    ),
+                    ai = state.ai.copy(
+                        processed = result.aiStats.totalIndexed.coerceIn(0, totalPhotos),
+                        richCaptionedCount = result.aiStats.richCaptionedCount,
+                        clipEmbeddedCount = result.aiStats.clipEmbeddedCount,
+                        failedCount = result.aiStats.failedCount,
+                        distinctTagCount = result.aiStats.distinctTagCount,
+                        providerLabel = result.aiProviderLabel,
+                        isClipInstalled = result.isClipInstalled
                     )
                 )
             }
@@ -248,7 +268,10 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val enteSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
         val enteFailedItems: List<Pair<String, String>>,
         val locProcessed: Int,
-        val locLocated: Int
+        val locLocated: Int,
+        val aiStats: AiIndexStats,
+        val aiProviderLabel: String,
+        val isClipInstalled: Boolean
     )
 
     fun retryFailedFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
@@ -313,6 +336,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 _uiState.update { state ->
                     var newOcr = state.ocr
+                    var newAi = state.ai
                     var newFace = state.faceFinding
                     var newEnteFace = state.enteFaceFinding
                     var newLocation = state.location
@@ -421,10 +445,32 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 itemsPerMinute = ipm
                             )
                         }
+                        IndexingForegroundService.TASK_AI -> {
+                            val ipm = if (running && !paused) {
+                                calculateRate(processed - aiStartProcessed, aiStartTimeMillis)
+                            } else 0
+                            newAi = newAi.copy(
+                                isRunning = running,
+                                isPaused = paused,
+                                processed = if (total > 0) processed else newAi.processed,
+                                itemsPerMinute = ipm,
+                                error = error
+                            )
+                        }
+                        IndexingForegroundService.TASK_AI_MODEL -> {
+                            newAi = newAi.copy(
+                                isDownloadingModel = running,
+                                downloadBytes = bytes,
+                                downloadTotalBytes = bytesTotal,
+                                isClipInstalled = ClipOnnxModelManager.isInstalled(context),
+                                error = error
+                            )
+                        }
                     }
 
                     if (!running) {
                         newOcr = newOcr.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
+                        newAi = newAi.copy(isRunning = false, isPaused = false, isDownloadingModel = false, itemsPerMinute = 0)
                         newFace = newFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newEnteFace = newEnteFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newLocation = newLocation.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
@@ -434,6 +480,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                     state.copy(
                         ocr = newOcr,
+                        ai = newAi,
                         faceFinding = newFace,
                         enteFaceFinding = newEnteFace,
                         location = newLocation,
@@ -456,6 +503,55 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val elapsedSec = (System.currentTimeMillis() - startTimeMillis) / 1000f
         if (elapsedSec < 3f) return 0
         return ((items / elapsedSec) * 60f).roundToInt()
+    }
+
+    // --- AI Tagging & Semantic Search Indexing Actions ---
+
+    fun toggleAiIndexing() {
+        val state = _uiState.value
+        if (!state.countsReady || currentPhotos.isEmpty()) return
+        if (state.ai.isRunning) {
+            val paused = !state.ai.isPaused
+            _uiState.update { it.copy(ai = it.ai.copy(isPaused = paused)) }
+            if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
+            return
+        }
+        if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
+            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading || state.ai.isDownloadingModel
+        ) return
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = state.ai.processed
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = false, includeCloudApi = true)
+    }
+
+    fun stopAiIndexing() {
+        IndexingForegroundService.cancel(context)
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)) }
+        refreshCounts()
+    }
+
+    fun clearAndReindexAi() {
+        val state = _uiState.value
+        if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning || state.ai.isRunning) return
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = 0
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, processed = 0, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = true, includeCloudApi = true)
+    }
+
+    fun startAiModelDownload() {
+        val state = _uiState.value
+        if (state.ai.isDownloadingModel || state.ai.isRunning) return
+        _uiState.update { it.copy(ai = it.ai.copy(isDownloadingModel = true, downloadBytes = 0L, error = null)) }
+        IndexingForegroundService.downloadAiModel(context, force = false)
+    }
+
+    fun clearAiIndex() {
+        viewModelScope.launch(Dispatchers.IO) {
+            aiStore.clearAll()
+            withContext(Dispatchers.Main) { refreshCounts() }
+        }
     }
 
     // --- Face Finding Actions (Scoped by Engine) ---

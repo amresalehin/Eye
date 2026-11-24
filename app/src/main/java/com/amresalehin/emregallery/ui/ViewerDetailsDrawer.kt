@@ -155,6 +155,10 @@ fun ViewerDetailsDrawer(
     defaultOcrModel: String = "fast",
     defaultMlKitLanguages: Set<String> = setOf("latin"),
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
+    isLockedVaultItem: Boolean = false,
+    onFindSimilar: ((MediaItem) -> Unit)? = null,
+    onSearchTag: ((String) -> Unit)? = null,
+    onSearchColor: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -461,6 +465,10 @@ fun ViewerDetailsDrawer(
                             metadata = detailsState.metadata,
                             onOpenMap = onOpenMap,
                             onAddToAlbum = onAddTo,
+                            isLockedVaultItem = isLockedVaultItem,
+                            onFindSimilar = onFindSimilar?.let { cb -> { mediaItem -> onClose(); cb(mediaItem) } },
+                            onSearchTag = onSearchTag?.let { cb -> { tag -> onClose(); cb(tag) } },
+                            onSearchColor = onSearchColor?.let { cb -> { color -> onClose(); cb(color) } },
                             onAddTag = { showAddTagDialog = true },
                             onEditLocation = { showAddLocationDialog = true },
                             listState = overviewListState,

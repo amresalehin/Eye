@@ -209,7 +209,7 @@ fun AiSettingsScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "Vision descriptions and tags",
+                            "Choose a vision service",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -238,7 +238,7 @@ fun AiSettingsScreen(
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
                 ) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("AI provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("AI service", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                             SegmentedButton(
                                 selected = providerMode == AiProviderMode.OPENAI_COMPATIBLE,
@@ -254,7 +254,7 @@ fun AiSettingsScreen(
                                 icon = {}
                             ) { Text("BYOK") }
                             SegmentedButton(
-                                selected = providerMode.isLocal,
+                                selected = providerMode == AiProviderMode.EXTERNAL_LOCAL,
                                 onClick = {
                                     providerMode = AiProviderMode.EXTERNAL_LOCAL
                                     baseUrl = AiProviderMode.EXTERNAL_LOCAL.defaultBaseUrl
@@ -265,11 +265,11 @@ fun AiSettingsScreen(
                                 },
                                 shape = SegmentedButtonDefaults.itemShape(1, 2),
                                 icon = {}
-                            ) { Text("External server") }
+                            ) { Text("Server") }
                         }
-                        if (providerMode.isLocal) {
+                        if (providerMode == AiProviderMode.EXTERNAL_LOCAL) {
                             Text(
-                                "Connect a vision server already running on your device or network. Eye does not currently bundle a local vision-language runtime or download runnable local models.",
+                                "Connect to an existing OpenAI-compatible vision server. This does not install or run models on your phone.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -278,7 +278,7 @@ fun AiSettingsScreen(
                             value = baseUrl,
                             onValueChange = { baseUrl = it; discoveredModels = emptyList(); connectionReady = false },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Endpoint URL") },
+                            label = { Text(if (providerMode == AiProviderMode.EXTERNAL_LOCAL) "Server URL" else "API endpoint") },
                             singleLine = true,
                             shape = RoundedCornerShape(14.dp)
                         )
@@ -312,7 +312,7 @@ fun AiSettingsScreen(
                                 if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                 else Icon(Icons.Default.Refresh, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (connectionReady) "Refresh models" else "Connect")
+                                Text(if (connectionReady) "Refresh models" else "Test connection")
                             }
                         }
                         if (message != null) Text(

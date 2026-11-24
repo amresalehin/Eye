@@ -257,49 +257,69 @@ fun LocalAiModelsSection(
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     AiModelCatalog.models().forEach { asset ->
                         val projector = asset.pairedProjectorId?.let { AiModelCatalog.byId(it) }
                         val modelReady = AiModelStorage.isInstalled(context, asset)
                         val projectorReady = projector?.let { AiModelStorage.isInstalled(context, it) } ?: false
                         val isSelected = selectedModel == asset.id
-                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(asset.modelName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                    Text(asset.sizeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (isSelected && selection != null) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
-                                } else if (modelReady && projectorReady) {
-                                    TextButton(onClick = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 2.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    asset.modelName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    buildString {
+                                        append(asset.sizeLabel)
+                                        if (projector != null) append(" · Vision ").append(projector.sizeLabel)
+                                        if (!modelReady) append(" · Not downloaded")
+                                        else if (!projectorReady) append(" · Vision file missing")
+                                        else append(" · Ready")
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            when {
+                                isSelected && selection != null -> Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Selected",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                modelReady && projectorReady -> TextButton(
+                                    onClick = {
                                         activateModel(asset.id)
                                         showLibrary = false
-                                    }) { Text("Use") }
-                                } else if (!modelReady) {
-                                    TextButton(
-                                        enabled = !downloading && !resumable,
-                                        onClick = { scope.launch { AiModelStorage.start(context, asset) } }
-                                    ) { Text("Download") }
-                                }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) { Text("Use") }
+                                !modelReady -> TextButton(
+                                    enabled = !downloading && !resumable,
+                                    onClick = { scope.launch { AiModelStorage.start(context, asset) } },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) { Text("Get") }
                             }
                             if (projector != null && !projectorReady) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        "Vision file · ${projector.sizeLabel}",
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    TextButton(
-                                        enabled = !downloading && !resumable,
-                                        onClick = { scope.launch { AiModelStorage.start(context, projector) } }
-                                    ) { Text("Download") }
-                                }
+                                TextButton(
+                                    enabled = !downloading && !resumable,
+                                    onClick = { scope.launch { AiModelStorage.start(context, projector) } },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                ) { Text("Vision") }
                             }
                         }
-                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                     }
 
                     if (storedFiles.isNotEmpty()) {

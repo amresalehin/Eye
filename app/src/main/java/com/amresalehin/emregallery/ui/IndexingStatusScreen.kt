@@ -177,7 +177,36 @@ fun IndexingStatusScreen(
                 onReindexClip = viewModel::clearAndReindexClip,
                 onDownloadClipModel = viewModel::startAiModelDownload,
                 onOpenAiSettings = { onOpenAiSettings?.invoke() },
-                onClearAiIndex = viewModel::clearAiIndex
+                onClearAiIndex = viewModel::clearAiIndex,
+                availableFolders = availableFolders,
+                onToggleClipFolder = { folderPath ->
+                    val current = uiState.ai
+                    if (current.clipIsAllFolders) {
+                        viewModel.setAiIndexingFolders(isVlm = false, allFolders = false, folders = setOf(folderPath))
+                    } else {
+                        val next = if (folderPath in current.clipSelectedFolders) current.clipSelectedFolders - folderPath else current.clipSelectedFolders + folderPath
+                        if (next.isEmpty() || next.size >= availableFolders.size) {
+                            viewModel.setAiIndexingFolders(isVlm = false, allFolders = true, folders = emptySet())
+                        } else {
+                            viewModel.setAiIndexingFolders(isVlm = false, allFolders = false, folders = next)
+                        }
+                    }
+                },
+                onSelectAllClipFolders = { viewModel.setAiIndexingFolders(isVlm = false, allFolders = true, folders = emptySet()) },
+                onToggleVlmFolder = { folderPath ->
+                    val current = uiState.ai
+                    if (current.vlmIsAllFolders) {
+                        viewModel.setAiIndexingFolders(isVlm = true, allFolders = false, folders = setOf(folderPath))
+                    } else {
+                        val next = if (folderPath in current.vlmSelectedFolders) current.vlmSelectedFolders - folderPath else current.vlmSelectedFolders + folderPath
+                        if (next.isEmpty() || next.size >= availableFolders.size) {
+                            viewModel.setAiIndexingFolders(isVlm = true, allFolders = true, folders = emptySet())
+                        } else {
+                            viewModel.setAiIndexingFolders(isVlm = true, allFolders = false, folders = next)
+                        }
+                    }
+                },
+                onSelectAllVlmFolders = { viewModel.setAiIndexingFolders(isVlm = true, allFolders = true, folders = emptySet()) }
             )
 
             // 3. Face Recognition (Finding & Clustering) Card

@@ -38,7 +38,7 @@ data class AiModelAsset(
 object AiModelCatalog {
     val assets = listOf(
         AiModelAsset("qwen25vl-q4", "Qwen2.5-VL 3B · Q4_K_M", "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "~1.93 GB", pairedProjectorId = "qwen25vl-mmproj"),
-        AiModelAsset("qwen25vl-mmproj", "Qwen2.5-VL 3B · Vision projector", "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "~845 MB", "Vision projector"),
+        AiModelAsset("qwen25vl-mmproj", "Qwen2.5-VL 3B · Vision projector", "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "~1.34 GB", "Vision projector"),
         AiModelAsset("qwen3vl-q4", "Qwen3-VL 2B · Q4_K_M", "Qwen3VL-2B-Instruct-Q4_K_M.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~1.11 GB", pairedProjectorId = "qwen3vl-mmproj"),
         AiModelAsset("qwen3vl-q8", "Qwen3-VL 2B · Q8_0", "Qwen3VL-2B-Instruct-Q8_0.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~1.83 GB", pairedProjectorId = "qwen3vl-mmproj"),
         AiModelAsset("qwen3vl-mmproj", "Qwen3-VL 2B · Vision projector", "mmproj-Qwen3VL-2B-Instruct-F16.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~819 MB", "Vision projector"),
@@ -70,6 +70,7 @@ object AiModelStorage {
     private const val KEY_TOTAL = "total"
     private const val KEY_ERROR = "error"
     private const val KEY_PAUSE = "pause_requested"
+    private const val KEY_ETAG = "download_etag"
 
     fun directory(context: Context): File =
         File(context.applicationContext.filesDir, "ai_models").apply { mkdirs() }
@@ -140,7 +141,10 @@ object AiModelStorage {
 
     suspend fun pause(context: Context) {
         setPauseRequested(context, true)
-        state(context)?.let { writeState(context, it.copy(status = "paused")) }
+        state(context)?.let { old ->
+            val bytes = AiModelCatalog.byId(old.assetId)?.let { partialFile(context, it).length() } ?: old.downloadedBytes
+            writeState(context, old.copy(status = "paused", downloadedBytes = bytes))
+        }
         WorkManager.getInstance(context).cancelUniqueWork("ai-model-download").await()
     }
 
@@ -180,14 +184,34 @@ class AiModelDownloadWorker(
             setForeground(createForegroundInfo(asset, existing, 0L))
             val request = Request.Builder().url(asset.downloadUrl)
                 .header("User-Agent", "Eye-Android/1.0")
-                .apply { if (existing > 0L) header("Range", "bytes=$existing-") }
+                .apply {
+                    if (existing > 0L) {
+                        header("Range", "bytes=$existing-")
+                        applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
+                            .getString(AiModelStorage::class.java.name + KEY_ETAG, null)
+                            ?.takeIf { it.isNotBlank() }?.let { header("If-Range", it) }
+                    }
+                }
                 .build()
             client.newCall(request).execute().use { response ->
                 if (existing > 0L && response.code != 206) {
                     partial.delete()
-                    throw IOException("Hugging Face did not honor the resume request; restarting safely.")
+                    applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
+                        .edit().remove(AiModelStorage::class.java.name + KEY_ETAG).apply()
+                    throw IOException("Hugging Face did not honor the resume request; the partial file was discarded safely.")
                 }
                 if (!response.isSuccessful) throw IOException("Download failed (HTTP ${response.code}).")
+                if (existing > 0L) {
+                    val contentRange = response.header("Content-Range").orEmpty()
+                    if (!contentRange.startsWith("bytes $existing-", ignoreCase = true)) {
+                        partial.delete()
+                        throw IOException("The server returned an invalid byte range; the partial file was discarded.")
+                    }
+                }
+                response.header("ETag")?.let { etag ->
+                    applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
+                        .edit().putString(AiModelStorage::class.java.name + KEY_ETAG, etag).apply()
+                }
                 val body = response.body ?: throw IOException("Hugging Face returned an empty response.")
                 val total = if (response.code == 206) {
                     val range = response.header("Content-Range")
@@ -232,6 +256,8 @@ class AiModelDownloadWorker(
                 partial.delete()
             }
             AiModelStorage.writeState(applicationContext, ModelDownloadState(asset.id, "complete", target.length(), target.length()))
+            applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
+                .edit().remove(AiModelStorage::class.java.name + KEY_ETAG).apply()
             Result.success()
         } catch (error: Exception) {
             if (AiModelStorage.pauseRequested(applicationContext) || isStopped) {

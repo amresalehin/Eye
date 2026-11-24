@@ -295,7 +295,7 @@ class AiVisionRepository(private val context: Context) {
             validateSettings(settings)
             null
         }
-        val frames = prepareFrames(item)
+        val frames = if (localSelection != null) prepareLocalFrames(item) else prepareFrames(item)
         if (frames.isEmpty()) throw IOException("Eye could not decode this media item.")
 
         val gpsPoint = runCatching {
@@ -473,6 +473,9 @@ class AiVisionRepository(private val context: Context) {
 
     private fun prepareFrames(item: MediaItem): List<ByteArray> =
         if (item.isVideo) loadVideoFrames(item.uri) else listOfNotNull(loadImage(item.uri, 1024))
+
+    private fun prepareLocalFrames(item: MediaItem): List<ByteArray> =
+        if (item.isVideo) loadVideoFrames(item.uri) else listOfNotNull(loadImage(item.uri, 768))
 
     private fun loadImage(uriString: String, maxDimension: Int): ByteArray {
         val uri = Uri.parse(uriString)

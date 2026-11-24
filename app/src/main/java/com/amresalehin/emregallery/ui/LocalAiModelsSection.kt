@@ -78,8 +78,9 @@ fun LocalAiModelsSection(
         downloadState = AiModelStorage.state(context)
         selectedModel = AiModelStorage.selectedModelId(context)
         selectedProjector = AiModelStorage.selectedProjectorName(context)
+        val catalogNames = AiModelCatalog.assets.map { it.fileName }.toSet()
         storedFiles = AiModelStorage.directory(context).listFiles()
-            ?.filter { it.isFile && it.extension.equals("gguf", true) }
+            ?.filter { it.isFile && it.extension.equals("gguf", true) && it.name !in catalogNames }
             ?.sortedBy { it.name.lowercase() }.orEmpty()
     }
 
@@ -146,9 +147,7 @@ fun LocalAiModelsSection(
         }
     }
 
-    val selection = remember(selectedModel, selectedProjector, storedFiles) {
-        AiModelStorage.resolveSelection(context)
-    }
+    val selection = AiModelStorage.resolveSelection(context)
     val activeAsset = downloadState?.let { AiModelCatalog.byId(it.assetId) }
     val downloading = downloadState?.status in listOf("queued", "downloading")
     val resumable = downloadState?.status in listOf("paused", "error")

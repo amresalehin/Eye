@@ -210,14 +210,16 @@ fun GalleryApp(
                                 // next cold launch has a usable snapshot to render immediately.
                                 if (!firstPageSnapshotWritten) {
                                     firstPageSnapshotWritten = true
-                                    val firstPageSnapshot = progressiveItems.values
-                                        .sortedWith(
-                                            compareByDescending<MediaItem> {
-                                                if (it.dateTakenMillis > 0L) it.dateTakenMillis
-                                                else it.dateAddedSeconds * 1000L
-                                            }.thenByDescending { it.id }
-                                        )
-                                        .take(180)
+                                    val firstPageSnapshot = withContext(Dispatchers.Default) {
+                                        progressiveItems.values
+                                            .sortedWith(
+                                                compareByDescending<MediaItem> {
+                                                    if (it.dateTakenMillis > 0L) it.dateTakenMillis
+                                                    else it.dateAddedSeconds * 1000L
+                                                }.thenByDescending { it.id }
+                                            )
+                                            .take(180)
+                                    }
                                     withContext(Dispatchers.IO) {
                                         MediaSnapshotCache.write(mediaSnapshotContext, firstPageSnapshot)
                                     }
@@ -239,12 +241,14 @@ fun GalleryApp(
                     mediaLoadError = false
 
                     // Persist the most recent metadata page from the authoritative final result.
-                    val recentSnapshot = loadedMedia.sortedWith(
-                        compareByDescending<MediaItem> {
-                            if (it.dateTakenMillis > 0L) it.dateTakenMillis
-                            else it.dateAddedSeconds * 1000L
-                        }.thenByDescending { it.id }
-                    ).take(180)
+                    val recentSnapshot = withContext(Dispatchers.Default) {
+                        loadedMedia.sortedWith(
+                            compareByDescending<MediaItem> {
+                                if (it.dateTakenMillis > 0L) it.dateTakenMillis
+                                else it.dateAddedSeconds * 1000L
+                            }.thenByDescending { it.id }
+                        ).take(180)
+                    }
                     withContext(Dispatchers.IO) {
                         MediaSnapshotCache.write(mediaSnapshotContext, recentSnapshot)
                     }

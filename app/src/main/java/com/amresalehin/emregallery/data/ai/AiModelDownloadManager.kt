@@ -188,7 +188,7 @@ class AiModelDownloadWorker(
                     if (existing > 0L) {
                         header("Range", "bytes=$existing-")
                         applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                            .getString(AiModelStorage::class.java.name + KEY_ETAG, null)
+                            .getString("download_etag", null)
                             ?.takeIf { it.isNotBlank() }?.let { header("If-Range", it) }
                     }
                 }
@@ -197,7 +197,7 @@ class AiModelDownloadWorker(
                 if (existing > 0L && response.code != 206) {
                     partial.delete()
                     applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                        .edit().remove(AiModelStorage::class.java.name + KEY_ETAG).apply()
+                        .edit().remove("download_etag").apply()
                     throw IOException("Hugging Face did not honor the resume request; the partial file was discarded safely.")
                 }
                 if (!response.isSuccessful) throw IOException("Download failed (HTTP ${response.code}).")
@@ -210,7 +210,7 @@ class AiModelDownloadWorker(
                 }
                 response.header("ETag")?.let { etag ->
                     applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                        .edit().putString(AiModelStorage::class.java.name + KEY_ETAG, etag).apply()
+                        .edit().putString("download_etag", etag).apply()
                 }
                 val body = response.body ?: throw IOException("Hugging Face returned an empty response.")
                 val total = if (response.code == 206) {
@@ -257,7 +257,7 @@ class AiModelDownloadWorker(
             }
             AiModelStorage.writeState(applicationContext, ModelDownloadState(asset.id, "complete", target.length(), target.length()))
             applicationContext.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                .edit().remove(AiModelStorage::class.java.name + KEY_ETAG).apply()
+                .edit().remove("download_etag").apply()
             Result.success()
         } catch (error: Exception) {
             if (AiModelStorage.pauseRequested(applicationContext) || isStopped) {

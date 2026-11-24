@@ -240,9 +240,10 @@ fun GalleryApp(
             refreshMedia()
         }
     }
-    LaunchedEffect(media, hidden, inBin) {
-        if (media.isNotEmpty()) {
-            // Delay background scanning so initial app launch, first layout, and scrolling are 100% smooth
+    LaunchedEffect(media, hidden, inBin, destination) {
+        // Location metadata indexing is unrelated to Home thumbnail presentation. Start it
+        // only after leaving the initial Home interaction window and never while Home is active.
+        if (media.isNotEmpty() && destination != Destination.HOME) {
             delay(3000)
             withContext(Dispatchers.IO) {
                 runCatching {

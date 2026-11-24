@@ -4,47 +4,104 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.withContext
 
 data class MediaLoadResult(
     val items: List<MediaItem>,
     val successfulCollections: Int
 )
 
+sealed class MediaLoadEvent {
+    data class Batch(val items: List<MediaItem>) : MediaLoadEvent()
+    data class Completed(val result: MediaLoadResult) : MediaLoadEvent()
+}
+
 class MediaRepository(private val resolver: ContentResolver) {
 
-    fun loadMediaInitial(limitPerCollection: Int = 60): List<MediaItem> =
+    suspend fun loadMediaInitial(limitPerCollection: Int = 60): List<MediaItem> =
         loadMediaInitialResult(limitPerCollection).items
 
-    fun loadMedia(): List<MediaItem> = loadMediaResult().items
+    suspend fun loadMedia(): List<MediaItem> = loadMediaResult().items
 
-    fun loadMediaInitialResult(limitPerCollection: Int = 60): MediaLoadResult =
+    suspend fun loadMediaInitialResult(limitPerCollection: Int = 60): MediaLoadResult =
         queryMedia(limitPerCollection)
 
-    fun loadMediaResult(): MediaLoadResult = queryMedia(null)
+    suspend fun loadMediaResult(): MediaLoadResult = queryMedia(null)
 
-    private fun queryMedia(limitPerCollection: Int?): MediaLoadResult {
+    /**
+     * Emits real MediaStore rows as they are read, instead of waiting for both full cursors.
+     * The channel is deliberately bounded so a slow UI cannot accumulate an unbounded list
+     * of pending batches in memory.
+     */
+    fun loadMediaBatches(
+        firstBatchSize: Int = 72,
+        batchSize: Int = 384
+    ): Flow<MediaLoadEvent> = channelFlow {
+        val firstSize = firstBatchSize.coerceAtLeast(1)
+        val laterSize = batchSize.coerceAtLeast(firstSize)
+        val result = queryMedia(
+            limitPerCollection = null,
+            firstBatchSize = firstSize,
+            batchSize = laterSize,
+            onBatch = { batch -> send(MediaLoadEvent.Batch(batch)) }
+        )
+        send(MediaLoadEvent.Completed(result))
+    }.buffer(Channel.RENDEZVOUS)
+
+    private suspend fun queryMedia(
+        limitPerCollection: Int?,
+        firstBatchSize: Int? = null,
+        batchSize: Int? = null,
+        onBatch: (suspend (List<MediaItem>) -> Unit)? = null
+    ): MediaLoadResult = withContext(Dispatchers.IO) {
         val rows = ArrayList<MediaItem>(if (limitPerCollection != null) limitPerCollection * 2 else 256)
         var successfulCollections = 0
 
-        // Images and videos have separate runtime permissions on Android 13+.
-        // A denied collection must not discard results from the other collection.
-        if (queryCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, rows, limitPerCollection)) {
+        // Keep image and video collection permissions independent. Each collection emits
+        // batches immediately, so images can appear while the video cursor is still pending.
+        if (queryCollection(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                false,
+                rows,
+                limitPerCollection,
+                firstBatchSize,
+                batchSize,
+                onBatch
+            )
+        ) {
             successfulCollections++
         }
-        if (queryCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, rows, limitPerCollection)) {
+        if (queryCollection(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                true,
+                rows,
+                limitPerCollection,
+                firstBatchSize,
+                batchSize,
+                onBatch
+            )
+        ) {
             successfulCollections++
         }
 
-        // The Home screen applies the user's selected sort order before grouping. Avoid
-        // sorting the complete result here as well; preserve the MediaStore query's ordering.
-        return MediaLoadResult(rows, successfulCollections)
+        // Home applies the selected sort order over the accumulated batches and the final list.
+        MediaLoadResult(rows, successfulCollections)
     }
 
-    private fun queryCollection(
+    private suspend fun queryCollection(
         collection: Uri,
         video: Boolean,
         rows: MutableList<MediaItem>,
-        limit: Int? = null
+        limit: Int? = null,
+        firstBatchSize: Int? = null,
+        batchSize: Int? = null,
+        onBatch: (suspend (List<MediaItem>) -> Unit)? = null
     ): Boolean {
         val projectionList = buildList {
             add(MediaStore.MediaColumns._ID)
@@ -104,6 +161,11 @@ class MediaRepository(private val resolver: ContentResolver) {
                 } else -1
 
                 var addedCount = 0
+                val pendingBatch = if (onBatch != null) {
+                    ArrayList<MediaItem>(firstBatchSize ?: 72)
+                } else null
+                var nextBatchSize = firstBatchSize ?: batchSize ?: Int.MAX_VALUE
+
                 while (c.moveToNext()) {
                     val id = c.getLong(idCol)
                     val itemUri = ContentUris.withAppendedId(collection, id)
@@ -120,28 +182,39 @@ class MediaRepository(private val resolver: ContentResolver) {
 
                     if (!isSupportedMedia(name, mimeType, video)) continue
 
-                    rows.add(
-                        MediaItem(
-                            id = id,
-                            uri = itemUri.toString(),
-                            name = name,
-                            mimeType = mimeType,
-                            dateAddedSeconds = added,
-                            dateTakenMillis = taken,
-                            sizeBytes = size,
-                            width = width,
-                            height = height,
-                            relativePath = path,
-                            isVideo = video,
-                            durationMillis = duration,
-                            isTrashed = isTrashed
-                        )
+                    val item = MediaItem(
+                        id = id,
+                        uri = itemUri.toString(),
+                        name = name,
+                        mimeType = mimeType,
+                        dateAddedSeconds = added,
+                        dateTakenMillis = taken,
+                        sizeBytes = size,
+                        width = width,
+                        height = height,
+                        relativePath = path,
+                        isVideo = video,
+                        durationMillis = duration,
+                        isTrashed = isTrashed
                     )
+                    rows.add(item)
+                    pendingBatch?.add(item)
                     addedCount++
+
+                    if (pendingBatch != null && pendingBatch.size >= nextBatchSize) {
+                        onBatch?.invoke(pendingBatch.toList())
+                        pendingBatch.clear()
+                        nextBatchSize = batchSize ?: Int.MAX_VALUE
+                    }
                     if (limit != null && addedCount >= limit) break
+                }
+                if (!pendingBatch.isNullOrEmpty()) {
+                    onBatch?.invoke(pendingBatch.toList())
                 }
             }
             true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: SecurityException) {
             false
         } catch (_: Exception) {

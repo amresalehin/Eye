@@ -254,6 +254,7 @@ object AiResponseParser {
  * loopback; this class never uploads media to a cloud service unless a cloud endpoint is chosen.
  */
 class AiVisionRepository(private val context: Context) {
+    private val localRuntime = LocalVisionRuntime(context.applicationContext)
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)
@@ -287,7 +288,13 @@ class AiVisionRepository(private val context: Context) {
     }
 
     suspend fun enrich(item: MediaItem, settings: AiSettings): AiMediaMetadata = withContext(Dispatchers.IO) {
-        validateSettings(settings)
+        val localSelection = if (settings.providerMode.isOnDevice) {
+            AiModelStorage.resolveSelection(context)
+                ?: throw IOException("Select and install a GGUF model with its matching vision projector in AI & Models.")
+        } else {
+            validateSettings(settings)
+            null
+        }
         val frames = prepareFrames(item)
         if (frames.isEmpty()) throw IOException("Eye could not decode this media item.")
 
@@ -355,21 +362,25 @@ class AiVisionRepository(private val context: Context) {
             .apply { applyAuthorization(settings) }
             .build()
 
-        val responseText = client.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("AI request failed (HTTP ${response.code}): ${extractError(body)}")
+        val responseText = if (localSelection != null) {
+            localRuntime.generate(localSelection, frames, prompt)
+        } else {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw IOException("AI request failed (HTTP ${response.code}): ${extractError(body)}")
+                }
+                val root = try {
+                    JSONObject(body)
+                } catch (error: Exception) {
+                    throw IOException("The AI endpoint returned an unreadable response.", error)
+                }
+                val message = root.optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?: throw IOException("The AI endpoint did not return a chat completion.")
+                extractMessageText(message.opt("content"))
             }
-            val root = try {
-                JSONObject(body)
-            } catch (error: Exception) {
-                throw IOException("The AI endpoint returned an unreadable response.", error)
-            }
-            val message = root.optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-                ?: throw IOException("The AI endpoint did not return a chat completion.")
-            extractMessageText(message.opt("content"))
         }
 
         val parsed = AiResponseParser.parse(responseText)
@@ -378,13 +389,22 @@ class AiVisionRepository(private val context: Context) {
             description = parsed.description,
             tags = parsed.tags,
             providerMode = settings.providerMode.id,
-            model = settings.model.trim(),
+            model = localSelection?.displayName ?: settings.model.trim(),
             sourceSignature = AiMediaMetadata.signature(item),
             generatedAtMillis = System.currentTimeMillis()
         )
     }
 
+    fun close() {
+        localRuntime.close()
+    }
+
+    fun cancelLocalInference() {
+        localRuntime.cancel()
+    }
+
     private fun validateEndpoint(settings: AiSettings) {
+        if (settings.providerMode.isOnDevice) return
         if (settings.baseUrl.isBlank()) throw IOException("Enter an AI endpoint URL.")
         if (!settings.providerMode.isLocal && settings.apiKey.isBlank()) {
             throw IOException("Enter your API key, or select a local model provider.")

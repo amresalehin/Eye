@@ -14,7 +14,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -203,6 +202,7 @@ fun AiIndexingCard(
                     selectedFolders = aiState.clipSelectedFolders,
                     onToggleFolder = onToggleClipFolder,
                     onSelectAll = onSelectAllClipFolders,
+                    enabled = !aiState.isClipRunning,
                     testTag = "clip_folders"
                 )
             }
@@ -335,6 +335,7 @@ fun AiIndexingCard(
                     selectedFolders = aiState.vlmSelectedFolders,
                     onToggleFolder = onToggleVlmFolder,
                     onSelectAll = onSelectAllVlmFolders,
+                    enabled = !aiState.isVlmRunning,
                     testTag = "vlm_folders"
                 )
             }
@@ -391,6 +392,7 @@ private fun AiFolderSelector(
     selectedFolders: Set<String>,
     onToggleFolder: (String) -> Unit,
     onSelectAll: () -> Unit,
+    enabled: Boolean,
     testTag: String
 ) {
     Column(
@@ -418,7 +420,7 @@ private fun AiFolderSelector(
                 shape = RoundedCornerShape(14.dp),
                 color = if (isAllFolders) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                modifier = Modifier.height(32.dp).clickable(onClick = onSelectAll)
+                modifier = Modifier.height(32.dp).clickable(enabled = enabled, onClick = onSelectAll)
             ) {
                 Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
                     Text(
@@ -439,7 +441,7 @@ private fun AiFolderSelector(
                     shape = RoundedCornerShape(14.dp),
                     color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                    modifier = Modifier.height(34.dp).clickable { onToggleFolder(folder.path) }
+                    modifier = Modifier.height(34.dp).clickable(enabled = enabled) { onToggleFolder(folder.path) }
                 ) {
                     Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
                         Text(

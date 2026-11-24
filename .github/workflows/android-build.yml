@@ -70,6 +70,10 @@ jobs:
       # Gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # Keep the Gradle User Home (wrapper, dependencies, transforms and build cache)
+          # between workflow runs. Gradle's task output cache is enabled in gradle.properties.
+          cache-disabled: false
 
       # Run tests and build
       - name: Run unit tests and assemble debug APK

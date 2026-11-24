@@ -312,7 +312,7 @@ object PreparedThumbnailCache {
 object ThumbnailPrewarmManager {
     private const val DISK_WORKER_COUNT = 1
     // Bounded decoded-image window: visible rows first, followed by predictive look-ahead.
-    private const val MEMORY_WARM_WINDOW = 24
+    private const val MEMORY_WARM_WINDOW = 8
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private val memoryLock = Any()
@@ -403,6 +403,9 @@ object ThumbnailPrewarmManager {
         val imageLoader = runCatching { Coil.imageLoader(context) }.getOrNull() ?: return
         val visible = visibleItems.distinctBy { it.uri }
         val visibleUris = visible.mapTo(HashSet(visible.size)) { it.uri }
+        // Memory prefetch is deliberately kept to a tiny near-viewport window. The disk
+        // preparation worker handles farther rows while idle; decoding dozens of speculative
+        // Coil requests competes with the images the user can currently see.
         val retainedTargets = (visible + lookAheadItems)
             .distinctBy { it.uri }
             .take(MEMORY_WARM_WINDOW)

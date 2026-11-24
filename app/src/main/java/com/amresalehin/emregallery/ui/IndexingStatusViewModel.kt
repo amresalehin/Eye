@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amresalehin.emregallery.IndexingForegroundService
+import com.amresalehin.emregallery.AiIndexingFolderSettings
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory
@@ -65,6 +66,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             enteClustering = FaceClusteringState(
                 minGroupFaces = FaceRecognitionSettings.minGroupFaces(context, EnteFaceConstants.ENGINE_ID),
                 clusterDistance = FaceRecognitionSettings.recognitionDistance(context, EnteFaceConstants.ENGINE_ID)
+            ),
+            ai = AiIndexingState(
+                clipIsAllFolders = AiIndexingFolderSettings.isAllFolders(context, isVlm = false),
+                clipSelectedFolders = AiIndexingFolderSettings.selectedFolders(context, isVlm = false),
+                vlmIsAllFolders = AiIndexingFolderSettings.isAllFolders(context, isVlm = true),
+                vlmSelectedFolders = AiIndexingFolderSettings.selectedFolders(context, isVlm = true)
             )
         )
     )
@@ -160,6 +167,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             val selectedFolders = FaceRecognitionSettings.getSelectedFolders(context)
             val facePhotos = FaceRecognitionSettings.filterMediaForFaceIndexing(context, photos) { it.relativePath }
             val facePhotoUris = facePhotos.map { it.uri }
+            val clipAllFolders = AiIndexingFolderSettings.isAllFolders(context, isVlm = false)
+            val clipSelectedFolders = AiIndexingFolderSettings.selectedFolders(context, isVlm = false)
+            val vlmAllFolders = AiIndexingFolderSettings.isAllFolders(context, isVlm = true)
+            val vlmSelectedFolders = AiIndexingFolderSettings.selectedFolders(context, isVlm = true)
+            val clipPhotos = AiIndexingFolderSettings.filterMedia(context, photos, isVlm = false) { it.relativePath }
+            val vlmPhotos = AiIndexingFolderSettings.filterMedia(context, photos, isVlm = true) { it.relativePath }
 
             val result = withContext(Dispatchers.IO) {
                 val oCount = photos.count { item ->
@@ -187,7 +200,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val locMap = locCache.loadAll()
                 val lProcessed = photos.count { locMap.containsKey(it.uri) }
                 val lLocated = locMap.values.count { it.point != null }
-                val aiStats = aiStore.getStats(photos.map { it.uri }.toSet())
+                val clipStats = aiStore.getStats(clipPhotos.map { it.uri }.toSet())
+                val vlmStats = aiStore.getStats(vlmPhotos.map { it.uri }.toSet())
                 val aiConfig = AiSettings.load(context)
                 val clipInstalled = ClipOnnxModelManager.isInstalled(context)
                 val vlmLabel = if (aiConfig.provider == AiProviderType.ON_DEVICE_VLM) {
@@ -205,7 +219,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated,
-                    aiStats, vlmLabel, clipInstalled
+                    clipStats, vlmStats, vlmLabel, clipInstalled
                 )
             }
 
@@ -250,13 +264,17 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         locatedCount = result.locLocated
                     ),
                     ai = state.ai.copy(
-                        processed = result.aiStats.totalIndexed.coerceIn(0, totalPhotos),
-                        richCaptionedCount = result.aiStats.richCaptionedCount,
-                        clipEmbeddedCount = result.aiStats.clipEmbeddedCount,
-                        failedCount = result.aiStats.failedCount,
-                        distinctTagCount = result.aiStats.distinctTagCount,
+                        processed = result.clipStats.totalIndexed.coerceIn(0, clipPhotos.size),
+                        richCaptionedCount = result.vlmStats.richCaptionedCount.coerceIn(0, vlmPhotos.size),
+                        clipEmbeddedCount = result.clipStats.clipEmbeddedCount,
+                        failedCount = result.clipStats.failedCount,
+                        distinctTagCount = result.vlmStats.distinctTagCount,
                         vlmStatusLabel = result.aiProviderLabel,
-                        isClipInstalled = result.isClipInstalled
+                        isClipInstalled = result.isClipInstalled,
+                        clipIsAllFolders = clipAllFolders,
+                        clipSelectedFolders = clipSelectedFolders,
+                        vlmIsAllFolders = vlmAllFolders,
+                        vlmSelectedFolders = vlmSelectedFolders
                     )
                 )
             }
@@ -280,7 +298,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val enteFailedItems: List<Pair<String, String>>,
         val locProcessed: Int,
         val locLocated: Int,
-        val aiStats: AiIndexStats,
+        val clipStats: AiIndexStats,
+        val vlmStats: AiIndexStats,
         val aiProviderLabel: String,
         val isClipInstalled: Boolean
     )

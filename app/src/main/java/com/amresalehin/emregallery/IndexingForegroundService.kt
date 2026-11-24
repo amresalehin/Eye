@@ -48,6 +48,43 @@ import kotlinx.coroutines.withContext
  * Completed media are checkpointed to the OCR cache / face-index database, so a later run
  * naturally continues with remaining media.
  */
+
+/** Independent, persistent folder scopes for CLIP embeddings and VLM captions. */
+object AiIndexingFolderSettings {
+    private const val PREFS = "ai_indexing_folder_settings"
+    private const val KEY_CLIP_ALL = "clip_all_folders"
+    private const val KEY_CLIP_SELECTED = "clip_selected_folders"
+    private const val KEY_VLM_ALL = "vlm_all_folders"
+    private const val KEY_VLM_SELECTED = "vlm_selected_folders"
+
+    fun isAllFolders(context: Context, isVlm: Boolean): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(if (isVlm) KEY_VLM_ALL else KEY_CLIP_ALL, true)
+
+    fun selectedFolders(context: Context, isVlm: Boolean): Set<String> {
+        val key = if (isVlm) KEY_VLM_SELECTED else KEY_CLIP_SELECTED
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(key, null)?.let(::HashSet) ?: emptySet()
+    }
+
+    fun setFolders(context: Context, isVlm: Boolean, allFolders: Boolean, folders: Set<String>) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val allKey = if (isVlm) KEY_VLM_ALL else KEY_CLIP_ALL
+        val selectedKey = if (isVlm) KEY_VLM_SELECTED else KEY_CLIP_SELECTED
+        prefs.edit().putBoolean(allKey, allFolders)
+            .putStringSet(selectedKey, HashSet(folders)).apply()
+    }
+
+    fun <T> filterMedia(context: Context, media: List<T>, isVlm: Boolean, pathSelector: (T) -> String): List<T> {
+        if (isAllFolders(context, isVlm)) return media
+        val selected = selectedFolders(context, isVlm)
+        if (selected.isEmpty()) return media
+        return media.filter { item ->
+            FaceRecognitionSettings.normalizeFolderPath(pathSelector(item)) in selected
+        }
+    }
+}
+
 class IndexingForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var taskJob: Job? = null
@@ -566,7 +603,7 @@ class IndexingForegroundService : Service() {
     private suspend fun runClipSemantic(rescanAll: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val store = AiIndexStore.getInstance(this)
-        val photos = loadPhotos()
+        val photos = AiIndexingFolderSettings.filterMedia(this, loadPhotos(), isVlm = false) { it.relativePath }
         val alreadyDone = if (rescanAll) emptySet() else withContext(Dispatchers.IO) { store.getIndexedUris() }
         val pending = photos.filterNot { it.uri in alreadyDone }
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
@@ -605,7 +642,7 @@ class IndexingForegroundService : Service() {
     private suspend fun runVlmBatch(rescanAll: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val store = AiIndexStore.getInstance(this)
-        val photos = loadPhotos()
+        val photos = AiIndexingFolderSettings.filterMedia(this, loadPhotos(), isVlm = true) { it.relativePath }
         val alreadyDone = if (rescanAll) emptySet() else withContext(Dispatchers.IO) { store.getFullyCaptionedUris() }
         val pending = photos.filterNot { it.uri in alreadyDone }
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)

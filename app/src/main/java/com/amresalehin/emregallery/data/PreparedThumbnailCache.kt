@@ -98,10 +98,10 @@ object PreparedThumbnailCache {
         val (targetWidth, targetHeight) = normalizedDimensions(widthPx, heightPx)
         val key = cacheKey(uri.toString(), targetWidth, targetHeight)
         val file = File(cacheDirectory(appContext), "$key.webp")
-        if (file.isFile && file.length() > 0L) {
-            runCatching { file.setLastModified(System.currentTimeMillis()) }
-            return file
-        }
+        // Do not mutate filesystem metadata on every visible thumbnail cache hit. Besides
+        // adding write pressure during scrolling, this makes directory-based LRU eviction
+        // increasingly expensive. The prepared cache is an opportunistic cache, not a database.
+        if (file.isFile && file.length() > 0L) return file
         val result = loadOrCreate(appContext, uri, widthPx, heightPx) ?: return null
         if (!result.bitmap.isRecycled) result.bitmap.recycle()
         return if (file.isFile && file.length() > 0L) file else null
@@ -197,8 +197,6 @@ object PreparedThumbnailCache {
         val bitmap = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
         if (bitmap == null) {
             runCatching { file.delete() }
-        } else {
-            runCatching { file.setLastModified(System.currentTimeMillis()) }
         }
         return bitmap
     }
@@ -240,17 +238,21 @@ object PreparedThumbnailCache {
     }
 
     private fun evictIfNeeded(context: Context) {
-        runCatching {
-            val dir = cacheDirectory(context)
-            val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".webp") } ?: return
-            var totalBytes = 0L
-            for (f in files) totalBytes += f.length()
-            if (totalBytes <= MAX_CACHE_BYTES) return
-            files.sortBy { it.lastModified() }
-            for (f in files) {
-                if (totalBytes <= EVICT_TARGET_BYTES) break
-                val len = f.length()
-                if (f.delete()) totalBytes -= len
+        // Eviction is a background maintenance operation. Never enumerate/sort the cache
+        // directory on the visible thumbnail request path.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                val dir = cacheDirectory(context)
+                val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".webp") } ?: return@launch
+                var totalBytes = 0L
+                for (f in files) totalBytes += f.length()
+                if (totalBytes <= MAX_CACHE_BYTES) return@launch
+                files.sortBy { it.lastModified() }
+                for (f in files) {
+                    if (totalBytes <= EVICT_TARGET_BYTES) break
+                    val len = f.length()
+                    if (f.delete()) totalBytes -= len
+                }
             }
         }
     }

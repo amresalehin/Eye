@@ -790,16 +790,19 @@ fun GalleryApp(
         }
     }
 
-    val visibleMediaResult by produceState<List<MediaItem>?>(
-        initialValue = if (media.size <= 150) filterVisibleMedia() else null,
-        media, hidden, inBin, archive, favourites, albumFilter, customAlbums
-    ) {
-        value = if (media.size <= 150) {
+    val visibleMediaState = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
+        mutableStateOf<List<MediaItem>?>(
+            if (media.size <= 150) filterVisibleMedia() else null
+        )
+    }
+    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
+        visibleMediaState.value = if (media.size <= 150) {
             filterVisibleMedia()
         } else {
             withContext(Dispatchers.Default) { filterVisibleMedia() }
         }
     }
+    val visibleMediaResult = visibleMediaState.value
     val visibleMedia = visibleMediaResult.orEmpty()
     val visibleMediaLoading = visibleMediaResult == null
 

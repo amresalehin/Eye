@@ -255,7 +255,7 @@ fun SettingsScreen(
                                 Text(
                                     when (label) {
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
-                                        "AI & Models" -> "BYOK vision APIs, MNN and llama.cpp local models"
+                                        "AI & Models" -> "AI descriptions, tags and model providers"
                                         "Indexing Status" -> "Local MediaStore scan, OCR and AI status"
                                         "About" -> "Emre Gallery · 0.1.0"
                                         else -> ""

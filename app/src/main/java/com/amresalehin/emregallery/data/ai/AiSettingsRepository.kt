@@ -28,6 +28,12 @@ enum class AiProviderMode(
         "https://api.openai.com/v1",
         "Use your own API key with OpenAI or another OpenAI-compatible vision provider."
     ),
+    ON_DEVICE(
+        "on_device",
+        "On-device",
+        "",
+        "Run a downloaded GGUF vision model on this phone."
+    ),
     EXTERNAL_LOCAL(
         "external_local",
         "External server",
@@ -35,13 +41,15 @@ enum class AiProviderMode(
         "Connect to a separately installed OpenAI-compatible vision server."
     );
 
-    /** This is a remote transport choice, not an on-device inference runtime. */
+    /** External local server transport; on-device inference is handled by the native runtime. */
     val isLocal: Boolean get() = this == EXTERNAL_LOCAL
+    val isOnDevice: Boolean get() = this == ON_DEVICE
 
     companion object {
         fun fromId(id: String?): AiProviderMode =
             when (id?.lowercase()) {
                 "mnn_local", "llama_cpp_local" -> EXTERNAL_LOCAL
+                "on_device" -> ON_DEVICE
                 else -> entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: OPENAI_COMPATIBLE
             }
     }
@@ -54,9 +62,13 @@ data class AiSettings(
     val apiKey: String = ""
 ) {
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() &&
-            model.isNotBlank() &&
-            (providerMode.isLocal || apiKey.isNotBlank())
+        get() = if (providerMode.isOnDevice) {
+            model.isNotBlank()
+        } else {
+            baseUrl.isNotBlank() &&
+                model.isNotBlank() &&
+                (providerMode.isLocal || apiKey.isNotBlank())
+        }
 }
 
 /**

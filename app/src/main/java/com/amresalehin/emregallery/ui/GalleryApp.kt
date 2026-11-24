@@ -1297,6 +1297,7 @@ fun GalleryApp(
                         onSettings = { label ->
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
+                                "AI & Models" -> navigateTo(Destination.AI_SETTINGS)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }
@@ -1384,6 +1385,10 @@ fun GalleryApp(
                             }
                             scope.launch { prefs.setMlKitLanguages(updated) }
                         },
+                        onBack = { performBackNavigation() }
+                    )
+                    Destination.AI_SETTINGS -> AiSettingsScreen(
+                        totalMedia = media.size,
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(

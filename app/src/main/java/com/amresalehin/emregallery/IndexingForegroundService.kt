@@ -13,6 +13,9 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.data.ai.AiMediaMetadataStore
+import com.amresalehin.emregallery.data.ai.AiSettingsRepository
+import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
@@ -98,6 +101,7 @@ class IndexingForegroundService : Service() {
             ACTION_START_OCR -> "OCR indexing"
             ACTION_START_FACE -> "Face indexing"
             ACTION_START_LOCATION -> "Map location indexing"
+            ACTION_START_AI -> "AI descriptions & tags"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -122,6 +126,9 @@ class IndexingForegroundService : Service() {
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                    )
+                    ACTION_START_AI -> runAi(
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
@@ -476,6 +483,106 @@ class IndexingForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
+
+    /**
+     * Runs AI descriptions and structured tag generation as a resumable foreground task.
+     * Media bytes are processed one item at a time; only compact JPEG frames are held in memory.
+     */
+    private suspend fun runAi(rescanAll: Boolean) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        val settings = AiSettingsRepository(applicationContext).settings.first()
+        check(settings.isConfigured) {
+            "Configure a BYOK vision API or start a local MNN / llama.cpp vision server in AI & Models."
+        }
+
+        val items = loadAiMedia()
+        val store = AiMediaMetadataStore(applicationContext)
+        val pending = if (rescanAll) items else withContext(Dispatchers.IO) {
+            items.filterNot { store.hasCurrentResult(it) }
+        }
+        val completedInitially = items.size - pending.size
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
+        updateState(
+            task = TASK_AI,
+            running = true,
+            paused = initialPaused,
+            processed = completedInitially,
+            total = items.size,
+            failed = 0,
+            currentItemName = "",
+            currentItemStatus = "Preparing AI analysis",
+            error = null
+        )
+        postProgress(
+            "AI descriptions & tags",
+            if (pending.isEmpty()) "All media already have current AI metadata" else "Preparing ${pending.size} media items",
+            completedInitially,
+            items.size
+        )
+
+        var completed = completedInitially
+        var failed = 0
+        var consecutiveFailures = 0
+        val engine = AiVisionRepository(applicationContext)
+
+        for (item in pending) {
+            awaitResume()
+            currentCoroutineContext().ensureActive()
+            updateState(
+                currentItemName = item.name,
+                currentItemStatus = if (item.isVideo) "Analyzing video frames…" else "Analyzing photo…"
+            )
+            try {
+                val metadata = engine.enrich(item, settings)
+                withContext(Dispatchers.IO) { store.save(metadata) }
+                consecutiveFailures = 0
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failed++
+                consecutiveFailures++
+                updateState(
+                    failed = failed,
+                    currentItemStatus = error.localizedMessage?.take(140) ?: "AI analysis failed"
+                )
+                // A bad endpoint or model should not make Eye issue hundreds of identical
+                // failed requests. Stop after three consecutive failures; retry remains possible.
+                if (consecutiveFailures >= 3) {
+                    updateState(error = "Stopped after three consecutive AI failures: ${error.localizedMessage ?: "check the provider connection"}")
+                    break
+                }
+            }
+
+            completed++
+            updateState(processed = completed, total = items.size, failed = failed)
+            if (completed % 2 == 0 || completed == items.size) {
+                postProgress(
+                    "AI descriptions & tags",
+                    "Processed $completed of ${items.size} · $failed failed",
+                    completed,
+                    items.size
+                )
+            }
+            kotlinx.coroutines.yield()
+        }
+        postProgress(
+            "AI descriptions & tags",
+            "Finished $completed of ${items.size} · $failed failed",
+            completed,
+            items.size
+        )
+    }
+
+    private suspend fun loadAiMedia(): List<MediaItem> {
+        val prefsRepo = PreferencesRepository(applicationContext)
+        val hiddenUris = runCatching { prefsRepo.hidden.first() }.getOrDefault(emptySet())
+        val binUris = runCatching { prefsRepo.bin.first() }.getOrDefault(emptySet())
+        return MediaRepository(contentResolver).loadMedia().filterNot {
+            it.isTrashed || it.uri in hiddenUris || it.uri in binUris
+        }
+    }
+
     private suspend fun runLocation(rescanAll: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val photos = loadPhotos()
@@ -515,6 +622,7 @@ class IndexingForegroundService : Service() {
             TASK_OCR -> "OCR indexing"
             TASK_FACE -> "Face indexing"
             TASK_LOCATION -> "Map location indexing"
+            TASK_AI -> "AI descriptions & tags"
             TASK_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -578,6 +686,7 @@ class IndexingForegroundService : Service() {
         const val KEY_PHOTOS_WITH_FACES = "photos_with_faces"
 
         const val TASK_LOCATION = "location"
+        const val TASK_AI = "ai"
         private const val TASK_OCR = "ocr"
         private const val TASK_FACE = "face"
         private const val TASK_MODEL = "model"
@@ -586,6 +695,7 @@ class IndexingForegroundService : Service() {
         private const val ACTION_START_OCR = "com.amresalehin.emregallery.indexing.START_OCR"
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
         private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
+        private const val ACTION_START_AI = "com.amresalehin.emregallery.indexing.START_AI"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
@@ -650,6 +760,11 @@ class IndexingForegroundService : Service() {
 
         fun startLocation(context: Context, rescanAll: Boolean = false) =
             command(context, ACTION_START_LOCATION) {
+                putExtra(EXTRA_RESCAN_ALL, rescanAll)
+            }
+
+        fun startAiIndexing(context: Context, rescanAll: Boolean = false) =
+            command(context, ACTION_START_AI) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
             }
 

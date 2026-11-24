@@ -37,6 +37,7 @@ fun SettingsScreen(
 
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
+        "AI & Models" to Icons.Default.AutoAwesome,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -254,7 +255,8 @@ fun SettingsScreen(
                                 Text(
                                     when (label) {
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
-                                        "Indexing Status" -> "Local MediaStore scan & OCR status"
+                                        "AI & Models" -> "BYOK vision APIs, MNN and llama.cpp local models"
+                                        "Indexing Status" -> "Local MediaStore scan, OCR and AI status"
                                         "About" -> "Emre Gallery · 0.1.0"
                                         else -> ""
                                     },

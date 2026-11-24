@@ -776,6 +776,10 @@ fun OverviewTabContent(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        item(key = "overview_ai_enrichment") {
+            AiEnrichmentSection(item = item)
+        }
+
         // 1. Albums Section
         item(key = "overview_albums") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

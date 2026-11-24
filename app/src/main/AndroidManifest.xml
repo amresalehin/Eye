@@ -46,6 +46,7 @@
         android:enableOnBackInvokedCallback="true"
         android:largeHeap="true"
         android:hardwareAccelerated="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.EmreGallery">
         <service
             android:name=".IndexingForegroundService"

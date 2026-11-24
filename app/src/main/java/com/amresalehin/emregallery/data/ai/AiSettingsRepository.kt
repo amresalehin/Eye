@@ -30,12 +30,13 @@ enum class AiProviderMode(
     ),
     EXTERNAL_LOCAL(
         "external_local",
-        "External local server",
+        "External server",
         "http://127.0.0.1:8080/v1",
         "Connect to a separately installed OpenAI-compatible vision server."
     );
 
-    val isLocal: Boolean get() = this != OPENAI_COMPATIBLE
+    /** This is a remote transport choice, not an on-device inference runtime. */
+    val isLocal: Boolean get() = this == EXTERNAL_LOCAL
 
     companion object {
         fun fromId(id: String?): AiProviderMode =

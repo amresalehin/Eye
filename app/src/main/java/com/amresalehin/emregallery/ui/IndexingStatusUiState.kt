@@ -83,6 +83,7 @@ data class AiIndexingState(
     val downloadTotalBytes: Long = 0L,
     val isClipInstalled: Boolean = false,
     val vlmStatusLabel: String = "MediaPipe VLM",
+    val isVlmConfigured: Boolean = false,
     val itemsPerMinute: Int = 0,
     val error: String? = null,
     val clipIsAllFolders: Boolean = true,

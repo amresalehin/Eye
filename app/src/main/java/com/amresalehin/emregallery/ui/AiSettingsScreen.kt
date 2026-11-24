@@ -203,7 +203,7 @@ fun AiSettingsScreen(
                     MinimalSegmentedBar(
                         options = listOf(
                             AiProviderType.ON_DEVICE_VLM to "Local",
-                            AiProviderType.OLLAMA to "Cloud / BYOK"
+                            AiProviderType.OLLAMA to "BYOK"
                         ),
                         selected = if (config.provider == AiProviderType.ON_DEVICE_VLM) {
                             AiProviderType.ON_DEVICE_VLM
@@ -426,34 +426,10 @@ fun AiSettingsScreen(
                             }
                         }
                     } else {
-                        MinimalSegmentedBar(
-                            options = listOf(
-                                AiProviderType.OLLAMA to "Ollama",
-                                AiProviderType.GEMINI to "Gemini",
-                                AiProviderType.OPENAI_COMPATIBLE to "OpenAI / Custom"
-                            ),
-                            selected = config.provider,
-                            onSelect = { provider ->
-                                AiSettings.save(context, config)
-                                val saved = context.getSharedPreferences("emre_ai_settings", android.content.Context.MODE_PRIVATE)
-                                val nextConfig = when (provider) {
-                                    AiProviderType.OLLAMA -> config.copy(provider = provider,
-                                        baseUrl = saved.getString("ollama_base_url", null) ?: provider.defaultBaseUrl,
-                                        modelName = saved.getString("ollama_model", null) ?: provider.defaultModel,
-                                        apiKey = "")
-                                    AiProviderType.GEMINI -> config.copy(provider = provider,
-                                        baseUrl = saved.getString("gemini_base_url", null) ?: provider.defaultBaseUrl,
-                                        modelName = saved.getString("gemini_model", null) ?: provider.defaultModel,
-                                        apiKey = saved.getString("gemini_key", "") ?: "")
-                                    else -> config.copy(provider = provider,
-                                        baseUrl = saved.getString("openai_base_url", null) ?: provider.defaultBaseUrl,
-                                        modelName = saved.getString("openai_model", null) ?: provider.defaultModel,
-                                        apiKey = saved.getString("openai_key", "") ?: "")
-                                }
-                                config = nextConfig
-                                AiSettings.save(context, nextConfig)
-                                statusText = null
-                            }
+                        Text(
+                            text = "Custom API URL",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         OutlinedTextField(
                             value = config.baseUrl,

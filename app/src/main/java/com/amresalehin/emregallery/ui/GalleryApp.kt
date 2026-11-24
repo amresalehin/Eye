@@ -986,7 +986,6 @@ fun GalleryApp(
                     ) {
                         HomeScreen(
                             isVisible = homeVisible,
-                            isPrewarmActive = destination == Destination.HOME,
                         listState = homeListState,
                         media = visibleMedia,
                         loading = loading,

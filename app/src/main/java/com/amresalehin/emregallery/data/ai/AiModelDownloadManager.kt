@@ -46,6 +46,7 @@ object AiModelCatalog {
         AiModelAsset("smol22-mmproj", "SmolVLM2 2.2B · mmproj F16", "mmproj-SmolVLM2-2.2B-Instruct-f16.gguf", "ggml-org/SmolVLM2-2.2B-Instruct-GGUF", "872 MB", "Vision projector"),
         AiModelAsset("smol500-video-q8", "SmolVLM2 500M Video · Q8_0", "SmolVLM2-500M-Video-Instruct-Q8_0.gguf", "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF", "437 MB", pairedProjectorId = "smol500-video-mmproj"),
         AiModelAsset("smol500-video-mmproj", "SmolVLM2 500M Video · mmproj Q8_0", "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf", "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF", "109 MB", "Vision projector"),
+        AiModelAsset("gemma4-e2b-q4", "Gemma 4 E2B · Q4_0", "gemma-4-E2B-it-Q4_0.gguf", "ggml-org/gemma-4-E2B-it-GGUF", "2.84 GB", pairedProjectorId = "gemma4-e2b-mmproj"),
         AiModelAsset("gemma4-e2b-q8", "Gemma 4 E2B · Q8_0", "gemma-4-E2B-it-Q8_0.gguf", "ggml-org/gemma-4-E2B-it-GGUF", "4.97 GB", pairedProjectorId = "gemma4-e2b-mmproj"),
         AiModelAsset("gemma4-e2b-mmproj", "Gemma 4 E2B · mmproj Q8_0", "mmproj-gemma-4-E2B-it-Q8_0.gguf", "ggml-org/gemma-4-E2B-it-GGUF", "557 MB", "Vision projector")
     )

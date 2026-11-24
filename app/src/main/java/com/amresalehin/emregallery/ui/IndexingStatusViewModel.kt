@@ -549,6 +549,20 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         return ((items / elapsedSec) * 60f).roundToInt()
     }
 
+    fun setAiIndexingFolders(isVlm: Boolean, allFolders: Boolean, folders: Set<String>) {
+        AiIndexingFolderSettings.setFolders(context, isVlm, allFolders, folders)
+        _uiState.update { state ->
+            state.copy(
+                ai = if (isVlm) {
+                    state.ai.copy(vlmIsAllFolders = allFolders, vlmSelectedFolders = folders)
+                } else {
+                    state.ai.copy(clipIsAllFolders = allFolders, clipSelectedFolders = folders)
+                }
+            )
+        }
+        refreshCounts()
+    }
+
     // --- AI Tagging & Semantic Search Indexing Actions ---
 
     fun toggleClipIndexing() {

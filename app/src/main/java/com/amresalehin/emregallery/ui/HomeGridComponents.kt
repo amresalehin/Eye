@@ -1,7 +1,6 @@
 package com.amresalehin.emregallery.ui
 
 import android.net.Uri
-import com.amresalehin.emregallery.data.StoryGroup
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -19,8 +18,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -53,9 +49,6 @@ import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -143,135 +136,6 @@ fun HomeFastScrollbar(
         }
     }
 }
-
-@Composable
-fun MemoriesStrip(
-    media: List<MediaItem>,
-    onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit,
-    listState: LazyListState
-) {
-    val today = remember { Calendar.getInstance() }
-    val currentYear = today.get(Calendar.YEAR)
-    val todayMonth = today.get(Calendar.MONTH)
-    val todayDay = today.get(Calendar.DAY_OF_YEAR)
-
-    fun computeStories(source: List<MediaItem>): List<Pair<String, List<MediaItem>>> {
-        if (source.isEmpty()) return emptyList()
-        val cal = Calendar.getInstance()
-        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
-        val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
-
-        for (item in source) {
-            val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
-            if (timestamp <= 0L) continue
-            cal.timeInMillis = timestamp
-            val y = cal.get(Calendar.YEAR)
-            val m = cal.get(Calendar.MONTH)
-            val d = cal.get(Calendar.DAY_OF_YEAR)
-
-            if (m == todayMonth && d == todayDay && y < currentYear) {
-                onThisDayMap.getOrPut(y) { mutableListOf() }.add(item)
-            }
-            val tripKey = y * 1000 + d
-            tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
-        }
-
-        val result = mutableListOf<Pair<String, List<MediaItem>>>()
-        onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
-            result += "On this day · $year" to entries
-        }
-
-        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-        tripsMap.entries
-            .filter { it.value.size >= 4 }
-            .sortedByDescending { it.key }
-            .take(8)
-            .forEach { (_, entries) ->
-                val label = dateFormat.format(Date(entries.first().second))
-                if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
-                    result += label to entries.map { it.first }
-                }
-            }
-
-        return result.filter { it.second.isNotEmpty() }.take(10)
-    }
-
-    // Resolve story groups off the main thread. A null value means calculation is in
-    // progress; an empty list means the library has no eligible memories to display.
-    var stories by remember(media, currentYear, todayMonth, todayDay) {
-        mutableStateOf<List<Pair<String, List<MediaItem>>>?>(null)
-    }
-    LaunchedEffect(media, currentYear, todayMonth, todayDay) {
-        stories = withContext(Dispatchers.Default) { computeStories(media) }
-    }
-
-    val resolvedStories = stories ?: return
-    if (resolvedStories.isEmpty()) return
-
-    Column {
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(vertical = 4.dp)
-        ) {
-            items(resolvedStories.size, key = { index -> resolvedStories[index].first }) { index ->
-                val (title, storyMedia) = resolvedStories[index]
-                val cover = storyMedia.first()
-                val memInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                val isMemPressed by memInteractionSource.collectIsPressedAsState()
-                val memScale by animateFloatAsState(
-                    targetValue = if (isMemPressed) 0.94f else 1f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                    label = "mem_card_scale"
-                )
-                Box(
-                    Modifier.width(132.dp).height(184.dp)
-                        .trackThumbnailBounds(cover.uri)
-                        .graphicsLayer {
-                            scaleX = memScale
-                            scaleY = memScale
-                        }
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable(
-                            interactionSource = memInteractionSource,
-                            indication = ripple(bounded = true),
-                            onClick = {
-                                val storyGroups = resolvedStories.map { StoryGroup(it.first, it.second) }
-                                onOpenMemory(storyGroups, index)
-                            }
-                        )
-                ) {
-                    val context = LocalContext.current
-                    AsyncImage(
-                        model = remember(cover.uri, context) {
-                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 264, 368)
-                        },
-                        contentDescription = title,
-                        modifier = Modifier.fillMaxSize().graphicsLayer {
-                            alpha = if (ThumbnailBoundsTracker.activeViewerUri == cover.uri) 0f else 1f
-                        },
-                        contentScale = ContentScale.Crop
-                    )
-                    Box(
-                        Modifier.fillMaxWidth().height(78.dp).align(Alignment.BottomCenter)
-                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
-                    )
-                    Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
-                        Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${storyMedia.size} photos and videos",
-                            color = Color.White.copy(alpha = 0.88f),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-
 
 /**
  * Shared geometry for the real mosaic and its loading placeholders.

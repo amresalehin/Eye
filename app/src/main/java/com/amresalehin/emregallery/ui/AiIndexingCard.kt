@@ -293,16 +293,25 @@ fun AiIndexingCard(
                     Spacer(Modifier.width(6.dp))
                 }
 
-                CompactProgressPill(
-                    isRunning = vlmRunning,
-                    isPaused = vlmPaused,
-                    isDone = vlmDone,
-                    percent = vlmPct,
-                    hasPartial = aiState.richCaptionedCount > 0,
-                    enabled = countsReady && vlmTotalPhotos > 0 &&
-                        !aiState.isClipRunning && !aiState.isDownloadingModel,
-                    onClick = onToggleVlmIndexing
-                )
+                if (!aiState.isVlmConfigured && !vlmRunning && !vlmPaused) {
+                    CompactActionPill(
+                        label = "Config",
+                        enabled = true,
+                        onClick = onOpenAiSettings,
+                        modifier = Modifier.testTag("vlm_config_button")
+                    )
+                } else {
+                    CompactProgressPill(
+                        isRunning = vlmRunning,
+                        isPaused = vlmPaused,
+                        isDone = vlmDone,
+                        percent = vlmPct,
+                        hasPartial = aiState.richCaptionedCount > 0,
+                        enabled = countsReady && aiState.isVlmConfigured && vlmTotalPhotos > 0 &&
+                            !aiState.isClipRunning && !aiState.isDownloadingModel,
+                        onClick = onToggleVlmIndexing
+                    )
+                }
             }
 
             // Match the OCR and Face cards' divider-integrated progress treatment.
@@ -360,12 +369,6 @@ fun AiIndexingCard(
                     Spacer(Modifier.weight(1f))
                 }
 
-                CompactActionPill(
-                    label = "Config",
-                    enabled = true,
-                    onClick = onOpenAiSettings,
-                    modifier = Modifier.testTag("vlm_config_button")
-                )
             }
 
             if (!aiState.error.isNullOrBlank() &&

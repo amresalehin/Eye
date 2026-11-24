@@ -95,9 +95,18 @@ private fun buildHomeGroupedData(
 }
 
 /** Re-chunk already sorted groups when the column count changes; never sort the library again. */
-private fun buildHomeGridData(grouped: HomeGroupedData, columns: Int): HomeGridData {
+private fun buildHomeGroupedRows(
+    grouped: HomeGroupedData,
+    columns: Int
+): List<Pair<DayGroup, List<List<MediaItem>>>> {
     val clampedCols = columns.coerceIn(1, 6)
-    val groupedRows = grouped.groups.map { group -> group to group.items.chunked(clampedCols) }
+    return grouped.groups.map { group -> group to group.items.chunked(clampedCols) }
+}
+
+private fun buildHomeGridData(
+    grouped: HomeGroupedData,
+    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
+): HomeGridData {
     val predictivePrefetchRows = groupedRows.flatMap { (group, rowChunks) ->
         rowChunks.map { row ->
             "day_${group.dayKey}_row_${row.first().id}" to row
@@ -181,14 +190,22 @@ fun HomeScreen(
     var gridData by remember {
         mutableStateOf(HomeGridData())
     }
-    // Build the Home snapshot in one background pass: sorting, grouping, row chunking and
-    // predictive index creation are all derived from the same media version. This avoids
-    // publishing an intermediate grouped snapshot and immediately rebuilding it a second time.
+    var skeletonRows by remember {
+        mutableStateOf(emptyList<Pair<DayGroup, List<List<MediaItem>>>>())
+    }
+    // Sort, group and chunk once. Publish those exact rows to the skeleton first, then build
+    // the predictive lookup from the same row list before switching to real thumbnail cells.
     LaunchedEffect(isVisible, media, sortOrder, groupBy, pinchGridColumns) {
         if (!isVisible) return@LaunchedEffect
-        val next = withContext(Dispatchers.Default) {
+        val groupedAndRows = withContext(Dispatchers.Default) {
             val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
-            buildHomeGridData(grouped, pinchGridColumns)
+            grouped to buildHomeGroupedRows(grouped, pinchGridColumns)
+        }
+        skeletonRows = groupedAndRows.second
+        // Give Compose a frame to draw the data-aligned skeleton before real media cells replace it.
+        withFrameNanos { }
+        val next = withContext(Dispatchers.Default) {
+            buildHomeGridData(groupedAndRows.first, groupedAndRows.second)
         }
         gridData = next
     }
@@ -413,7 +430,7 @@ fun HomeScreen(
                         gridColumns = pinchGridColumns,
                         gridStyle = gridStyle,
                         showMemories = albumTitle == null,
-                        media = media,
+                        groupedRows = skeletonRows,
                         containerWidth = containerWidth
                     )
                 }
@@ -467,25 +484,7 @@ fun HomeScreen(
                 groupedRows.forEach { (group, rowChunks) ->
                     if (group.dayLabel.isNotBlank()) {
                         item(key = "header_${group.dayKey}", contentType = "header") {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = group.dayLabel,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    text = "${group.items.size} ${if (group.items.size == 1) "item" else "items"}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            HomeGroupHeader(group)
                         }
                     }
 

@@ -23,14 +23,14 @@ class GalleryApplication : Application() {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRam = activityManager?.isLowRamDevice ?: false
 
-        // Unconstrained memory caching: Allocate up to 45% (30% on low-RAM) of JVM heap to Coil.
-        // With largeHeap enabled, this unlocks hundreds of megabytes for raw pre-decoded bitmaps,
-        // avoiding recurring decompression bottlenecks during 120Hz continuous scrolling.
-        val cachePercent = if (isLowRam) 0.15 else 0.25
+        // Keep enough decoded thumbnails resident for smooth back-and-forth gallery scrolling.
+        // Low-RAM devices retain a smaller safety budget; Android memory callbacks trim this cache.
+        val cachePercent = if (isLowRam) 0.30 else 0.45
 
-        // Bounded concurrency prevents fast flings from saturating CPU cores and causing GC/thermal spikes.
-        val imageIoDispatcher = Dispatchers.IO.limitedParallelism(6)
-        val imageComputeDispatcher = Dispatchers.Default.limitedParallelism(4)
+        // Let Coil use the shared dispatchers so visible thumbnail requests are not held behind
+        // an unnecessarily small decoder pool. Speculative prefetch is bounded separately.
+        val imageIoDispatcher = Dispatchers.IO
+        val imageComputeDispatcher = Dispatchers.Default
 
         val imageLoader = ImageLoader.Builder(this)
             .okHttpClient { OkHttpDownloader.client }

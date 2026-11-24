@@ -6,8 +6,12 @@ readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DESTINATION="${ROOT}/third_party/llama.cpp"
 
 if [[ -f "${DESTINATION}/CMakeLists.txt" ]]; then
-    printf 'llama.cpp already present at %s\n' "${DESTINATION}"
-    exit 0
+    existing="$(git -C "${DESTINATION}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "${existing}" == "${COMMIT}" ]]; then
+        printf 'llama.cpp %s already present\n' "${COMMIT}"
+        exit 0
+    fi
+    rm -rf "${DESTINATION}"
 fi
 
 mkdir -p "$(dirname "${DESTINATION}")"

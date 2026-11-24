@@ -30,8 +30,7 @@ else()
         llama_cpp
         GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
         GIT_TAG dfdfca22bce36f66b4cfa3e6c96f0c4d92dac0fe
-        GIT_SHALLOW TRUE
-    )
+        )
     FetchContent_MakeAvailable(llama_cpp)
     set(LOCAL_LLAMA_DIR "${llama_cpp_SOURCE_DIR}")
 endif()

@@ -10,28 +10,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,31 +49,93 @@ import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.ai.AiModelAsset
 import com.amresalehin.emregallery.data.ai.AiModelCatalog
 import com.amresalehin.emregallery.data.ai.AiModelStorage
+import com.amresalehin.emregallery.data.ai.AiProviderMode
+import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.ModelDownloadState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 @Composable
-fun LocalAiModelsSection() {
+fun LocalAiModelsSection(
+    onModelSelected: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var downloadState by remember { mutableStateOf<ModelDownloadState?>(null) }
-    var selectedId by remember { mutableStateOf("") }
-    var installedVersion by remember { mutableStateOf(0) }
-    var importedFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var selectedModel by remember { mutableStateOf("") }
+    var selectedProjector by remember { mutableStateOf("") }
+    var storedFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var showLibrary by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var hasError by remember { mutableStateOf(false) }
+    var noticeIsError by remember { mutableStateOf(false) }
 
     fun refresh() {
         downloadState = AiModelStorage.state(context)
-        val prefs = context.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-        selectedId = prefs.getString("selected_model", "").orEmpty()
-        importedFiles = AiModelStorage.directory(context).listFiles()
-            ?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".importing") }
+        selectedModel = AiModelStorage.selectedModelId(context)
+        selectedProjector = AiModelStorage.selectedProjectorName(context)
+        storedFiles = AiModelStorage.directory(context).listFiles()
+            ?.filter { it.isFile && it.extension.equals("gguf", true) }
             ?.sortedBy { it.name.lowercase() }.orEmpty()
-        installedVersion++
+    }
+
+    fun activateModel(modelId: String) {
+        AiModelStorage.selectModel(context, modelId)
+        scope.launch {
+            runCatching {
+                val repository = AiSettingsRepository(context.applicationContext)
+                val saved = repository.settings.first()
+                repository.save(
+                    saved.copy(
+                        providerMode = AiProviderMode.ON_DEVICE,
+                        baseUrl = "",
+                        model = modelId
+                    )
+                )
+            }.onSuccess {
+                notice = "On-device model selected"
+                noticeIsError = false
+                onModelSelected(modelId)
+                refresh()
+            }.onFailure {
+                notice = it.localizedMessage ?: "Could not select model"
+                noticeIsError = true
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val name = queryModelDisplayName(context, uri) ?: "imported-model.gguf"
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("Could not open the selected file.")
+                    withContext(Dispatchers.IO) { AiModelStorage.importFile(context, input, name) }
+                }.onSuccess { file ->
+                    if (file.name.startsWith("mmproj", true)) {
+                        AiModelStorage.selectProjector(context, file.name)
+                        val currentModel = AiModelStorage.selectedModelId(context)
+                        if (currentModel.isNotBlank()) onModelSelected(currentModel)
+                        notice = "Vision projector imported"
+                    } else {
+                        activateModel(file.name)
+                        notice = "Model imported"
+                    }
+                    noticeIsError = false
+                    refresh()
+                }.onFailure {
+                    notice = it.localizedMessage ?: "Import failed"
+                    noticeIsError = true
+                }
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -83,85 +146,68 @@ fun LocalAiModelsSection() {
         }
     }
 
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            scope.launch {
-                runCatching {
-                    val name = queryDisplayName(context, uri) ?: "imported-model.gguf"
-                    val input = context.contentResolver.openInputStream(uri)
-                        ?: error("Could not open the selected file.")
-                    withContextIo { AiModelStorage.importFile(context, input, name) }
-                }.onSuccess {
-                    notice = "Imported ${it.name}"
-                    hasError = false
-                    refresh()
-                }.onFailure {
-                    notice = it.message ?: "Import failed"
-                    hasError = true
-                }
-            }
-        }
+    val selection = remember(selectedModel, selectedProjector, storedFiles) {
+        AiModelStorage.resolveSelection(context)
     }
-
-    val state = downloadState
-    val activeAsset = state?.let { AiModelCatalog.byId(it.assetId) }
-    val installed = remember(installedVersion) {
-        AiModelCatalog.assets.filter { AiModelStorage.isInstalled(context, it) }
-    }
+    val activeAsset = downloadState?.let { AiModelCatalog.byId(it.assetId) }
+    val downloading = downloadState?.status in listOf("queued", "downloading")
+    val resumable = downloadState?.status in listOf("paused", "error")
 
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(
-                    "On-device models",
-                    modifier = Modifier.padding(start = 8.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("On-device AI", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                Text(
-                    "${installed.size} files",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (selection != null) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = "Model ready", tint = MaterialTheme.colorScheme.primary)
+                }
             }
 
             Text(
-                "Download GGUF models from Hugging Face or import a model file. Downloads are kept in Eye's private storage.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                selection?.displayName ?: if (selectedModel.isNotBlank()) "Vision projector required" else "No model selected",
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
+            val state = downloadState
             if (state != null && activeAsset != null && state.status in listOf("queued", "downloading", "paused", "error")) {
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text(activeAsset.modelName, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(activeAsset.modelName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(
+                            if (state.totalBytes > 0L) "${(state.progress * 100).toInt()}%" else formatModelBytes(state.downloadedBytes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (state.totalBytes > 0L) {
                         LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
                         Text(
-                            "${formatModelBytes(state.downloadedBytes)} / ${formatModelBytes(state.totalBytes)} · ${(state.progress * 100).toInt()}%",
+                            "${formatModelBytes(state.downloadedBytes)} / ${formatModelBytes(state.totalBytes)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text("${formatModelBytes(state.downloadedBytes)} downloaded", style = MaterialTheme.typography.labelSmall)
                     }
                     if (!state.error.isNullOrBlank()) {
-                        Text(state.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        Text(state.error, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (state.status == "paused" || state.status == "error") {
-                            Button(onClick = { scope.launch { AiModelStorage.resume(context, activeAsset) } }) {
+                        if (resumable) {
+                            Button(onClick = {
+                                scope.launch {
+                                    activeAsset?.let { AiModelStorage.resume(context, it) }
+                                }
+                            }) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
                                 Text("Resume")
@@ -180,132 +226,129 @@ fun LocalAiModelsSection() {
                         }
                     }
                 }
-            } else if (state?.status == "complete") {
-                Text(
-                    "Last download completed · ${activeAsset?.modelName.orEmpty()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            } else if (state?.status == "complete" && activeAsset != null) {
+                Text("Downloaded · ${activeAsset.modelName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
 
-            Text("Available models", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            AiModelCatalog.assets.filter { it.kind == "Model" }.forEach { asset ->
-                val isInstalled = AiModelStorage.isInstalled(context, asset)
-                val isSelected = selectedId == asset.id
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(asset.modelName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                            Text(
-                                "${asset.sizeLabel} · GGUF",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            asset.pairedProjectorId?.let { projectorId ->
-                                val projector = AiModelCatalog.byId(projectorId)
-                                Text(
-                                    "Vision projector required: ${projector?.fileName ?: "separate file"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                        }
-                        if (isSelected) {
-                            Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
-                        } else if (isInstalled) {
-                            OutlinedButton(onClick = {
-                                context.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                                    .edit().putString("selected_model", asset.id).apply()
-                                refresh()
-                                notice = "Model selected"
-                                hasError = false
-                            }) { Text("Select") }
-                        } else {
-                            OutlinedButton(
-                                enabled = state?.status !in listOf("queued", "downloading", "paused", "error"),
-                                onClick = { scope.launch { AiModelStorage.start(context, asset) } }
-                            ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null)
-                                Spacer(Modifier.width(4.dp))
-                                Text("Download")
-                            }
-                        }
-                    }
-                    if (asset.pairedProjectorId != null) {
-                        val projector = AiModelCatalog.byId(asset.pairedProjectorId)
-                        if (projector != null && !AiModelStorage.isInstalled(context, projector)) {
-                            OutlinedButton(
-                                enabled = state?.status !in listOf("queued", "downloading"),
-                                onClick = { scope.launch { AiModelStorage.start(context, projector) } }
-                            ) { Text("Download vision projector · ${projector.sizeLabel}") }
-                        }
-                    }
-                    if (asset != AiModelCatalog.assets.filter { it.kind == "Model" }.last()) {
-                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    }
-                }
-            }
-
-            OutlinedButton(
-                onClick = { importLauncher.launch(arrayOf("application/octet-stream", "application/x-gguf", "application/*")) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.FolderOpen, contentDescription = null)
-                Spacer(Modifier.width(7.dp))
-                Text("Import model file")
-            }
-
-            if (importedFiles.isNotEmpty()) {
-                Text("Stored in Eye", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                importedFiles.forEach { file ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(formatModelBytes(file.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (selectedId == file.name) {
-                            Icon(Icons.Default.Check, contentDescription = "Selected")
-                        } else if (file.extension.equals("gguf", true)) {
-                            TextButtonCompatSelect(file.name) {
-                                context.getSharedPreferences("ai_model_downloads", Context.MODE_PRIVATE)
-                                    .edit().putString("selected_model", file.name).apply()
-                                refresh()
-                            }
-                        }
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { showLibrary = true }) { Text("Models") }
+                OutlinedButton(onClick = {
+                    importLauncher.launch(arrayOf("application/octet-stream", "application/*"))
+                }) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("Import")
                 }
             }
 
             if (notice != null) {
-                Text(notice.orEmpty(), style = MaterialTheme.typography.labelSmall, color = if (hasError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                Text(
+                    notice.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
             }
-            Text(
-                "GGUF vision models may need a matching mmproj file. Model files can be managed here; on-device inference requires a compatible runtime.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
+    }
+
+    if (showLibrary) {
+        AlertDialog(
+            onDismissRequest = { showLibrary = false },
+            title = { Text("Model library") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    AiModelCatalog.models().forEach { asset ->
+                        val projector = asset.pairedProjectorId?.let { AiModelCatalog.byId(it) }
+                        val modelReady = AiModelStorage.isInstalled(context, asset)
+                        val projectorReady = projector?.let { AiModelStorage.isInstalled(context, it) } ?: false
+                        val isSelected = selectedModel == asset.id
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(asset.modelName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                    Text(asset.sizeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (isSelected && selection != null) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+                                } else if (modelReady && projectorReady) {
+                                    TextButton(onClick = {
+                                        activateModel(asset.id)
+                                        showLibrary = false
+                                    }) { Text("Use") }
+                                } else if (!modelReady) {
+                                    TextButton(
+                                        enabled = !downloading && !resumable,
+                                        onClick = { scope.launch { AiModelStorage.start(context, asset) } }
+                                    ) { Text("Download") }
+                                }
+                            }
+                            if (projector != null && !projectorReady) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "Vision file · ${projector.sizeLabel}",
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    TextButton(
+                                        enabled = !downloading && !resumable,
+                                        onClick = { scope.launch { AiModelStorage.start(context, projector) } }
+                                    ) { Text("Download") }
+                                }
+                            }
+                        }
+                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    }
+
+                    if (storedFiles.isNotEmpty()) {
+                        Text("Imported GGUF files", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        storedFiles.forEach { file ->
+                            val isProjector = file.name.startsWith("mmproj", true)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(formatModelBytes(file.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                TextButton(onClick = {
+                                    if (isProjector) {
+                                        AiModelStorage.selectProjector(context, file.name)
+                                        val model = AiModelStorage.selectedModelId(context)
+                                        if (model.isNotBlank()) onModelSelected(model)
+                                        notice = "Vision projector selected"
+                                    } else {
+                                        activateModel(file.name)
+                                    }
+                                    showLibrary = false
+                                    refresh()
+                                }) {
+                                    Text(if (isProjector) "Use mmproj" else "Use")
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLibrary = false }) { Text("Done") } }
+        )
     }
 }
 
-@Composable
-private fun TextButtonCompatSelect(label: String, onClick: () -> Unit) {
-    androidx.compose.material3.TextButton(onClick = onClick) { Text("Select") }
-}
-
-private fun queryDisplayName(context: Context, uri: Uri): String? =
+private fun queryModelDisplayName(context: Context, uri: Uri): String? =
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) cursor.getString(0) else null
     }
-
-private suspend fun withContextIo(block: () -> File): File =
-    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() }
 
 private fun formatModelBytes(bytes: Long): String {
     if (bytes < 1024L) return "$bytes B"
     val units = arrayOf("KB", "MB", "GB", "TB")
     var value = bytes.toDouble()
     var index = -1
-    do { value /= 1024.0; index++ } while (value >= 1024.0 && index < units.lastIndex)
+    do {
+        value /= 1024.0
+        index++
+    } while (value >= 1024.0 && index < units.lastIndex)
     return String.format(java.util.Locale.US, "%.1f %s", value, units[index])
 }

@@ -263,7 +263,7 @@ class AiVisionRepository(private val context: Context) {
         .build()
 
     suspend fun testConnection(settings: AiSettings): List<String> = withContext(Dispatchers.IO) {
-        validateSettings(settings)
+        validateEndpoint(settings)
         val request = Request.Builder()
             .url(modelsUrl(settings.baseUrl))
             .get()
@@ -384,9 +384,8 @@ class AiVisionRepository(private val context: Context) {
         )
     }
 
-    private fun validateSettings(settings: AiSettings) {
+    private fun validateEndpoint(settings: AiSettings) {
         if (settings.baseUrl.isBlank()) throw IOException("Enter an AI endpoint URL.")
-        if (settings.model.isBlank()) throw IOException("Enter or select a model name.")
         if (!settings.providerMode.isLocal && settings.apiKey.isBlank()) {
             throw IOException("Enter your API key, or select a local model provider.")
         }
@@ -395,6 +394,11 @@ class AiVisionRepository(private val context: Context) {
         if (!parsed.isHttps && !isLoopback(parsed.host)) {
             throw IOException("Use HTTPS for remote endpoints. HTTP is enabled only for localhost.")
         }
+    }
+
+    private fun validateSettings(settings: AiSettings) {
+        validateEndpoint(settings)
+        if (settings.model.isBlank()) throw IOException("Enter or select a vision model name.")
     }
 
     private fun isLoopback(host: String): Boolean =

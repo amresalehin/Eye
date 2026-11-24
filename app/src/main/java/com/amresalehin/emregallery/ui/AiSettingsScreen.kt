@@ -119,6 +119,7 @@ fun AiSettingsScreen(
     val currentSettings = AiSettings(providerMode, baseUrl, model, apiKey)
     val configured = currentSettings.isConfigured
     val localProvider = providerMode.isLocal
+    val canTestConnection = baseUrl.isNotBlank() && (localProvider || apiKey.isNotBlank())
     val localSetupInstructions = when (providerMode) {
         AiProviderMode.MNN_LOCAL ->
             "MNN: start a vision-capable model server with mnncli serve <model-name> --host 127.0.0.1 --port 8000. Eye uses its OpenAI-compatible /v1/models and /v1/chat/completions routes."
@@ -280,7 +281,7 @@ fun AiSettingsScreen(
                             Button(onClick = { saveSettings() }, enabled = initialized && !busy) {
                                 Text("Save")
                             }
-                            OutlinedButton(onClick = { testConnection() }, enabled = initialized && !busy && configured) {
+                            OutlinedButton(onClick = { testConnection() }, enabled = initialized && !busy && canTestConnection) {
                                 if (busy) {
                                     CircularProgressIndicator(modifier = Modifier.height(16.dp).width(16.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(7.dp))

@@ -294,11 +294,7 @@ fun AiSettingsScreen(
                             ) { Text("Server") }
                         }
                         if (providerMode == AiProviderMode.EXTERNAL_LOCAL) {
-                            Text(
-                                "Connect to an existing OpenAI-compatible vision server. This does not install or run models on your phone.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("OpenAI-compatible server", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (!onDeviceProvider) {
                             OutlinedTextField(

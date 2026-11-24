@@ -64,6 +64,24 @@ void throwJava(JNIEnv * env, const std::string & message) {
 struct BitmapOwner {
     mtmd_bitmap * bitmap = nullptr;
     mtmd_helper_video * video = nullptr;
+    BitmapOwner() = default;
+    BitmapOwner(const BitmapOwner &) = delete;
+    BitmapOwner & operator=(const BitmapOwner &) = delete;
+    BitmapOwner(BitmapOwner && other) noexcept : bitmap(other.bitmap), video(other.video) {
+        other.bitmap = nullptr;
+        other.video = nullptr;
+    }
+    BitmapOwner & operator=(BitmapOwner && other) noexcept {
+        if (this != &other) {
+            if (bitmap) mtmd_bitmap_free(bitmap);
+            if (video) mtmd_helper_video_free(video);
+            bitmap = other.bitmap;
+            video = other.video;
+            other.bitmap = nullptr;
+            other.video = nullptr;
+        }
+        return *this;
+    }
     ~BitmapOwner() {
         if (bitmap) mtmd_bitmap_free(bitmap);
         if (video) mtmd_helper_video_free(video);

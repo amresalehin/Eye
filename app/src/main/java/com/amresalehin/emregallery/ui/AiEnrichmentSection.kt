@@ -80,7 +80,12 @@ fun AiEnrichmentSection(
                     message = "Configure a BYOK API or external vision server in Settings → AI & Models."
                     return@launch
                 }
-                val result = AiVisionRepository(context.applicationContext).enrich(item, settings)
+                val engine = AiVisionRepository(context.applicationContext)
+                val result = try {
+                    engine.enrich(item, settings)
+                } finally {
+                    engine.close()
+                }
                 withContext(Dispatchers.IO) { store.save(result) }
                 metadata = result
                 message = "Description and tags updated."

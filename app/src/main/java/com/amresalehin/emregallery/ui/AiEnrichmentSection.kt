@@ -170,7 +170,7 @@ fun AiEnrichmentSection(
             } else {
                 Text(
                     if (isConfigured) "No AI description has been generated for this item yet."
-                    else "Set up a BYOK provider or a local MNN / llama.cpp vision endpoint to begin.",
+                    else "Set up a BYOK provider or connect an external vision server in AI & Models.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

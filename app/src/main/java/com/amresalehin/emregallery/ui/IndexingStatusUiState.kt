@@ -84,7 +84,11 @@ data class AiIndexingState(
     val isClipInstalled: Boolean = false,
     val vlmStatusLabel: String = "MediaPipe VLM",
     val itemsPerMinute: Int = 0,
-    val error: String? = null
+    val error: String? = null,
+    val clipIsAllFolders: Boolean = true,
+    val clipSelectedFolders: Set<String> = emptySet(),
+    val vlmIsAllFolders: Boolean = true,
+    val vlmSelectedFolders: Set<String> = emptySet()
 ) {
     val isRunning: Boolean get() = isClipRunning || isVlmRunning
 }

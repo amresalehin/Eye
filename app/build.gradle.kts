@@ -9,8 +9,9 @@ plugins {
 // GitHub Actions dependency-fetch step.
 val fetchLlamaCpp by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)
+    // The script is idempotent: it verifies the pinned revision and repairs
+    // a missing or mismatched checkout before native configuration starts.
     commandLine("bash", "./scripts/fetch_llama_cpp.sh")
-    onlyIf { !rootProject.file("third_party/llama.cpp/CMakeLists.txt").isFile }
 }
 
 tasks.configureEach {

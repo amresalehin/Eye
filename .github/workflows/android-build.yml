@@ -53,7 +53,24 @@ jobs:
           python --version
           python3.10 --version
 
+      # Restore the exact Android toolchain versions before sdkmanager runs.
+      # This avoids downloading the NDK, CMake and platform on every fresh runner.
+      - name: Cache Android SDK components
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+            ${{ env.ANDROID_HOME }}/cmake/3.22.1
+            ${{ env.ANDROID_HOME }}/platforms/android-35
+          key: ${{ runner.os }}-android-sdk-ndk-27.2.12479018-cmake-3.22.1-platform-35-v1
+
       # Native llama.cpp toolchain and pinned source for on-device VLM inference
+      - name: Cache pinned llama.cpp source
+        uses: actions/cache@v4
+        with:
+          path: third_party/llama.cpp
+          key: ${{ runner.os }}-llama-cpp-56381e407c0ccfb3a6f71e668a27a901001d22ce-v1
+
       - name: Install Android NDK and CMake
         run: |
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"

@@ -1062,7 +1062,6 @@ fun GalleryApp(
                             media.filter { it.isVideo && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
                         }
                         HomeScreen(
-                            isPrewarmActive = destination == Destination.VIDEOS,
                             media = videoItems,
                             loading = loading,
                             isRefreshing = isRefreshing,
@@ -1092,7 +1091,6 @@ fun GalleryApp(
                             }
                         }
                         HomeScreen(
-                            isPrewarmActive = destination == Destination.RECENTLY_ADDED,
                             media = recentItems,
                             loading = loading,
                             isRefreshing = isRefreshing,

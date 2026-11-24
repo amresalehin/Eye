@@ -4,6 +4,21 @@ plugins {
     id("com.chaquo.python")
 }
 
+// Ensure the pinned llama.cpp source exists before Android Gradle Plugin configures
+// any native ABI. This also covers IDE/applet builds that do not execute the
+// GitHub Actions dependency-fetch step.
+val fetchLlamaCpp by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("bash", "./scripts/fetch_llama_cpp.sh")
+    onlyIf { !rootProject.file("third_party/llama.cpp/CMakeLists.txt").isFile }
+}
+
+tasks.configureEach {
+    if (name.startsWith("configureCMake")) {
+        dependsOn(fetchLlamaCpp)
+    }
+}
+
 android {
     namespace = "com.amresalehin.emregallery"
     compileSdk = 35

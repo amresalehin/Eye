@@ -10,7 +10,7 @@ import java.io.IOException
  */
 object LocalVisionRuntime {
     private val lock = Any()
-    private var loadedModelPath: String? = null
+    @Volatile private var loadedModelPath: String? = null
     private var loadedProjectorPath: String? = null
 
     suspend fun generate(
@@ -38,7 +38,7 @@ object LocalVisionRuntime {
     }
 
     fun cancel() {
-        runCatching { NativeVisionEngine.cancel() }
+        if (loadedModelPath != null) runCatching { NativeVisionEngine.cancel() }
     }
 
     fun close() {

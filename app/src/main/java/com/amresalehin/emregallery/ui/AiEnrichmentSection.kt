@@ -35,12 +35,12 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.ai.AiMediaMetadata
 import com.amresalehin.emregallery.data.ai.AiMetadataEvents
 import com.amresalehin.emregallery.data.ai.AiMetadataStore
-import com.amresalehin.emregallery.data.ai.AiProviderMode
+import com.amresalehin.emregallery.data.ai.AiSettings
 import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectAsState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -55,13 +55,12 @@ fun AiEnrichmentSection(
     val store = remember(context) { AiMetadataStore(context.applicationContext) }
 
     var metadata by remember(item.uri) { mutableStateOf<AiMediaMetadata?>(null) }
-    var isConfigured by remember { mutableStateOf(false) }
+    val currentSettings by settingsRepository.settings.collectAsState(initial = AiSettings())
+    val isConfigured = currentSettings.isConfigured
     var isGenerating by remember(item.uri) { mutableStateOf(false) }
     var message by remember(item.uri) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(item.uri) {
-        val currentSettings = settingsRepository.settings.first()
-        isConfigured = currentSettings.isConfigured
         metadata = withContext(Dispatchers.IO) { store.get(item.uri) }
         AiMetadataEvents.updates.collect { changedUri ->
             if (changedUri == item.uri) {
@@ -76,8 +75,7 @@ fun AiEnrichmentSection(
             isGenerating = true
             message = null
             try {
-                val settings = settingsRepository.settings.first()
-                isConfigured = settings.isConfigured
+                val settings = currentSettings
                 if (!settings.isConfigured) {
                     message = "Configure a BYOK API or local vision model in Settings → AI & Models."
                     return@launch

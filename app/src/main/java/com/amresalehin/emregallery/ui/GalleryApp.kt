@@ -753,6 +753,7 @@ fun GalleryApp(
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
+                Destination.AI_SETTINGS,
                 Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS

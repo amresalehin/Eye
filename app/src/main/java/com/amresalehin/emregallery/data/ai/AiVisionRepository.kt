@@ -234,7 +234,7 @@ object AiResponseParser {
     }
 
     private fun extractJsonObject(raw: String): String {
-        val fence = "\\u0060\\u0060\\u0060"
+        val fence = 96.toChar().toString().repeat(3)
         val cleaned = raw.trim()
             .removePrefix(fence + "json")
             .removePrefix(fence + "JSON")
@@ -322,7 +322,8 @@ class AiVisionRepository(private val context: Context) {
                 """.trimIndent()
             )
             if (gpsPoint != null) {
-                append("\\nTrusted EXIF/video GPS coordinates are available: ")
+                append('\n')
+                append("Trusted EXIF/video GPS coordinates are available: ")
                 append(String.format(java.util.Locale.US, "%.5f, %.5f", gpsPoint.latitude, gpsPoint.longitude))
                 append(". Do not convert these coordinates into a place name unless you can verify it.")
             }

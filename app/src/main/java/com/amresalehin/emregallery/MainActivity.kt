@@ -4,15 +4,22 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : FragmentActivity() {
 
@@ -28,19 +35,47 @@ class MainActivity : FragmentActivity() {
         handleBrowserOpenIntent(intent)
 
         val preferences = PreferencesRepository(applicationContext)
-        // Install Compose immediately; the persisted theme is collected asynchronously.
-        setContent {
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
-            EmreGalleryTheme(theme) {
-                GalleryApp(
-                    externalBrowserOpenRequest = incomingBrowserRequest.value,
-                    onExternalBrowserOpenRequestConsumed = { requestId ->
-                        if (incomingBrowserRequest.value?.requestId == requestId) {
-                            incomingBrowserRequest.value = null
+        lifecycleScope.launch {
+            // Resolve the saved theme before the first Compose frame. Starting with
+            // "system" here causes a dark-mode flash when the saved app theme is light.
+            val initialTheme = preferences.theme.first()
+            if (isFinishing || isDestroyed) return@launch
+
+            applyStartupTheme(initialTheme)
+            setContent {
+                val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
+                EmreGalleryTheme(theme) {
+                    GalleryApp(
+                        externalBrowserOpenRequest = incomingBrowserRequest.value,
+                        onExternalBrowserOpenRequestConsumed = { requestId ->
+                            if (incomingBrowserRequest.value?.requestId == requestId) {
+                                incomingBrowserRequest.value = null
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
+        }
+    }
+
+
+    /**
+     * Match the Activity's first visible window frame to the saved in-app theme.
+     * Compose will take over the full content surface once setContent is installed.
+     */
+    private fun applyStartupTheme(theme: String) {
+        val darkTheme = when (theme) {
+            "dark" -> true
+            "light" -> false
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        }
+        window.setBackgroundDrawable(
+            ColorDrawable(if (darkTheme) Color.rgb(16, 16, 16) else Color.WHITE)
+        )
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
         }
     }
 

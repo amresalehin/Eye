@@ -336,35 +336,35 @@ class AiVisionRepository(private val context: Context) {
             }
         }
 
-        val content = JSONArray().put(JSONObject().put("type", "text").put("text", prompt))
-        frames.forEach { bytes ->
-            val dataUrl = "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-            content.put(
-                JSONObject()
-                    .put("type", "image_url")
-                    .put("image_url", JSONObject().put("url", dataUrl).put("detail", "auto"))
-            )
-        }
-
-        val requestJson = JSONObject()
-            .put("model", settings.model.trim())
-            .put("messages", JSONArray().put(
-                JSONObject()
-                    .put("role", "user")
-                    .put("content", content)
-            ))
-            .put("temperature", 0.2)
-            .put("max_tokens", 700)
-
-        val request = Request.Builder()
-            .url(completionsUrl(settings.baseUrl))
-            .post(requestJson.toString().toRequestBody(AI_JSON_MEDIA_TYPE))
-            .apply { applyAuthorization(settings) }
-            .build()
-
         val responseText = if (localSelection != null) {
             localRuntime.generate(localSelection, frames, prompt)
         } else {
+            val content = JSONArray().put(JSONObject().put("type", "text").put("text", prompt))
+            frames.forEach { bytes ->
+                val dataUrl = "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                content.put(
+                    JSONObject()
+                        .put("type", "image_url")
+                        .put("image_url", JSONObject().put("url", dataUrl).put("detail", "auto"))
+                )
+            }
+
+            val requestJson = JSONObject()
+                .put("model", settings.model.trim())
+                .put("messages", JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("content", content)
+                ))
+                .put("temperature", 0.2)
+                .put("max_tokens", 700)
+
+            val request = Request.Builder()
+                .url(completionsUrl(settings.baseUrl))
+                .post(requestJson.toString().toRequestBody(AI_JSON_MEDIA_TYPE))
+                .apply { applyAuthorization(settings) }
+                .build()
+
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {

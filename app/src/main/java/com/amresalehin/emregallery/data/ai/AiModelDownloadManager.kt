@@ -115,8 +115,16 @@ object AiModelStorage {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PAUSE, value).apply()
     }
 
+    fun hasGgufMagic(file: File): Boolean = runCatching {
+        if (!file.isFile || file.length() < 4L) return@runCatching false
+        file.inputStream().use { input ->
+            val magic = ByteArray(4)
+            input.read(magic) == 4 && magic.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+        }
+    }.getOrDefault(false)
+
     fun isInstalled(context: Context, asset: AiModelAsset) =
-        finalFile(context, asset).let { it.exists() && it.length() > 0L }
+        finalFile(context, asset).let { it.exists() && hasGgufMagic(it) }
 
     fun selectedModelId(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("selected_model", "").orEmpty()
@@ -162,9 +170,9 @@ object AiModelStorage {
         val target = File(directory(context), safeName)
         val temp = File(directory(context), "$safeName.importing")
         source.use { input -> temp.outputStream().buffered().use { output -> input.copyTo(output) } }
-        if (temp.length() <= 0L) {
+        if (!hasGgufMagic(temp)) {
             temp.delete()
-            throw IOException("The selected model file is empty.")
+            throw IOException("The selected file is not a valid GGUF model or vision projector.")
         }
         if (!temp.renameTo(target)) {
             temp.copyTo(target, overwrite = true)
@@ -219,9 +227,11 @@ class AiModelDownloadWorker(
         val asset = AiModelCatalog.byId(inputData.getString("asset") ?: return@withContext Result.failure())
             ?: return@withContext Result.failure()
         val target = AiModelStorage.finalFile(applicationContext, asset)
-        if (target.exists() && target.length() > 0L) {
+        if (target.exists() && AiModelStorage.hasGgufMagic(target)) {
             AiModelStorage.writeState(applicationContext, ModelDownloadState(asset.id, "complete", target.length(), target.length()))
             return@withContext Result.success()
+        } else if (target.exists()) {
+            target.delete()
         }
         val partial = AiModelStorage.partialFile(applicationContext, asset)
         val existing = partial.length()
@@ -295,7 +305,9 @@ class AiModelDownloadWorker(
                     }
                 }
             }
-            if (partial.length() <= 0L) throw IOException("The downloaded model is empty.")
+            if (!AiModelStorage.hasGgufMagic(partial)) {
+                throw IOException("Hugging Face returned an invalid GGUF file.")
+            }
             if (!partial.renameTo(target)) {
                 partial.copyTo(target, overwrite = true)
                 partial.delete()

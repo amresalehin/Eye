@@ -203,6 +203,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val clipStats = aiStore.getStats(clipPhotos.map { it.uri }.toSet())
                 val vlmStats = aiStore.getStats(vlmPhotos.map { it.uri }.toSet())
                 val aiConfig = AiSettings.load(context)
+                val vlmConfigured = AiSettings.isVlmConfigured(context)
                 val clipInstalled = ClipOnnxModelManager.isInstalled(context)
                 val vlmLabel = if (aiConfig.provider == AiProviderType.ON_DEVICE_VLM) {
                     if (aiConfig.localVlmEngineId == com.amresalehin.emregallery.ai.LocalVlmRegistry.ENGINE_LLAMACPP) {
@@ -219,7 +220,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated,
-                    clipStats, vlmStats, vlmLabel, clipInstalled
+                    clipStats, vlmStats, vlmLabel, clipInstalled, vlmConfigured
                 )
             }
 
@@ -270,6 +271,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         failedCount = result.clipStats.failedCount,
                         distinctTagCount = result.vlmStats.distinctTagCount,
                         vlmStatusLabel = result.aiProviderLabel,
+                        isVlmConfigured = result.vlmConfigured,
                         isClipInstalled = result.isClipInstalled,
                         clipIsAllFolders = clipAllFolders,
                         clipSelectedFolders = clipSelectedFolders,
@@ -301,7 +303,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val clipStats: AiIndexStats,
         val vlmStats: AiIndexStats,
         val aiProviderLabel: String,
-        val isClipInstalled: Boolean
+        val isClipInstalled: Boolean,
+        val vlmConfigured: Boolean
     )
 
     fun retryFailedFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {

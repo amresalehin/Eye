@@ -14,6 +14,9 @@ val fetchLlamaCpp by tasks.registering(Exec::class) {
     commandLine("bash", "./scripts/fetch_llama_cpp.sh")
 }
 
+// Native configuration can be requested directly by Android Studio, CI,
+ // or lightweight build runners. Attach the fetch to every ABI-specific CMake
+ // configure task rather than relying only on a workflow pre-step.
 tasks.configureEach {
     if (name.startsWith("configureCMake")) {
         dependsOn(fetchLlamaCpp)

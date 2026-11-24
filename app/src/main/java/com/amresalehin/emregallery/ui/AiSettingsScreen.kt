@@ -133,9 +133,11 @@ fun AiSettingsScreen(
     }
 
     val localProvider = providerMode.isLocal
+    val onDeviceProvider = providerMode.isOnDevice
     val currentSettings = AiSettings(providerMode, baseUrl, model, apiKey)
-    val configured = currentSettings.isConfigured
-    val canConnect = initialized && !busy && baseUrl.isNotBlank() &&
+    val configured = currentSettings.isConfigured &&
+        (!onDeviceProvider || com.amresalehin.emregallery.data.ai.AiModelStorage.resolveSelection(context) != null)
+    val canConnect = !onDeviceProvider && initialized && !busy && baseUrl.isNotBlank() &&
         (localProvider || apiKey.isNotBlank())
 
     fun saveSettings() {
@@ -232,7 +234,14 @@ fun AiSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                LocalAiModelsSection()
+                LocalAiModelsSection { selectedModelId ->
+                    providerMode = AiProviderMode.ON_DEVICE
+                    baseUrl = ""
+                    model = selectedModelId
+                    discoveredModels = emptyList()
+                    connectionReady = false
+                    message = null
+                }
             }
 
             item {
@@ -249,14 +258,27 @@ fun AiSettingsScreen(
                                 onClick = {
                                     providerMode = AiProviderMode.OPENAI_COMPATIBLE
                                     baseUrl = AiProviderMode.OPENAI_COMPATIBLE.defaultBaseUrl
-                                    if (model.isBlank()) model = "gpt-4.1-mini"
+                                    if (model.isBlank() || onDeviceProvider) model = "gpt-4.1-mini"
                                     discoveredModels = emptyList()
                                     connectionReady = false
                                     message = null
                                 },
-                                shape = SegmentedButtonDefaults.itemShape(0, 2),
+                                shape = SegmentedButtonDefaults.itemShape(0, 3),
                                 icon = {}
                             ) { Text("BYOK") }
+                            SegmentedButton(
+                                selected = onDeviceProvider,
+                                onClick = {
+                                    providerMode = AiProviderMode.ON_DEVICE
+                                    baseUrl = ""
+                                    model = com.amresalehin.emregallery.data.ai.AiModelStorage.selectedModelId(context)
+                                    discoveredModels = emptyList()
+                                    connectionReady = false
+                                    message = null
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(1, 3),
+                                icon = {}
+                            ) { Text("On-device") }
                             SegmentedButton(
                                 selected = providerMode == AiProviderMode.EXTERNAL_LOCAL,
                                 onClick = {
@@ -267,7 +289,7 @@ fun AiSettingsScreen(
                                     connectionReady = false
                                     message = null
                                 },
-                                shape = SegmentedButtonDefaults.itemShape(1, 2),
+                                shape = SegmentedButtonDefaults.itemShape(2, 3),
                                 icon = {}
                             ) { Text("Server") }
                         }
@@ -278,15 +300,17 @@ fun AiSettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        OutlinedTextField(
-                            value = baseUrl,
-                            onValueChange = { baseUrl = it; discoveredModels = emptyList(); connectionReady = false },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(if (providerMode == AiProviderMode.EXTERNAL_LOCAL) "Server URL" else "API endpoint") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        if (!localProvider) {
+                        if (!onDeviceProvider) {
+                            OutlinedTextField(
+                                value = baseUrl,
+                                onValueChange = { baseUrl = it; discoveredModels = emptyList(); connectionReady = false },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(if (providerMode == AiProviderMode.EXTERNAL_LOCAL) "Server URL" else "API endpoint") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                        }
+                        if (providerMode == AiProviderMode.OPENAI_COMPATIBLE) {
                             OutlinedTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it },
@@ -299,7 +323,7 @@ fun AiSettingsScreen(
                                 },
                                 shape = RoundedCornerShape(14.dp)
                             )
-                        } else if (apiKey.isNotBlank()) {
+                        } else if (providerMode == AiProviderMode.EXTERNAL_LOCAL && apiKey.isNotBlank()) {
                             OutlinedTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it },
@@ -312,11 +336,13 @@ fun AiSettingsScreen(
                         }
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { saveSettings() }, enabled = initialized && !busy) { Text("Save") }
-                            OutlinedButton(onClick = { discoverModels() }, enabled = canConnect) {
-                                if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                else Icon(Icons.Default.Refresh, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (connectionReady) "Refresh models" else "Test connection")
+                            if (!onDeviceProvider) {
+                                OutlinedButton(onClick = { discoverModels() }, enabled = canConnect) {
+                                    if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    else Icon(Icons.Default.Refresh, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (connectionReady) "Refresh models" else "Test connection")
+                                }
                             }
                         }
                         if (message != null) Text(
@@ -350,7 +376,7 @@ fun AiSettingsScreen(
                                     }
                                 }
                             }
-                        } else if (!localProvider) {
+                        } else if (!localProvider && !onDeviceProvider) {
                             OutlinedTextField(
                                 value = model,
                                 onValueChange = { model = it },

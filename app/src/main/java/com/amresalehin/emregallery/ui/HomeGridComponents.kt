@@ -324,7 +324,7 @@ fun HomeGroupHeader(group: DayGroup) {
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            text = group.items.size.toString() + if (group.items.size == 1) " item" else " items",
+            text = group.items.size.toString() + (if (group.items.size == 1) " item" else " items"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -420,12 +420,8 @@ fun HomeScreenSkeleton(
                 }
                 val visibleChunks = rowChunks.take(remainingRows)
                 visibleChunks.forEachIndexed { rowIndex, rowItems ->
-                    val aspects = remember(rowItems, isSquare, rowIndex) {
-                        mosaicAspectRatios(rowItems, isSquare, rowIndex)
-                    }
-                    val rowHeight = remember(containerWidth, rowItems.size, aspects) {
-                        mosaicRowHeight(containerWidth, rowItems.size, aspects)
-                    }
+                    val aspects = mosaicAspectRatios(rowItems, isSquare, rowIndex)
+                    val rowHeight = mosaicRowHeight(containerWidth, rowItems.size, aspects)
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)

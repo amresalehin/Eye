@@ -134,6 +134,12 @@ fun AiSettingsScreen(
         ) {
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(54.dp))
+            Text(
+                text = "Configure Cloud or Local Models",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+            )
 
             // 1. CLIP Card
             Card(
@@ -193,27 +199,35 @@ fun AiSettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "VLM",
+                        text = "Vision model",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontSize = 17.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     )
 
-                    // Provider segmented bar: Local | Ollama | Gemini | OpenAI
                     MinimalSegmentedBar(
                         options = listOf(
                             AiProviderType.ON_DEVICE_VLM to "Local",
-                            AiProviderType.OLLAMA to "Ollama",
-                            AiProviderType.GEMINI to "Gemini",
-                            AiProviderType.OPENAI_COMPATIBLE to "OpenAI"
+                            AiProviderType.OLLAMA to "Cloud / BYOK"
                         ),
-                        selected = config.provider,
-                        onSelect = { provider ->
+                        selected = if (config.provider == AiProviderType.ON_DEVICE_VLM) {
+                            AiProviderType.ON_DEVICE_VLM
+                        } else {
+                            AiProviderType.OLLAMA
+                        },
+                        onSelect = { selected ->
+                            val nextProvider = if (selected == AiProviderType.ON_DEVICE_VLM) {
+                                AiProviderType.ON_DEVICE_VLM
+                            } else {
+                                config.provider.takeIf { it != AiProviderType.ON_DEVICE_VLM } ?: AiProviderType.OLLAMA
+                            }
+                            val switchingToCloud = config.provider == AiProviderType.ON_DEVICE_VLM &&
+                                nextProvider != AiProviderType.ON_DEVICE_VLM
                             config = config.copy(
-                                provider = provider,
-                                baseUrl = provider.defaultBaseUrl,
-                                modelName = provider.defaultModel
+                                provider = nextProvider,
+                                baseUrl = if (switchingToCloud) AiProviderType.OLLAMA.defaultBaseUrl else config.baseUrl,
+                                modelName = if (switchingToCloud) AiProviderType.OLLAMA.defaultModel else config.modelName
                             )
                             AiSettings.save(context, config)
                             statusText = null
@@ -422,6 +436,23 @@ fun AiSettingsScreen(
                             }
                         }
                     } else {
+                        MinimalSegmentedBar(
+                            options = listOf(
+                                AiProviderType.OLLAMA to "Ollama",
+                                AiProviderType.GEMINI to "Gemini",
+                                AiProviderType.OPENAI_COMPATIBLE to "OpenAI / Custom"
+                            ),
+                            selected = config.provider,
+                            onSelect = { provider ->
+                                config = config.copy(
+                                    provider = provider,
+                                    baseUrl = provider.defaultBaseUrl,
+                                    modelName = provider.defaultModel
+                                )
+                                AiSettings.save(context, config)
+                                statusText = null
+                            }
+                        )
                         OutlinedTextField(
                             value = config.baseUrl,
                             onValueChange = { config = config.copy(baseUrl = it) },
@@ -458,8 +489,9 @@ fun AiSettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             MinimalPillButton(
-                                text = if (testing) "Testing…" else "Test",
-                                enabled = !testing,
+                                text = if (testing) "Testing…" else "Test connection",
+                                enabled = !testing && config.baseUrl.isNotBlank() && config.modelName.isNotBlank() &&
+                                    (!config.provider.requiresApiKey || config.apiKey.isNotBlank()),
                                 onClick = {
                                     testing = true
                                     statusText = null
@@ -480,6 +512,8 @@ fun AiSettingsScreen(
                             MinimalPillButton(
                                 text = "Save",
                                 emphasized = true,
+                                enabled = config.baseUrl.isNotBlank() && config.modelName.isNotBlank() &&
+                                    (!config.provider.requiresApiKey || config.apiKey.isNotBlank()),
                                 onClick = {
                                     AiSettings.save(context, config)
                                     statusIsError = false
@@ -581,7 +615,7 @@ fun AiSettingsScreen(
             }
             Spacer(Modifier.width(12.dp))
             Text(
-                text = "AI",
+                text = "AI Setup",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold

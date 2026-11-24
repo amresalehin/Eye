@@ -254,7 +254,7 @@ object AiResponseParser {
  * loopback; this class never uploads media to a cloud service unless a cloud endpoint is chosen.
  */
 class AiVisionRepository(private val context: Context) {
-    private val localRuntime = LocalVisionRuntime(context.applicationContext)
+    private val localRuntime = LocalVisionRuntime
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)

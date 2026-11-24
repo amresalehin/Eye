@@ -94,6 +94,7 @@ fun AiSettingsScreen(
     var discoveredModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var connectionReady by remember { mutableStateOf(false) }
+    var localModelReady by remember { mutableStateOf(false) }
 
     var indexedCount by remember { mutableIntStateOf(0) }
     var processed by remember { mutableIntStateOf(0) }
@@ -109,6 +110,7 @@ fun AiSettingsScreen(
         model = saved.model
         apiKey = saved.apiKey
         initialized = true
+        localModelReady = com.amresalehin.emregallery.data.ai.AiModelStorage.resolveSelection(context) != null
 
         while (isActive) {
             val state = context.getSharedPreferences(
@@ -126,7 +128,8 @@ fun AiSettingsScreen(
             }
             taskError = if (isAiTask) state.getString(IndexingForegroundService.KEY_ERROR, null) else null
             indexedCount = withContext(Dispatchers.IO) { metadataStore.count() }
-            delay(2500)
+            localModelReady = com.amresalehin.emregallery.data.ai.AiModelStorage.resolveSelection(context) != null
+            delay(1200)
         }
     }
 
@@ -272,7 +275,7 @@ fun AiSettingsScreen(
                         AiLevelPill(
                             label = "Local",
                             selected = onDeviceProvider,
-                            status = if (com.amresalehin.emregallery.data.ai.AiModelStorage.resolveSelection(context) != null) "Ready" else "Choose model",
+                            status = if (localModelReady) "Ready" else "Choose model",
                             onClick = {
                                 providerMode = AiProviderMode.ON_DEVICE
                                 baseUrl = ""
@@ -588,8 +591,9 @@ private fun AiLevelPill(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (selected) {
+                val indicatorColor = MaterialTheme.colorScheme.primary
                 androidx.compose.foundation.Canvas(Modifier.size(7.dp)) {
-                    drawCircle(MaterialTheme.colorScheme.primary)
+                    drawCircle(indicatorColor)
                 }
             }
             Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)

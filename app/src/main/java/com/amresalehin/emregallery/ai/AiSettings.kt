@@ -85,6 +85,15 @@ data class AiConfig(
 object AiSettings {
     private const val PREFS_NAME = "emre_ai_settings"
     private const val KEY_PROVIDER = "provider"
+    private const val KEY_CLOUD_PROVIDER = "cloud_provider"
+    private const val KEY_OLLAMA_BASE_URL = "ollama_base_url"
+    private const val KEY_OLLAMA_MODEL = "ollama_model"
+    private const val KEY_GEMINI_BASE_URL = "gemini_base_url"
+    private const val KEY_GEMINI_MODEL = "gemini_model"
+    private const val KEY_GEMINI_KEY = "gemini_key"
+    private const val KEY_OPENAI_BASE_URL = "openai_base_url"
+    private const val KEY_OPENAI_MODEL = "openai_model"
+    private const val KEY_OPENAI_KEY = "openai_key"
     private const val KEY_LOCAL_VLM_ENGINE = "local_vlm_engine"
     private const val KEY_GGUF_MODEL_PATH = "gguf_model_path"
     private const val KEY_GGUF_MMPROJ_PATH = "gguf_mmproj_path"
@@ -109,8 +118,11 @@ object AiSettings {
     fun load(context: Context): AiConfig {
         val p = prefs(context)
         val provider = AiProviderType.fromId(p.getString(KEY_PROVIDER, AiProviderType.ON_DEVICE_VLM.id))
+        val cloudProvider = AiProviderType.fromId(p.getString(KEY_CLOUD_PROVIDER, AiProviderType.OLLAMA.id))
+            .takeIf { it != AiProviderType.ON_DEVICE_VLM } ?: AiProviderType.OLLAMA
+        val activeProvider = if (provider == AiProviderType.ON_DEVICE_VLM) provider else cloudProvider
         return AiConfig(
-            provider = provider,
+            provider = activeProvider,
             localVlmEngineId = p.getString(KEY_LOCAL_VLM_ENGINE, LocalVlmRegistry.ENGINE_LLAMACPP)
                 ?: LocalVlmRegistry.ENGINE_LLAMACPP,
             ggufModelPath = p.getString(KEY_GGUF_MODEL_PATH, "") ?: "",
@@ -123,9 +135,23 @@ object AiSettings {
             localVlmDownloadUrl = p.getString(KEY_LOCAL_VLM_URL, "") ?: "",
             hfToken = p.getString(KEY_HF_TOKEN, "") ?: "",
             vlmUseGpu = p.getBoolean(KEY_VLM_USE_GPU, true),
-            baseUrl = p.getString(KEY_BASE_URL, null) ?: provider.defaultBaseUrl,
-            apiKey = p.getString(KEY_API_KEY, "") ?: "",
-            modelName = p.getString(KEY_MODEL_NAME, null) ?: provider.defaultModel,
+            baseUrl = when (activeProvider) {
+                AiProviderType.OLLAMA -> p.getString(KEY_OLLAMA_BASE_URL, null) ?: p.getString(KEY_BASE_URL, null) ?: activeProvider.defaultBaseUrl
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_BASE_URL, null) ?: activeProvider.defaultBaseUrl
+                AiProviderType.OPENAI_COMPATIBLE -> p.getString(KEY_OPENAI_BASE_URL, null) ?: activeProvider.defaultBaseUrl
+                else -> activeProvider.defaultBaseUrl
+            },
+            apiKey = when (activeProvider) {
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_KEY, null) ?: p.getString(KEY_API_KEY, "") ?: ""
+                AiProviderType.OPENAI_COMPATIBLE -> p.getString(KEY_OPENAI_KEY, null) ?: p.getString(KEY_API_KEY, "") ?: ""
+                else -> ""
+            },
+            modelName = when (activeProvider) {
+                AiProviderType.OLLAMA -> p.getString(KEY_OLLAMA_MODEL, null) ?: p.getString(KEY_MODEL_NAME, null) ?: activeProvider.defaultModel
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_MODEL, null) ?: activeProvider.defaultModel
+                AiProviderType.OPENAI_COMPATIBLE -> p.getString(KEY_OPENAI_MODEL, null) ?: activeProvider.defaultModel
+                else -> activeProvider.defaultModel
+            },
             includeOcrContext = p.getBoolean(KEY_INCLUDE_OCR, true),
             excludeLockedVaultFromCloud = p.getBoolean(KEY_EXCLUDE_VAULT, true),
             batchUseCloudApi = p.getBoolean(KEY_BATCH_USE_CLOUD, true)
@@ -133,8 +159,41 @@ object AiSettings {
     }
 
     fun save(context: Context, config: AiConfig) {
-        prefs(context).edit()
+        val p = prefs(context)
+        val previousCloud = AiProviderType.fromId(p.getString(KEY_CLOUD_PROVIDER, AiProviderType.OLLAMA.id))
+        val currentCloud = if (config.provider == AiProviderType.ON_DEVICE_VLM) previousCloud else config.provider
+        val oldCloudConfig = AiConfig(
+            provider = currentCloud,
+            baseUrl = when (currentCloud) {
+                AiProviderType.OLLAMA -> p.getString(KEY_OLLAMA_BASE_URL, null) ?: AiProviderType.OLLAMA.defaultBaseUrl
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_BASE_URL, null) ?: AiProviderType.GEMINI.defaultBaseUrl
+                else -> p.getString(KEY_OPENAI_BASE_URL, null) ?: AiProviderType.OPENAI_COMPATIBLE.defaultBaseUrl
+            },
+            modelName = when (currentCloud) {
+                AiProviderType.OLLAMA -> p.getString(KEY_OLLAMA_MODEL, null) ?: AiProviderType.OLLAMA.defaultModel
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_MODEL, null) ?: AiProviderType.GEMINI.defaultModel
+                else -> p.getString(KEY_OPENAI_MODEL, null) ?: AiProviderType.OPENAI_COMPATIBLE.defaultModel
+            },
+            apiKey = when (currentCloud) {
+                AiProviderType.GEMINI -> p.getString(KEY_GEMINI_KEY, "") ?: ""
+                AiProviderType.OPENAI_COMPATIBLE -> p.getString(KEY_OPENAI_KEY, "") ?: ""
+                else -> ""
+            }
+        )
+        val editor = p.edit()
             .putString(KEY_PROVIDER, config.provider.id)
+            .putString(KEY_CLOUD_PROVIDER, currentCloud.id)
+            .putString(KEY_OLLAMA_BASE_URL, if (currentCloud == AiProviderType.OLLAMA) config.baseUrl.trim() else oldCloudConfig.baseUrl)
+            .putString(KEY_OLLAMA_MODEL, if (currentCloud == AiProviderType.OLLAMA) config.modelName.trim() else oldCloudConfig.modelName)
+            .putString(KEY_GEMINI_BASE_URL, if (currentCloud == AiProviderType.GEMINI) config.baseUrl.trim() else oldCloudConfig.baseUrl)
+            .putString(KEY_GEMINI_MODEL, if (currentCloud == AiProviderType.GEMINI) config.modelName.trim() else oldCloudConfig.modelName)
+            .putString(KEY_GEMINI_KEY, if (currentCloud == AiProviderType.GEMINI) config.apiKey.trim() else oldCloudConfig.apiKey)
+            .putString(KEY_OPENAI_BASE_URL, if (currentCloud == AiProviderType.OPENAI_COMPATIBLE) config.baseUrl.trim() else oldCloudConfig.baseUrl)
+            .putString(KEY_OPENAI_MODEL, if (currentCloud == AiProviderType.OPENAI_COMPATIBLE) config.modelName.trim() else oldCloudConfig.modelName)
+            .putString(KEY_OPENAI_KEY, if (currentCloud == AiProviderType.OPENAI_COMPATIBLE) config.apiKey.trim() else oldCloudConfig.apiKey)
+            .putString(KEY_BASE_URL, config.baseUrl.trim())
+            .putString(KEY_API_KEY, config.apiKey.trim())
+            .putString(KEY_MODEL_NAME, config.modelName.trim())
             .putString(KEY_LOCAL_VLM_ENGINE, config.localVlmEngineId)
             .putString(KEY_GGUF_MODEL_PATH, config.ggufModelPath.trim())
             .putString(KEY_GGUF_MMPROJ_PATH, config.ggufMmprojPath.trim())
@@ -152,6 +211,6 @@ object AiSettings {
             .putBoolean(KEY_INCLUDE_OCR, config.includeOcrContext)
             .putBoolean(KEY_EXCLUDE_VAULT, config.excludeLockedVaultFromCloud)
             .putBoolean(KEY_BATCH_USE_CLOUD, config.batchUseCloudApi)
-            .apply()
+        editor.apply()
     }
 }

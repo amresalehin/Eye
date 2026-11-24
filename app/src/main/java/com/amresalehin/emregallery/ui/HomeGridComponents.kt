@@ -324,7 +324,7 @@ fun HomeGroupHeader(group: DayGroup) {
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            text = "\${group.items.size} \${if (group.items.size == 1) "item" else "items"}",
+            text = group.items.size.toString() + if (group.items.size == 1) " item" else " items",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -409,11 +409,17 @@ fun HomeScreenSkeleton(
                 }
             }
         } else {
-            groupedRows.forEach { (group, rowChunks) ->
+            // Keep the skeleton bounded: this whole placeholder is one LazyColumn item,
+            // whereas the real gallery virtualizes each row independently.
+            var remainingRows = 6
+            for ((group, rowChunks) in groupedRows) {
+                if (remainingRows <= 0) break
+                if (rowChunks.isEmpty()) continue
                 if (group.dayLabel.isNotBlank()) {
                     HomeGroupHeader(group)
                 }
-                rowChunks.forEachIndexed { rowIndex, rowItems ->
+                val visibleChunks = rowChunks.take(remainingRows)
+                visibleChunks.forEachIndexed { rowIndex, rowItems ->
                     val aspects = remember(rowItems, isSquare, rowIndex) {
                         mosaicAspectRatios(rowItems, isSquare, rowIndex)
                     }
@@ -435,6 +441,7 @@ fun HomeScreenSkeleton(
                         }
                     }
                 }
+                remainingRows -= visibleChunks.size
             }
         }
     }

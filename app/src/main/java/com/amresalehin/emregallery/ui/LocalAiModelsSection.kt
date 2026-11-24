@@ -499,9 +499,10 @@ private fun importGgufTree(context: Context, treeUri: Uri): Int {
                     visit(id)
                 } else if (name.endsWith(".gguf", true)) {
                     val documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
-                    val input = resolver.openInputStream(documentUri) ?: continue
-                    AiModelStorage.importFile(context, input, name)
-                    imported++
+                    resolver.openInputStream(documentUri)?.let { input ->
+                        AiModelStorage.importFile(context, input, name)
+                        imported++
+                    }
                 }
             }
         }

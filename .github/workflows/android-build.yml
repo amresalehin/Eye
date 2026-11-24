@@ -53,6 +53,15 @@ jobs:
           python --version
           python3.10 --version
 
+      # Native llama.cpp toolchain and pinned source for on-device VLM inference
+      - name: Install Android NDK and CMake
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Fetch pinned llama.cpp source
+        run: bash ./scripts/fetch_llama_cpp.sh
+
       # Gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

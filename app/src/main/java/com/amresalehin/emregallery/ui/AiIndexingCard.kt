@@ -459,7 +459,7 @@ private fun CompactProgressPill(
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "Done",
+                        text = "100% · Done",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -475,7 +475,7 @@ private fun CompactProgressPill(
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = if (hasPartial) "$percent%" else "Start",
+                        text = if (hasPartial) "Start ($percent%)" else "Start",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface

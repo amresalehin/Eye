@@ -13,7 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.amresalehin.emregallery.data.MediaRepository
-import com.amresalehin.emregallery.data.ai.AiMediaMetadataStore
+import com.amresalehin.emregallery.data.ai.AiMetadataStore
 import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import com.amresalehin.emregallery.data.MediaItem
@@ -496,7 +496,7 @@ class IndexingForegroundService : Service() {
         }
 
         val items = loadAiMedia()
-        val store = AiMediaMetadataStore(applicationContext)
+        val store = AiMetadataStore(applicationContext)
         val pending = if (rescanAll) items else withContext(Dispatchers.IO) {
             items.filterNot { store.hasCurrentResult(it) }
         }

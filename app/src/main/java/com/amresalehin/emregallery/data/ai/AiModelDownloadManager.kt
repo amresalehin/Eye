@@ -37,19 +37,27 @@ data class AiModelAsset(
 
 object AiModelCatalog {
     val assets = listOf(
-        AiModelAsset("qwen25vl-q4", "Qwen2.5-VL 3B · Q4_K_M", "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "~1.93 GB", pairedProjectorId = "qwen25vl-mmproj"),
-        AiModelAsset("qwen25vl-mmproj", "Qwen2.5-VL 3B · Vision projector", "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "~1.34 GB", "Vision projector"),
-        AiModelAsset("qwen3vl-q4", "Qwen3-VL 2B · Q4_K_M", "Qwen3VL-2B-Instruct-Q4_K_M.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~1.11 GB", pairedProjectorId = "qwen3vl-mmproj"),
-        AiModelAsset("qwen3vl-q8", "Qwen3-VL 2B · Q8_0", "Qwen3VL-2B-Instruct-Q8_0.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~1.83 GB", pairedProjectorId = "qwen3vl-mmproj"),
-        AiModelAsset("qwen3vl-mmproj", "Qwen3-VL 2B · Vision projector", "mmproj-Qwen3VL-2B-Instruct-F16.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "~819 MB", "Vision projector"),
-        AiModelAsset("smol22-q4", "SmolVLM2 2.2B · Q4_K_M", "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf", "second-state/SmolVLM2-2.2B-Instruct-GGUF", "~1.11 GB", pairedProjectorId = "smol22-mmproj"),
-        AiModelAsset("smol22-mmproj", "SmolVLM2 2.2B · Vision projector", "SmolVLM2-2.2B-Instruct-mmproj-f16.gguf", "second-state/SmolVLM2-2.2B-Instruct-GGUF", "~872 MB", "Vision projector"),
-        AiModelAsset("smol500-video-q8", "SmolVLM2 500M Video · Q8_0", "SmolVLM2-500M-Video-Instruct-Q8_0.gguf", "second-state/SmolVLM2-500M-Video-Instruct-GGUF", "~437 MB", pairedProjectorId = "smol500-video-mmproj"),
-        AiModelAsset("smol500-video-mmproj", "SmolVLM2 500M Video · Vision projector", "SmolVLM2-500M-Video-Instruct-mmproj-f16.gguf", "second-state/SmolVLM2-500M-Video-Instruct-GGUF", "~199 MB", "Vision projector"),
-        AiModelAsset("gemma4-e2b-q8", "Gemma 4 E2B · Q8_0", "gemma-4-E2B-it-Q8_0.gguf", "ggml-org/gemma-4-E2B-it-GGUF", "~4.97 GB")
+        AiModelAsset("qwen25vl-q4", "Qwen2.5-VL 3B · Q4_K_M", "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "1.93 GB", pairedProjectorId = "qwen25vl-mmproj"),
+        AiModelAsset("qwen25vl-mmproj", "Qwen2.5-VL 3B · mmproj Q8_0", "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "845 MB", "Vision projector"),
+        AiModelAsset("qwen3vl-q4", "Qwen3-VL 2B · Q4_K_M", "Qwen3VL-2B-Instruct-Q4_K_M.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "1.11 GB", pairedProjectorId = "qwen3vl-mmproj"),
+        AiModelAsset("qwen3vl-q8", "Qwen3-VL 2B · Q8_0", "Qwen3VL-2B-Instruct-Q8_0.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "1.83 GB", pairedProjectorId = "qwen3vl-mmproj"),
+        AiModelAsset("qwen3vl-mmproj", "Qwen3-VL 2B · mmproj Q8_0", "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf", "Qwen/Qwen3-VL-2B-Instruct-GGUF", "445 MB", "Vision projector"),
+        AiModelAsset("smol22-q4", "SmolVLM2 2.2B · Q4_K_M", "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf", "ggml-org/SmolVLM2-2.2B-Instruct-GGUF", "1.11 GB", pairedProjectorId = "smol22-mmproj"),
+        AiModelAsset("smol22-mmproj", "SmolVLM2 2.2B · mmproj F16", "mmproj-SmolVLM2-2.2B-Instruct-f16.gguf", "ggml-org/SmolVLM2-2.2B-Instruct-GGUF", "872 MB", "Vision projector"),
+        AiModelAsset("smol500-video-q8", "SmolVLM2 500M Video · Q8_0", "SmolVLM2-500M-Video-Instruct-Q8_0.gguf", "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF", "437 MB", pairedProjectorId = "smol500-video-mmproj"),
+        AiModelAsset("smol500-video-mmproj", "SmolVLM2 500M Video · mmproj Q8_0", "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf", "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF", "109 MB", "Vision projector")
     )
+
     fun byId(id: String) = assets.firstOrNull { it.id == id }
+    fun models() = assets.filter { it.kind == "Model" }
+    fun projectors() = assets.filter { it.kind == "Vision projector" }
 }
+
+data class AiModelSelection(
+    val modelFile: File,
+    val projectorFile: File,
+    val displayName: String
+)
 
 data class ModelDownloadState(
     val assetId: String,
@@ -105,11 +113,46 @@ object AiModelStorage {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PAUSE, value).apply()
     }
 
-    fun isInstalled(context: Context, asset: AiModelAsset) = finalFile(context, asset).let { it.exists() && it.length() > 0L }
+    fun isInstalled(context: Context, asset: AiModelAsset) =
+        finalFile(context, asset).let { it.exists() && it.length() > 0L }
+
+    fun selectedModelId(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("selected_model", "").orEmpty()
+
+    fun selectedProjectorName(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("selected_projector", "").orEmpty()
+
+    fun selectModel(context: Context, modelIdOrFile: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("selected_model", modelIdOrFile).apply()
+    }
+
+    fun selectProjector(context: Context, fileName: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("selected_projector", fileName).apply()
+    }
+
+    fun resolveSelection(context: Context): AiModelSelection? {
+        val selected = selectedModelId(context)
+        if (selected.isBlank()) return null
+        val catalogAsset = AiModelCatalog.byId(selected)?.takeIf { it.kind == "Model" }
+        val modelFile = catalogAsset?.let { finalFile(context, it) } ?: File(directory(context), selected)
+        if (!modelFile.isFile || modelFile.length() <= 0L || modelFile.name.startsWith("mmproj", true)) return null
+
+        val projectorFile = if (catalogAsset?.pairedProjectorId != null) {
+            AiModelCatalog.byId(catalogAsset.pairedProjectorId)?.let { finalFile(context, it) }
+        } else {
+            val selectedProjector = selectedProjectorName(context)
+            selectedProjector.takeIf { it.isNotBlank() }?.let { File(directory(context), it) }
+                ?: File(directory(context), "mmproj-" + modelFile.name)
+        }
+        if (projectorFile == null || !projectorFile.isFile || projectorFile.length() <= 0L) return null
+        return AiModelSelection(modelFile, projectorFile, catalogAsset?.modelName ?: modelFile.nameWithoutExtension)
+    }
 
     fun importFile(context: Context, source: java.io.InputStream, displayName: String): File {
-        require(displayName.endsWith(".gguf", true) || displayName.endsWith(".task", true) || displayName.endsWith(".bin", true)) {
-            "Choose a GGUF, TASK or BIN model file."
+        require(displayName.endsWith(".gguf", true)) {
+            "Choose a GGUF model or vision-projector file."
         }
         val safeName = displayName.substringAfterLast('/').substringAfterLast('\\')
             .replace(Regex("[^A-Za-z0-9._ -]"), "_").take(120)

@@ -492,7 +492,10 @@ class IndexingForegroundService : Service() {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val settings = AiSettingsRepository(applicationContext).settings.first()
         check(settings.isConfigured) {
-            "Configure a BYOK vision API or start a local MNN / llama.cpp vision server in AI & Models."
+            "Configure a BYOK vision API in AI & Models before starting AI indexing."
+        }
+        check(!settings.providerMode.isLocal) {
+            "Eye does not have an in-app local vision runtime in this build. Choose BYOK to run AI indexing."
         }
 
         val items = loadAiMedia()

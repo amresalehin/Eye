@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -39,9 +40,10 @@ class MediaRepository(private val resolver: ContentResolver) {
      * The channel is deliberately bounded so a slow UI cannot accumulate an unbounded list
      * of pending batches in memory.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun loadMediaBatches(
         firstBatchSize: Int = 72,
-        batchSize: Int = 384
+        batchSize: Int = 1536
     ): Flow<MediaLoadEvent> = channelFlow {
         val firstSize = firstBatchSize.coerceAtLeast(1)
         val laterSize = batchSize.coerceAtLeast(firstSize)

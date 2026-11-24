@@ -222,7 +222,7 @@ fun LocalAiModelsSection() {
                             }) { Text("Select") }
                         } else {
                             OutlinedButton(
-                                enabled = state?.status !in listOf("queued", "downloading"),
+                                enabled = state?.status !in listOf("queued", "downloading", "paused", "error"),
                                 onClick = { scope.launch { AiModelStorage.start(context, asset) } }
                             ) {
                                 Icon(Icons.Default.CloudDownload, contentDescription = null)

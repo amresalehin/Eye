@@ -2227,7 +2227,6 @@ fun DownloaderResultsPage(
                                 }
                             },
                             valueRange = 0f..512f,
-                            steps = 7,
                             modifier = Modifier.fillMaxWidth().testTag("downloader_min_kb_slider")
                         )
 
@@ -2248,7 +2247,6 @@ fun DownloaderResultsPage(
                                 scope.launch { downloaderPrefs.setMinWidthFilter(minWidthFilter.toInt()) }
                             },
                             valueRange = 0f..3840f,
-                            steps = 3,
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -2334,23 +2332,9 @@ fun DownloaderResultsPage(
                         }
                     }
                 } else if (extractorState.isRunning) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            CircularProgressIndicator()
-                            Text(
-                                extractorState.statusMessage.ifBlank { "Scanning for media…" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
+                    // Keep the result area settled while extraction continues; the top-bar
+                    // activity indicator already communicates that the scan is in progress.
+                    Spacer(modifier = Modifier.fillMaxSize())
                 } else {
                     Box(
                         modifier = Modifier
@@ -2783,7 +2767,6 @@ private fun DownloaderMediaThumbnail(
         }.distinct()
     }
     var candidateIndex by remember(item.id, candidates) { mutableIntStateOf(0) }
-    var isLoading by remember(item.id, candidates, candidateIndex) { mutableStateOf(true) }
     var hasFailed by remember(item.id, candidates, candidateIndex) { mutableStateOf(false) }
     val previewUrl = candidates.getOrNull(candidateIndex)
     val requestIndex = candidateIndex
@@ -2800,15 +2783,6 @@ private fun DownloaderMediaThumbnail(
                     requestHeaders.forEach { (name, value) -> setHeader(name, value) }
                 }
                 .listener(
-                    onStart = {
-                        if (candidateIndex == requestIndex) isLoading = true
-                    },
-                    onSuccess = { _, _ ->
-                        if (candidateIndex == requestIndex) {
-                            isLoading = false
-                            hasFailed = false
-                        }
-                    },
                     onError = { _, _ ->
                         if (candidateIndex == requestIndex) {
                             isLoading = false
@@ -2832,20 +2806,6 @@ private fun DownloaderMediaThumbnail(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.48f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 1.7.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                    )
-                }
-            }
         }
     } else {
         Box(

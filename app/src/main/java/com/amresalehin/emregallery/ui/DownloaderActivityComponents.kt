@@ -1,0 +1,995 @@
+package com.amresalehin.emregallery.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.amresalehin.emregallery.data.DownloadActivityItem
+import com.amresalehin.emregallery.data.DownloadActivityManager
+import com.amresalehin.emregallery.data.DownloadActivityStatus
+import kotlinx.coroutines.delay
+
+/**
+ * Returns a display-friendly format badge text (e.g. JPG, PNG, MP4, WEBP).
+ * Strictly prevents false "4K" labels from appearing on thumbnails.
+ */
+fun getDisplayFormatBadge(item: DownloadActivityItem): String {
+    val raw = item.format.trim().uppercase()
+    // Strictly prevent false 4K on non-video items
+    if (!item.isVideo && (raw == "4K" || raw.contains("4K"))) {
+        // Fall through to determine genuine format from URL/title
+    } else if (raw.isNotEmpty() && !raw.contains("4K") && raw != "UNKNOWN") {
+        return if (raw == "JPEG") "JPG" else raw.take(4)
+    } else if (item.isVideo && (raw.contains("4K") || item.title.contains("4K", ignoreCase = true))) {
+        return "4K"
+    }
+
+    val lowerUrl = item.mediaUrl.lowercase()
+    val lowerTitle = item.title.lowercase()
+    return when {
+        lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerTitle.endsWith(".jpg") || lowerTitle.endsWith(".jpeg") -> "JPG"
+        lowerUrl.contains(".png") || lowerTitle.endsWith(".png") -> "PNG"
+        lowerUrl.contains(".webp") || lowerTitle.endsWith(".webp") -> "WEBP"
+        lowerUrl.contains(".gif") || lowerTitle.endsWith(".gif") -> "GIF"
+        lowerUrl.contains(".svg") || lowerTitle.endsWith(".svg") -> "SVG"
+        lowerUrl.contains(".mp4") || lowerTitle.endsWith(".mp4") -> "MP4"
+        lowerUrl.contains(".webm") || lowerTitle.endsWith(".webm") -> "WEBM"
+        lowerUrl.contains(".m3u8") -> "HLS"
+        lowerUrl.contains(".mp3") || lowerTitle.endsWith(".mp3") -> "MP3"
+        item.isVideo -> "MP4"
+        item.isAudio -> "MP3"
+        else -> "JPG"
+    }
+}
+
+/**
+ * Filters download history by visible and diagnostic metadata.
+ * An empty query returns the deduplicated activity list unchanged.
+ */
+fun filterDownloadActivityItems(
+    items: List<DownloadActivityItem>,
+    query: String
+): List<DownloadActivityItem> {
+    val normalizedQuery = query.trim()
+    return items.distinctBy { it.id }.filter { item ->
+        normalizedQuery.isEmpty() || listOf(
+            item.title,
+            item.mediaUrl,
+            item.thumbnailUrl.orEmpty(),
+            item.localUri.orEmpty(),
+            item.sourceDomain.orEmpty(),
+            item.sourceUrl.orEmpty(),
+            item.stackTitle.orEmpty(),
+            item.format,
+            item.status.name,
+            item.errorMessage.orEmpty()
+        ).any { value -> value.contains(normalizedQuery, ignoreCase = true) }
+    }
+}
+
+/**
+ * Headerless Inbox activity preview. Reuses the full Activity page rows, including thumbnails,
+ * progress, pause/resume, retry, delete, and finished-media actions. Shows at most five items.
+ */
+@Composable
+fun ActivityPreviewCard(
+    activities: List<DownloadActivityItem>,
+    onOpenActivity: () -> Unit,
+    onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val previewActivities = remember(activities) {
+        val active = activities.filter { it.isDownloading || it.isPaused || it.isRetrying }
+        val failed = activities.filter { it.isFailed }
+        val finished = activities.filter { it.isFinished }
+        (active + failed + finished).distinctBy { it.id }.take(5)
+    }
+
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(previewActivities) {
+        if (previewActivities.any { it.isRetrying }) {
+            while (true) {
+                delay(500L)
+                currentTimeMillis = System.currentTimeMillis()
+            }
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 6.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(
+                alpha = if (isSystemInDarkTheme()) 0.65f else 0.75f
+            )
+        ),
+        modifier = modifier
+            .shadow(
+                elevation = 6.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = if (isSystemInDarkTheme()) Color.Black.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.12f),
+                spotColor = if (isSystemInDarkTheme()) Color.Black.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.18f)
+            )
+            .testTag("downloader_activity_preview_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            previewActivities.forEachIndexed { index, item ->
+                when {
+                    item.isDownloading || item.isPaused || item.isRetrying -> {
+                        ActiveDownloadRow(
+                            item = item,
+                            currentTimeMillis = currentTimeMillis,
+                            onPauseResume = {
+                                if (item.isPaused) {
+                                    DownloadActivityManager.resumeDownload(context, item.id)
+                                } else {
+                                    DownloadActivityManager.pauseDownload(context, item.id)
+                                }
+                            },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
+                    item.isFailed -> {
+                        FailedDownloadRow(
+                            item = item,
+                            currentTimeMillis = currentTimeMillis,
+                            onRetry = { DownloadActivityManager.retryDownload(context, item.id) },
+                            onDelete = { DownloadActivityManager.deleteActivity(item.id) },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
+                    item.isFinished -> {
+                        FinishedDownloadRow(
+                            item = item,
+                            onClick = {
+                                if (onOpenMedia != null) onOpenMedia(item) else onOpenActivity()
+                            },
+                            modifier = Modifier.testTag("downloader_activity_preview_row_$index")
+                        )
+                    }
+                }
+
+                if (index < previewActivities.lastIndex) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    )
+                }
+            }
+
+            if (activities.size > 5) {
+                TextButton(
+                    onClick = onOpenActivity,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .testTag("downloader_activity_see_all")
+                ) {
+                    Text("See all")
+                }
+            }
+        }
+    }
+}
+/**
+ * Activity page with an integrated search/controls bar, status filters, download history,
+ * and a modal sheet for global actions (retry all, cancel all, clear history).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DownloaderActivityPage(
+    onBack: () -> Unit,
+    onOpenMedia: ((DownloadActivityItem) -> Unit)? = null,
+    showBackButton: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.syncWithInboxRepository()
+    }
+
+    val activities by DownloadActivityManager.activities.collectAsState()
+
+    var selectedFilter by rememberSaveable { mutableStateOf("All") }
+    var activitySearchQuery by rememberSaveable { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var showControlsSheet by remember { mutableStateOf(false) }
+
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(activities) {
+        if (activities.any { it.isRetrying }) {
+            while (true) {
+                delay(500L)
+                currentTimeMillis = System.currentTimeMillis()
+            }
+        }
+    }
+
+    BackHandler { onBack() }
+
+    val matchingActivities = remember(activities, activitySearchQuery) {
+        filterDownloadActivityItems(activities, activitySearchQuery)
+    }
+    val downloadingItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isDownloading || it.isPaused || it.isRetrying }
+    }
+    val failedItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isFailed }
+    }
+    val finishedItems = remember(matchingActivities) {
+        matchingActivities.filter { it.isFinished }
+    }
+
+    val filteredList = remember(matchingActivities, selectedFilter, downloadingItems, failedItems, finishedItems) {
+        when (selectedFilter) {
+            "Downloading" -> downloadingItems
+            "Failed" -> failedItems
+            "Finished" -> finishedItems
+            else -> matchingActivities
+        }
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize().testTag("downloader_activity_page"),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (showBackButton) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(40.dp).testTag("activity_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("activity_search_bar")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 10.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (activitySearchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search activity...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = activitySearchQuery,
+                                    onValueChange = { activitySearchQuery = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        keyboardController?.hide()
+                                    }),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("activity_search_input")
+                                )
+                            }
+
+                            if (activitySearchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { activitySearchQuery = "" },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("activity_search_clear_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { showControlsSheet = true },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("activity_controls_tune_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Activity Controls",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // Filter Pills Row matching image_ae11436d.png
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("activity_filter_pills_row"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val filters = listOf(
+                    "All" to activities.size,
+                    "Downloading" to downloadingItems.size,
+                    "Failed" to failedItems.size,
+                    "Finished" to finishedItems.size
+                )
+                items(filters) { (name, count) ->
+                    val isSelected = selectedFilter == name
+                    val labelText = if (name == "All") name else "$name ($count)"
+                    Surface(
+                        onClick = { selectedFilter = name },
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                        },
+                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)) else null,
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(
+                                text = labelText,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.surface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                fontSize = 13.5.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Activities List matching image_ae11436d.png
+            if (filteredList.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(bottom = 112.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Active Downloads Section
+                    if (selectedFilter == "All" || selectedFilter == "Downloading") {
+                        if (downloadingItems.isNotEmpty()) {
+                            itemsIndexed(downloadingItems, key = { index, item -> "active_${item.id}_$index" }) { _, item ->
+                                ActiveDownloadRow(
+                                    item = item,
+                                    currentTimeMillis = currentTimeMillis,
+                                    onPauseResume = {
+                                        if (item.isPaused) {
+                                            DownloadActivityManager.resumeDownload(context, item.id)
+                                        } else {
+                                            DownloadActivityManager.pauseDownload(context, item.id)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Failed Downloads Section
+                    if (selectedFilter == "All" || selectedFilter == "Failed") {
+                        if (failedItems.isNotEmpty()) {
+                            itemsIndexed(failedItems, key = { index, item -> "failed_${item.id}_$index" }) { _, item ->
+                                FailedDownloadRow(
+                                    item = item,
+                                    currentTimeMillis = currentTimeMillis,
+                                    onRetry = {
+                                        DownloadActivityManager.retryDownload(context, item.id)
+                                    },
+                                    onDelete = {
+                                        DownloadActivityManager.deleteActivity(item.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Past Downloads Header & Items
+                    if (selectedFilter == "All" || selectedFilter == "Finished") {
+                        if (finishedItems.isNotEmpty()) {
+                            item(key = "past_downloads_header_label") {
+                                Text(
+                                    text = "Past downloads",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+                                )
+                            }
+                            itemsIndexed(finishedItems, key = { index, item -> "finished_${item.id}_$index" }) { _, item ->
+                                FinishedDownloadRow(
+                                    item = item,
+                                    onClick = {
+                                        onOpenMedia?.invoke(item)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Empty state for current filter
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Inbox,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(52.dp)
+                        )
+                        Text(
+                            text = if (activitySearchQuery.isNotBlank()) {
+                                "No matching downloads"
+                            } else {
+                                when (selectedFilter) {
+                                    "Downloading" -> "No active downloads"
+                                    "Failed" -> "No failed downloads"
+                                    "Finished" -> "No past downloads"
+                                    else -> "No download activity yet"
+                                }
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (activitySearchQuery.isNotBlank()) {
+                                "Try another title, site, or format."
+                            } else {
+                                "Add media links to start downloading."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Controls Modal Bottom Sheet
+    if (showControlsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showControlsSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Activity Controls",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                if (failedItems.isNotEmpty()) {
+                    Button(
+                        onClick = {
+                            DownloadActivityManager.retryAllFailed(context)
+                            showControlsSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Retry All Failed (${failedItems.size})")
+                    }
+                }
+
+                if (downloadingItems.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = {
+                            DownloadActivityManager.cancelAllActive(context)
+                            showControlsSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Cancel All Active Downloads")
+                    }
+                }
+
+                if (finishedItems.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = {
+                            DownloadActivityManager.clearFinished()
+                            showControlsSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Clear Past Download History")
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Row displaying an active downloading item matching image_ae11436d.png
+ */
+@Composable
+private fun ActiveDownloadRow(
+    item: DownloadActivityItem,
+    onPauseResume: () -> Unit,
+    modifier: Modifier = Modifier,
+    currentTimeMillis: Long = System.currentTimeMillis()
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Thumbnail with format tag and play icon
+        Box(
+            modifier = Modifier
+                .size(width = 96.dp, height = 62.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl ?: item.mediaUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Dynamic format badge top-left (no false 4K)
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+
+            // Play overlay if video
+            if (item.isVideo) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .size(22.dp)
+                        .align(Alignment.Center)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Title, byte progress & speed / retry status, and linear progress bar
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (item.isRetrying) {
+                val remainingSec = if (item.nextRetryTimestampMillis != null) {
+                    ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(0L)
+                } else 0L
+                val retryLabel = if (remainingSec > 0) "Retrying in ${remainingSec}s" else "Retrying now..."
+                Text(
+                    text = retryLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFB74D),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.sp
+                )
+            } else {
+                val speedText = DownloadActivityManager.formatSpeed(item.speedBytesPerSec)
+                val bytesText = if (item.totalBytes > 0) {
+                    "${DownloadActivityManager.formatBytes(item.bytesRead)} / ${DownloadActivityManager.formatBytes(item.totalBytes)}"
+                } else {
+                    "${DownloadActivityManager.formatBytes(item.bytesRead)} downloaded"
+                }
+
+                Text(
+                    text = "$bytesText • $speedText",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
+            }
+
+            LinearProgressIndicator(
+                progress = {
+                    val p = if (item.isRetrying) 0.05f else item.progress
+                    if (p.isNaN() || p.isInfinite() || p < 0f) 0.05f else p.coerceIn(0f, 1f)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = if (item.isRetrying) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+        }
+
+        // Pause/Resume button matching image_ae11436d.png
+        Surface(
+            onClick = onPauseResume,
+            shape = CircleShape,
+            color = Color.Transparent,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.size(36.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (item.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                    contentDescription = if (item.isPaused) "Resume" else "Pause",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Row displaying a failed item matching image_ae11436d.png with Retry and Delete buttons
+ */
+@Composable
+private fun FailedDownloadRow(
+    item: DownloadActivityItem,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    currentTimeMillis: Long = System.currentTimeMillis()
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Thumbnail with dynamic format tag (NO false 4K)
+        Box(
+            modifier = Modifier
+                .size(width = 96.dp, height = 62.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl ?: item.mediaUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+        }
+
+        // Title and status/error message
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (item.isRetrying && item.nextRetryTimestampMillis != null) {
+                val remainingSec = ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(1L)
+                Text(
+                    text = "Retrying in ${remainingSec}s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFB74D),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                val errorMsg = item.errorMessage ?: "Network error"
+                Text(
+                    text = "Failed • $errorMsg",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // Retry Button
+        IconButton(
+            onClick = onRetry,
+            enabled = !item.isRetrying,
+            modifier = Modifier.size(36.dp)
+        ) {
+            if (item.isRetrying) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFFFFB74D)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Retry download",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Delete Button
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.DeleteOutline,
+                contentDescription = "Delete",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Row displaying a finished past download item matching image_ae11436d.png with green checkmark
+ */
+@Composable
+private fun FinishedDownloadRow(
+    item: DownloadActivityItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Thumbnail with format tag
+        Box(
+            modifier = Modifier
+                .size(width = 96.dp, height = 62.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            val previewModel = item.localUri ?: item.thumbnailUrl ?: item.mediaUrl
+            AsyncImage(
+                model = previewModel,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+        }
+
+        // Title and size • date
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            val sizeStr = DownloadActivityManager.formatBytes(item.bytesRead)
+            val dateStr = DownloadActivityManager.formatDate(item.timestampMillis)
+            Text(
+                text = "$sizeStr • $dateStr",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.5.sp
+            )
+        }
+
+        // Green checkmark icon matching image_ae11436d.png
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = "Finished",
+            tint = Color(0xFF2E7D32),
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}

@@ -1,0 +1,103 @@
+
+name: Android Build
+
+on:
+  push:
+    branches:
+      - '**'
+
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble-debug:
+    name: Unit Tests and Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # Checkout the exact branch that triggered the workflow
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      # Python
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+          architecture: x64
+
+      # Java
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Verify environment
+      - name: Verify build environment
+        run: |
+          java -version
+          python --version
+          python3.10 --version
+
+      # Gradle
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Run tests and build
+      - name: Run unit tests and assemble debug APK
+        run: |
+          bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+      # Upload temporary artifact as a convenient build download
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emre-gallery-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # Permanently archive successful builds as GitHub Releases
+      - name: Publish permanent APK release
+        if: success() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found!"
+            exit 1
+          fi
+
+          SHORT_SHA="${GITHUB_SHA:0:12}"
+          SAFE_BRANCH=$(echo "$GITHUB_REF_NAME" | tr '/ ' '--')
+          TAG="build-${SAFE_BRANCH}-${SHORT_SHA}"
+
+          gh release create "$TAG" "$APK_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Emre Gallery - ${GITHUB_REF_NAME} - ${SHORT_SHA}" \
+            --notes "Automated successful Android debug build.
+
+          Branch: ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}
+          Workflow: Android Build"
+
+          echo "Successfully published APK release: $TAG"

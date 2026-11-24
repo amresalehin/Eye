@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.data
 
 import android.content.Context
 import android.util.AtomicFile
+import android.util.Log
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -19,6 +20,7 @@ object MediaSnapshotCache {
     private const val MAGIC = 0x454D5245 // EMRE
     private const val VERSION = 1
     private const val MAX_ITEMS = 180
+    private const val TAG = "MediaSnapshotCache"
 
     @Volatile
     private var lastWrittenFingerprint: Long = Long.MIN_VALUE
@@ -37,9 +39,18 @@ object MediaSnapshotCache {
     private fun snapshotFile(context: Context): File =
         File(context.noBackupFilesDir, FILE_NAME)
 
+    @Synchronized
     fun read(context: Context): List<MediaItem>? {
         val file = snapshotFile(context)
-        if (!file.isFile || file.length() <= 0L) return null
+        if (!file.isFile) {
+            Log.d(TAG, "Snapshot miss: no saved file")
+            return null
+        }
+        if (file.length() <= 0L) {
+            Log.w(TAG, "Snapshot miss: saved file is empty; removing it")
+            runCatching { AtomicFile(file).delete() }
+            return null
+        }
 
         return runCatching {
             val stream = AtomicFile(file).openRead()
@@ -87,14 +98,27 @@ object MediaSnapshotCache {
                     }
                 }
             }
+        }.onSuccess { snapshot ->
+            lastWrittenFingerprint = computeFingerprint(snapshot)
+            Log.d(TAG, "Snapshot restored: ${snapshot.size} media records")
+        }.onFailure { error ->
+            Log.w(TAG, "Snapshot read failed; removing invalid cache", error)
+            runCatching { AtomicFile(file).delete() }
         }.getOrNull()
     }
 
+    @Synchronized
     fun write(context: Context, media: List<MediaItem>) {
         val file = snapshotFile(context)
         val snapshot = media.take(MAX_ITEMS)
         val fingerprint = computeFingerprint(snapshot)
         if (fingerprint == lastWrittenFingerprint && file.isFile && file.length() > 0L) return
+        val parent = file.parentFile
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            Log.w(TAG, "Snapshot write skipped: cannot create cache directory")
+            return
+        }
+
         val atomicFile = AtomicFile(file)
         runCatching {
             val stream = atomicFile.startWrite()
@@ -126,6 +150,10 @@ object MediaSnapshotCache {
                 atomicFile.failWrite(stream)
                 throw error
             }
+        }.onSuccess {
+            Log.d(TAG, "Snapshot saved: ${snapshot.size} media records")
+        }.onFailure { error ->
+            Log.e(TAG, "Snapshot write failed", error)
         }
     }
 }

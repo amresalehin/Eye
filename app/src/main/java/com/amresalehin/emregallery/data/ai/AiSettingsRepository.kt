@@ -28,24 +28,21 @@ enum class AiProviderMode(
         "https://api.openai.com/v1",
         "Use your own API key with OpenAI or another OpenAI-compatible vision provider."
     ),
-    MNN_LOCAL(
-        "mnn_local",
-        "MNN local",
-        "http://127.0.0.1:8000/v1",
-        "Connect to the MNN OpenAI-compatible local vision server (default port 8000)."
-    ),
-    LLAMA_CPP_LOCAL(
-        "llama_cpp_local",
-        "llama.cpp",
+    EXTERNAL_LOCAL(
+        "external_local",
+        "External local server",
         "http://127.0.0.1:8080/v1",
-        "Connect to a local llama.cpp server with a vision-capable GGUF model and mmproj."
+        "Connect to a separately installed OpenAI-compatible vision server."
     );
 
     val isLocal: Boolean get() = this != OPENAI_COMPATIBLE
 
     companion object {
         fun fromId(id: String?): AiProviderMode =
-            entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: OPENAI_COMPATIBLE
+            when (id?.lowercase()) {
+                "mnn_local", "llama_cpp_local" -> EXTERNAL_LOCAL
+                else -> entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: OPENAI_COMPATIBLE
+            }
     }
 }
 

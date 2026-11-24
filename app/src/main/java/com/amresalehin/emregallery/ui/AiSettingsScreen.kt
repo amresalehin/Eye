@@ -76,6 +76,7 @@ fun AiSettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsRepository = remember(context) { AiSettingsRepository(context.applicationContext) }
+    val metadataStore = remember(context) { AiMetadataStore(context.applicationContext) }
 
     var initialized by remember { mutableStateOf(false) }
     var providerMode by remember { mutableStateOf(AiProviderMode.OPENAI_COMPATIBLE) }
@@ -111,7 +112,7 @@ fun AiSettingsScreen(
             processed = if (isAiTask) state.getInt(IndexingForegroundService.KEY_PROCESSED, 0) else 0
             currentItemName = if (isAiTask) state.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "").orEmpty() else ""
             taskError = if (isAiTask) state.getString(IndexingForegroundService.KEY_ERROR, null) else null
-            indexedCount = withContext(Dispatchers.IO) { AiMetadataStore(context).count() }
+            indexedCount = withContext(Dispatchers.IO) { metadataStore.count() }
             delay(1800)
         }
     }

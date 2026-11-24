@@ -524,6 +524,7 @@ class IndexingForegroundService : Service() {
         var completed = completedInitially
         var failed = 0
         var consecutiveFailures = 0
+        var terminalFailureMessage: String? = null
         val engine = AiVisionRepository(applicationContext)
 
         for (item in pending) {
@@ -549,7 +550,10 @@ class IndexingForegroundService : Service() {
                 // A bad endpoint or model should not make Eye issue hundreds of identical
                 // failed requests. Stop after three consecutive failures; retry remains possible.
                 if (consecutiveFailures >= 3) {
-                    updateState(error = "Stopped after three consecutive AI failures: ${error.localizedMessage ?: "check the provider connection"}")
+                    terminalFailureMessage =
+                        "Stopped after three consecutive AI failures: ${error.localizedMessage ?: "check the provider connection"}"
+                    completed++
+                    updateState(processed = completed, total = items.size, failed = failed)
                     break
                 }
             }
@@ -572,6 +576,11 @@ class IndexingForegroundService : Service() {
             completed,
             items.size
         )
+        if (failed > 0) {
+            throw IllegalStateException(
+                terminalFailureMessage ?: "$failed media item(s) could not be analyzed; run Index missing to retry them."
+            )
+        }
     }
 
     private suspend fun loadAiMedia(): List<MediaItem> {

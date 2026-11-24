@@ -74,7 +74,6 @@ Java_com_amresalehin_emregallery_ai_LlamaCppNativeBridge_nativeInit(
     session->n_threads = nThreads > 0 ? nThreads : 4;
 
     llama_model_params mparams = llama_model_default_params();
-    mparams.use_mmap = true;
     mparams.n_gpu_layers = 0; // Safe CPU default across all Android arm64 devices
 
     session->model = llama_model_load_from_file(modelPath.c_str(), mparams);
@@ -137,7 +136,15 @@ Java_com_amresalehin_emregallery_ai_LlamaCppNativeBridge_nativeAnalyzeImage(
     // Clear KV cache for a fresh single-image turn
     llama_memory_clear(llama_get_memory(session->ctx), true);
 
-    mtmd_bitmap * bitmap = mtmd_helper_bitmap_init_from_buf(session->mtmd, imgBuf.data(), imgBuf.size());
+    mtmd_helper_init_opt bitmapOptions = mtmd_helper_init_opt_default();
+    mtmd_helper_bitmap_wrapper bitmapResult = mtmd_helper_bitmap_init_from_buf(
+        session->mtmd,
+        imgBuf.data(),
+        imgBuf.size(),
+        false,
+        bitmapOptions
+    );
+    mtmd_bitmap * bitmap = bitmapResult.bitmap;
     if (bitmap == nullptr) {
         return env->NewStringUTF("ERROR: Failed to decode image buffer in libmtmd");
     }

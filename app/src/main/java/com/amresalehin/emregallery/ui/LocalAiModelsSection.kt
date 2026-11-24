@@ -218,7 +218,7 @@ fun LocalAiModelsSection() {
                                     .edit().putString("selected_model", asset.id).apply()
                                 refresh()
                                 notice = "Model selected"
-                                error = false
+                                hasError = false
                             }) { Text("Select") }
                         } else {
                             OutlinedButton(

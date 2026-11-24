@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,6 +46,8 @@ import com.amresalehin.emregallery.BrowserTabOpenRequest
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.MediaLoadEvent
+import com.amresalehin.emregallery.data.MediaLoadResult
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.MediaSnapshotCache
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
@@ -185,39 +188,51 @@ fun GalleryApp(
                 }
             }
             if (hasMediaPermission(context)) {
-                var completedMediaQuery = false
+                // Publish real MediaStore rows progressively. The first small batch is
+                // rendered immediately; later bounded batches keep the UI responsive while
+                // the remaining cursor rows are still being read.
+                val progressiveItems = LinkedHashMap<String, MediaItem>(media.size + 128)
+                media.forEach { progressiveItems[it.uri] = it }
+                var loadedResult: MediaLoadResult? = null
 
-                // A cached snapshot has already populated the recent Home rows. On a true
-                // first launch without a snapshot, run one complete MediaStore query instead
-                // of issuing separate limited and complete queries for both image/video stores.
-                val loadedResult = withContext(Dispatchers.IO) {
-                    runCatching { mediaRepository.loadMediaResult() }.getOrNull()
+                try {
+                    mediaRepository.loadMediaBatches().collect { event ->
+                        when (event) {
+                            is MediaLoadEvent.Batch -> {
+                                event.items.forEach { progressiveItems[it.uri] = it }
+                                media = progressiveItems.values.toList()
+                                loading = false
+                                mediaLoadError = false
+                            }
+                            is MediaLoadEvent.Completed -> loadedResult = event.result
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    loadedResult = null
                 }
-                if (loadedResult != null && loadedResult.successfulCollections > 0) {
-                    val loadedMedia = loadedResult.items
+
+                if (loadedResult != null && loadedResult!!.successfulCollections > 0) {
+                    val loadedMedia = loadedResult!!.items
                     media = loadedMedia
                     loading = false
                     mediaLoadError = false
-                    completedMediaQuery = true
 
-                    // Persist a small metadata-only first-page snapshot for instant next launch.
+                    // Persist the authoritative, complete metadata list for the next cold launch.
                     withContext(Dispatchers.IO) {
                         MediaSnapshotCache.write(mediaSnapshotContext, loadedMedia)
                     }
 
-                    // Existing prepared thumbnails are reused; the prewarmer skips disk hits.
+                    // Continue background preparation after the initial visible batches were shown.
                     scope.launch(Dispatchers.Default) {
                         ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                     }
                 } else {
-                    // A failed query is not evidence that the library is empty. Keep the last
-                    // successful snapshot when available, otherwise show an explicit retry state.
-                    mediaLoadError = true
+                    // A failed query is not proof that the library is empty. Keep the last
+                    // valid cached/progressively received rows and expose retry only when none exist.
+                    mediaLoadError = media.isEmpty()
                     if (media.isNotEmpty()) loading = false
-                }
-
-                if (completedMediaQuery && media.isEmpty()) {
-                    loading = false
                 }
             }
             if (userInitiated) {
@@ -802,21 +817,22 @@ fun GalleryApp(
         }
     }
 
-    val visibleMediaState = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
-        mutableStateOf<List<MediaItem>?>(
-            if (media.size <= 150) filterVisibleMedia() else null
-        )
+    val visibleMediaFilterKey = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
+        Any()
     }
-    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
-        visibleMediaState.value = if (media.size <= 150) {
+    var visibleMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var completedVisibleMediaFilterKey by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(visibleMediaFilterKey) {
+        val filtered = if (media.size <= 150) {
             filterVisibleMedia()
         } else {
             withContext(Dispatchers.Default) { filterVisibleMedia() }
         }
+        visibleMedia = filtered
+        completedVisibleMediaFilterKey = visibleMediaFilterKey
     }
-    val visibleMediaResult = visibleMediaState.value
-    val visibleMedia = visibleMediaResult.orEmpty()
-    val visibleMediaLoading = visibleMediaResult == null
+    // Keep the previous real media rows visible while the next batch/filter is prepared.
+    val visibleMediaLoading = completedVisibleMediaFilterKey !== visibleMediaFilterKey
 
     var peopleMedia by remember {
         mutableStateOf(

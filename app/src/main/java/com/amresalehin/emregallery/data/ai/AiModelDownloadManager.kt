@@ -257,7 +257,7 @@ class AiModelDownloadWorker(
                     throw IOException("Hugging Face did not honor the resume request; the partial file was discarded safely.")
                 }
                 if (!response.isSuccessful) throw IOException("Download failed (HTTP ${response.code}).")
-                if (existing > 0L) {
+                if (response.code == 206) {
                     val contentRange = response.header("Content-Range").orEmpty()
                     if (!contentRange.startsWith("bytes $existing-", ignoreCase = true)) {
                         partial.delete()
@@ -307,6 +307,7 @@ class AiModelDownloadWorker(
                 }
             }
             if (!AiModelStorage.hasGgufMagic(partial)) {
+                partial.delete()
                 throw IOException("Hugging Face returned an invalid GGUF file.")
             }
             if (!partial.renameTo(target)) {

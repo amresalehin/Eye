@@ -134,12 +134,6 @@ fun AiSettingsScreen(
         ) {
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(54.dp))
-            Text(
-                text = "Configure Cloud or Local Models",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-            )
 
             // 1. CLIP Card
             Card(
@@ -622,14 +616,7 @@ fun AiSettingsScreen(
                     Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                 }
             }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "AI Setup",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            )
+
         }
     }
 }

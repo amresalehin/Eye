@@ -302,7 +302,10 @@ fun HomeScreenSkeleton(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (showMemories) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 repeat(3) {
                     Box(
                         modifier = Modifier

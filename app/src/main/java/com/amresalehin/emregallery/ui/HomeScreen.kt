@@ -52,7 +52,6 @@ import java.util.Locale
 private const val PREFETCH_LOOK_AHEAD_ROWS = 14
 private const val PREFETCH_IDLE_LOOK_AHEAD_ROWS = 6
 private const val PREFETCH_MAX_MEDIA_ITEMS = 120
-private const val SYNC_COMPUTE_THRESHOLD = 150
 
 @Immutable
 private data class HomeGroupedData(
@@ -180,31 +179,18 @@ fun HomeScreen(
         return
     }
 
-    var groupedData by remember {
-        mutableStateOf(
-            if (media.size <= SYNC_COMPUTE_THRESHOLD) {
-                buildHomeGroupedData(media, sortOrder, groupBy)
-            } else {
-                HomeGroupedData()
-            }
-        )
-    }
-    LaunchedEffect(media, sortOrder, groupBy) {
-        groupedData = if (media.size <= SYNC_COMPUTE_THRESHOLD) {
-            buildHomeGroupedData(media, sortOrder, groupBy)
-        } else {
-            withContext(Dispatchers.Default) {
-                buildHomeGroupedData(media, sortOrder, groupBy)
-            }
-        }
-    }
     var gridData by remember {
-        mutableStateOf(buildHomeGridData(groupedData, pinchGridColumns))
+        mutableStateOf(HomeGridData())
     }
-    LaunchedEffect(groupedData, pinchGridColumns) {
-        gridData = withContext(Dispatchers.Default) {
-            buildHomeGridData(groupedData, pinchGridColumns)
+    // Build the Home snapshot in one background pass: sorting, grouping, row chunking and
+    // predictive index creation are all derived from the same media version. This avoids
+    // publishing an intermediate grouped snapshot and immediately rebuilding it a second time.
+    LaunchedEffect(media, sortOrder, groupBy, pinchGridColumns) {
+        val next = withContext(Dispatchers.Default) {
+            val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
+            buildHomeGridData(grouped, pinchGridColumns)
         }
+        gridData = next
     }
     val sortedMedia = gridData.sortedMedia
     val groupedRows = gridData.groupedRows

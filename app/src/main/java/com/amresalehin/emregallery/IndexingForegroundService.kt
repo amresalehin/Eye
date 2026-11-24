@@ -14,6 +14,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.ai.AiMetadataStore
+import com.amresalehin.emregallery.data.ai.AiModelStorage
+import com.amresalehin.emregallery.data.ai.NativeVisionEngine
 import com.amresalehin.emregallery.data.ai.AiSettingsRepository
 import com.amresalehin.emregallery.data.ai.AiVisionRepository
 import com.amresalehin.emregallery.data.MediaItem
@@ -66,6 +68,7 @@ class IndexingForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_STATUS
         if (action == ACTION_CANCEL) {
+            runCatching { NativeVisionEngine.cancel() }
             taskJob?.cancel()
             taskJob = null
             pauseSignal.value = false
@@ -491,11 +494,14 @@ class IndexingForegroundService : Service() {
     private suspend fun runAi(rescanAll: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val settings = AiSettingsRepository(applicationContext).settings.first()
-        check(settings.isConfigured) {
-            "Configure a BYOK vision API in AI & Models before starting AI indexing."
-        }
-        check(!settings.providerMode.isLocal) {
-            "Eye does not have an in-app local vision runtime in this build. Choose BYOK to run AI indexing."
+        if (settings.providerMode.isOnDevice) {
+            check(AiModelStorage.resolveSelection(applicationContext) != null) {
+                "Select a downloaded GGUF model and its matching vision projector in AI & Models."
+            }
+        } else {
+            check(settings.isConfigured) {
+                "Configure BYOK or select an on-device model in AI & Models before starting AI indexing."
+            }
         }
 
         val items = loadAiMedia()
@@ -530,59 +536,61 @@ class IndexingForegroundService : Service() {
         var terminalFailureMessage: String? = null
         val engine = AiVisionRepository(applicationContext)
 
-        for (item in pending) {
-            awaitResume()
-            currentCoroutineContext().ensureActive()
-            updateState(
-                currentItemName = item.name,
-                currentItemStatus = if (item.isVideo) "Analyzing video frames…" else "Analyzing photo…"
-            )
-            try {
-                val metadata = engine.enrich(item, settings)
-                withContext(Dispatchers.IO) { store.save(metadata) }
-                consecutiveFailures = 0
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                failed++
-                consecutiveFailures++
+        try {
+            for (item in pending) {
+                awaitResume()
+                currentCoroutineContext().ensureActive()
                 updateState(
-                    failed = failed,
-                    currentItemStatus = error.localizedMessage?.take(140) ?: "AI analysis failed"
+                    currentItemName = item.name,
+                    currentItemStatus = if (item.isVideo) "Analyzing video frames…" else "Analyzing photo…"
                 )
-                // A bad endpoint or model should not make Eye issue hundreds of identical
-                // failed requests. Stop after three consecutive failures; retry remains possible.
-                if (consecutiveFailures >= 3) {
-                    terminalFailureMessage =
-                        "Stopped after three consecutive AI failures: ${error.localizedMessage ?: "check the provider connection"}"
-                    completed++
-                    updateState(processed = completed, total = items.size, failed = failed)
-                    break
+                try {
+                    val metadata = engine.enrich(item, settings)
+                    withContext(Dispatchers.IO) { store.save(metadata) }
+                    consecutiveFailures = 0
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    failed++
+                    consecutiveFailures++
+                    updateState(
+                        failed = failed,
+                        currentItemStatus = error.localizedMessage?.take(140) ?: "AI analysis failed"
+                    )
+                    if (consecutiveFailures >= 3) {
+                        terminalFailureMessage =
+                            "Stopped after three consecutive AI failures: ${error.localizedMessage ?: "check the selected model or provider"}"
+                        completed++
+                        updateState(processed = completed, total = items.size, failed = failed)
+                        break
+                    }
                 }
-            }
 
-            completed++
-            updateState(processed = completed, total = items.size, failed = failed)
-            if (completed % 2 == 0 || completed == items.size) {
-                postProgress(
-                    "AI descriptions & tags",
-                    "Processed $completed of ${items.size} · $failed failed",
-                    completed,
-                    items.size
+                completed++
+                updateState(processed = completed, total = items.size, failed = failed)
+                if (completed % 2 == 0 || completed == items.size) {
+                    postProgress(
+                        "AI descriptions & tags",
+                        "Processed $completed of ${items.size} · $failed failed",
+                        completed,
+                        items.size
+                    )
+                }
+                kotlinx.coroutines.yield()
+            }
+            postProgress(
+                "AI descriptions & tags",
+                "Finished $completed of ${items.size} · $failed failed",
+                completed,
+                items.size
+            )
+            if (failed > 0) {
+                throw IllegalStateException(
+                    terminalFailureMessage ?: "$failed media item(s) could not be analyzed; run Index missing to retry them."
                 )
             }
-            kotlinx.coroutines.yield()
-        }
-        postProgress(
-            "AI descriptions & tags",
-            "Finished $completed of ${items.size} · $failed failed",
-            completed,
-            items.size
-        )
-        if (failed > 0) {
-            throw IllegalStateException(
-                terminalFailureMessage ?: "$failed media item(s) could not be analyzed; run Index missing to retry them."
-            )
+        } finally {
+            engine.close()
         }
     }
 

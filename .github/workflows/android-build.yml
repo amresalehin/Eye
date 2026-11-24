@@ -60,7 +60,7 @@ jobs:
       # Run tests and build
       - name: Run unit tests and assemble debug APK
         run: |
-          bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
+          bash ./gradlew --no-daemon -PbuildLlamaNative=true testDebugUnitTest assembleDebug
 
       # Upload temporary artifact as a convenient build download
       - name: Upload debug APK artifact

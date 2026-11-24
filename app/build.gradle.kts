@@ -18,6 +18,13 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+        if (project.findProperty("buildLlamaNative")?.toString()?.toBoolean() == true) {
+            externalNativeBuild {
+                cmake {
+                    targets += listOf("emre_llama_vlm")
+                }
+            }
+        }
     }
 
     buildTypes {

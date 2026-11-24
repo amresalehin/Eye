@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,9 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -250,13 +248,83 @@ fun AiSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                LocalAiModelsSection { selectedModelId ->
-                    providerMode = AiProviderMode.ON_DEVICE
-                    baseUrl = ""
-                    model = selectedModelId
-                    discoveredModels = emptyList()
-                    connectionReady = false
-                    message = null
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("AI provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AiLevelPill(
+                            label = "BYOK",
+                            selected = !onDeviceProvider,
+                            status = if (providerMode == AiProviderMode.OPENAI_COMPATIBLE) "Cloud" else "Server",
+                            onClick = {
+                                if (providerMode == AiProviderMode.ON_DEVICE) {
+                                    providerMode = AiProviderMode.OPENAI_COMPATIBLE
+                                    baseUrl = AiProviderMode.OPENAI_COMPATIBLE.defaultBaseUrl
+                                    model = "gpt-4.1-mini"
+                                }
+                                discoveredModels = emptyList()
+                                connectionReady = false
+                                message = null
+                            }
+                        )
+                        AiLevelPill(
+                            label = "Local",
+                            selected = onDeviceProvider,
+                            status = if (com.amresalehin.emregallery.data.ai.AiModelStorage.resolveSelection(context) != null) "Ready" else "Choose model",
+                            onClick = {
+                                providerMode = AiProviderMode.ON_DEVICE
+                                baseUrl = ""
+                                model = com.amresalehin.emregallery.data.ai.AiModelStorage.selectedModelId(context)
+                                discoveredModels = emptyList()
+                                connectionReady = false
+                                message = null
+                            }
+                        )
+                    }
+                    if (onDeviceProvider) {
+                        LocalAiModelsSection { selectedModelId ->
+                            providerMode = AiProviderMode.ON_DEVICE
+                            baseUrl = ""
+                            model = selectedModelId
+                            discoveredModels = emptyList()
+                            connectionReady = false
+                            message = null
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AiLevelPill(
+                                label = "Cloud",
+                                selected = providerMode == AiProviderMode.OPENAI_COMPATIBLE,
+                                status = if (providerMode == AiProviderMode.OPENAI_COMPATIBLE && apiKey.isNotBlank()) "Configured" else null,
+                                onClick = {
+                                    providerMode = AiProviderMode.OPENAI_COMPATIBLE
+                                    baseUrl = AiProviderMode.OPENAI_COMPATIBLE.defaultBaseUrl
+                                    if (model.isBlank() || onDeviceProvider) model = "gpt-4.1-mini"
+                                    discoveredModels = emptyList()
+                                    connectionReady = false
+                                    message = null
+                                }
+                            )
+                            AiLevelPill(
+                                label = "Server",
+                                selected = providerMode == AiProviderMode.EXTERNAL_LOCAL,
+                                status = if (providerMode == AiProviderMode.EXTERNAL_LOCAL && baseUrl.isNotBlank()) "Set" else null,
+                                onClick = {
+                                    providerMode = AiProviderMode.EXTERNAL_LOCAL
+                                    baseUrl = AiProviderMode.EXTERNAL_LOCAL.defaultBaseUrl
+                                    model = ""
+                                    discoveredModels = emptyList()
+                                    connectionReady = false
+                                    message = null
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -267,51 +335,6 @@ fun AiSettingsScreen(
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
                 ) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("AI service", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            SegmentedButton(
-                                selected = providerMode == AiProviderMode.OPENAI_COMPATIBLE,
-                                onClick = {
-                                    providerMode = AiProviderMode.OPENAI_COMPATIBLE
-                                    baseUrl = AiProviderMode.OPENAI_COMPATIBLE.defaultBaseUrl
-                                    if (model.isBlank() || onDeviceProvider) model = "gpt-4.1-mini"
-                                    discoveredModels = emptyList()
-                                    connectionReady = false
-                                    message = null
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(0, 3),
-                                icon = {}
-                            ) { Text("BYOK") }
-                            SegmentedButton(
-                                selected = onDeviceProvider,
-                                onClick = {
-                                    providerMode = AiProviderMode.ON_DEVICE
-                                    baseUrl = ""
-                                    model = com.amresalehin.emregallery.data.ai.AiModelStorage.selectedModelId(context)
-                                    discoveredModels = emptyList()
-                                    connectionReady = false
-                                    message = null
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(1, 3),
-                                icon = {}
-                            ) { Text("On-device") }
-                            SegmentedButton(
-                                selected = providerMode == AiProviderMode.EXTERNAL_LOCAL,
-                                onClick = {
-                                    providerMode = AiProviderMode.EXTERNAL_LOCAL
-                                    baseUrl = AiProviderMode.EXTERNAL_LOCAL.defaultBaseUrl
-                                    model = ""
-                                    discoveredModels = emptyList()
-                                    connectionReady = false
-                                    message = null
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(2, 3),
-                                icon = {}
-                            ) { Text("Server") }
-                        }
-                        if (providerMode == AiProviderMode.EXTERNAL_LOCAL) {
-                            Text("OpenAI-compatible server", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
                         if (!onDeviceProvider) {
                             OutlinedTextField(
                                 value = baseUrl,
@@ -536,6 +559,42 @@ fun AiSettingsScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun AiLevelPill(
+    label: String,
+    selected: Boolean,
+    status: String? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (selected) {
+                androidx.compose.foundation.Canvas(Modifier.size(7.dp)) {
+                    drawCircle(MaterialTheme.colorScheme.primary)
+                }
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+            if (!status.isNullOrBlank()) {
+                Text("· $status", style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

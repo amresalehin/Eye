@@ -2267,7 +2267,6 @@ fun DownloaderResultsPage(
                                 scope.launch { downloaderPrefs.setMinHeightFilter(minHeightFilter.toInt()) }
                             },
                             valueRange = 0f..2160f,
-                            steps = 3,
                             modifier = Modifier.fillMaxWidth()
                         )
 

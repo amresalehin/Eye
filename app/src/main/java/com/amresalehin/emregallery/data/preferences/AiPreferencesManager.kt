@@ -154,7 +154,7 @@ class AiPreferencesManager(private val context: Context) {
             autoOrganizeCollections = prefs[aiAutoOrganizeCollectionsKey] ?: true,
             includeOcrContext = prefs[aiIncludeOcrContextKey] ?: true,
             customPromptInstructions = prefs[aiCustomPromptKey] ?: "",
-            batchDelayMs = (prefs[aiBatchDelayMsKey] ?: 500L).coerceIn(0L, 5000L),
+            batchDelayMs = (prefs[aiBatchDelayMsKey] ?: 500L).coerceAtLeast(0L),
             providerId = selected?.id ?: "legacy",
             providerName = selected?.name ?: "No provider selected"
         )
@@ -295,6 +295,6 @@ class AiPreferencesManager(private val context: Context) {
     }
 
     suspend fun setBatchDelayMs(delayMs: Long) {
-        context.galleryDataStore.edit { it[aiBatchDelayMsKey] = delayMs.coerceIn(0L, 5000L) }
+        context.galleryDataStore.edit { it[aiBatchDelayMsKey] = delayMs.coerceAtLeast(0L) }
     }
 }

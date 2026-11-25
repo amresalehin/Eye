@@ -17,9 +17,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardActions
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +34,7 @@ import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import kotlinx.coroutines.launch
+import kotlin.math.roundToLong
 
 @Composable
 fun AiSettingsScreen(
@@ -53,7 +59,31 @@ fun AiSettingsScreen(
     var isModelMenuExpanded by remember { mutableStateOf(false) }
     var modelFetchError by remember { mutableStateOf<String?>(null) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
-    var requestDelayMs by remember(config.batchDelayMs) { mutableFloatStateOf(config.batchDelayMs.toFloat()) }
+    fun formatDelaySeconds(delayMs: Long): String {
+        val wholeSeconds = delayMs / 1000L
+        val remainderMs = delayMs % 1000L
+        if (remainderMs == 0L) return wholeSeconds.toString()
+        return "$wholeSeconds.${remainderMs.toString().padStart(3, '0').trimEnd('0')}"
+    }
+    var requestDelayMs by remember(config.batchDelayMs) {
+        mutableLongStateOf(config.batchDelayMs.coerceAtLeast(0L))
+    }
+    var requestDelayInput by remember(config.batchDelayMs) {
+        mutableStateOf(formatDelaySeconds(config.batchDelayMs.coerceAtLeast(0L)))
+    }
+    val commitRequestDelayInput = {
+        val seconds = requestDelayInput.toDoubleOrNull()
+        if (seconds != null && seconds.isFinite() && seconds >= 0.0 &&
+            seconds <= Long.MAX_VALUE.toDouble() / 1000.0
+        ) {
+            val savedDelay = (seconds * 1000.0).roundToLong()
+            requestDelayMs = savedDelay
+            requestDelayInput = formatDelaySeconds(savedDelay)
+            scope.launch { prefs.setAiBatchDelayMs(savedDelay) }
+        } else {
+            requestDelayInput = formatDelaySeconds(requestDelayMs)
+        }
+    }
 
     var isTestingCapabilities by remember { mutableStateOf(false) }
     var capabilityReport by remember { mutableStateOf<EndpointCapabilityReport?>(null) }
@@ -650,24 +680,45 @@ fun AiSettingsScreen(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
-                        val selectedDelayMs = requestDelayMs.toLong()
-                        Text(
-                            text = if (selectedDelayMs == 0L) "Off" else "${selectedDelayMs / 1000.0} s",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("ai_request_delay_value")
+                        OutlinedTextField(
+                            value = requestDelayInput,
+                            onValueChange = { value ->
+                                if (value.matches(Regex("\\d*(\\.\\d{0,3})?"))) {
+                                    requestDelayInput = value
+                                }
+                            },
+                            label = { Text("Seconds") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = { commitRequestDelayInput() }
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .width(116.dp)
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused &&
+                                        requestDelayInput != formatDelaySeconds(requestDelayMs)
+                                    ) {
+                                        commitRequestDelayInput()
+                                    }
+                                }
+                                .testTag("ai_request_delay_input")
                         )
                     }
                     Slider(
-                        value = requestDelayMs,
-                        onValueChange = { requestDelayMs = it },
+                        value = requestDelayMs.coerceIn(0L, 5000L).toFloat(),
+                        onValueChange = {
+                            requestDelayMs = it.roundToLong()
+                            requestDelayInput = formatDelaySeconds(requestDelayMs)
+                        },
                         valueRange = 0f..5000f,
                         steps = 19,
                         onValueChangeFinished = {
-                            val savedDelay = (requestDelayMs / 250f).toLong() * 250L
-                            requestDelayMs = savedDelay.toFloat()
-                            scope.launch { prefs.setAiBatchDelayMs(savedDelay) }
+                            scope.launch { prefs.setAiBatchDelayMs(requestDelayMs) }
                         },
                         modifier = Modifier.testTag("ai_request_delay_slider")
                     )
@@ -676,7 +727,7 @@ fun AiSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("No delay", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("5 s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("5 s max", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

@@ -137,14 +137,7 @@ fun AiSettingsScreen(
                     }
 
                     val configuredProviders = providers.filter { it.isConfigured }
-                    if (configuredProviders.isEmpty()) {
-                        Text(
-                            text = "No configured models yet",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    } else {
+                    if (configuredProviders.isNotEmpty()) {
                         configuredProviders.forEach { provider ->
                             Surface(
                                 shape = RoundedCornerShape(14.dp),

@@ -254,11 +254,6 @@ fun AiSettingsScreen(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Text(
-                            text = "Configure Cloud or Local Models",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                     Icon(
                         imageVector = if (isAiSetupExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,

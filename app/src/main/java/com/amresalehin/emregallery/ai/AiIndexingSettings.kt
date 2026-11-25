@@ -37,11 +37,23 @@ object AiIndexingSettings {
         media: List<T>,
         pathSelector: (T) -> String
     ): List<T> {
-        if (isIndexAllFolders(context)) return media
-        val selected = getSelectedFolders(context)
-        if (selected.isEmpty()) return media
+        return filterMediaByFolders(
+            media = media,
+            allFolders = isIndexAllFolders(context),
+            selectedFolders = getSelectedFolders(context),
+            pathSelector = pathSelector
+        )
+    }
+
+    internal fun <T> filterMediaByFolders(
+        media: List<T>,
+        allFolders: Boolean,
+        selectedFolders: Set<String>,
+        pathSelector: (T) -> String
+    ): List<T> {
+        if (allFolders || selectedFolders.isEmpty()) return media
         return media.filter { item ->
-            normalizeFolderPath(pathSelector(item)) in selected
+            normalizeFolderPath(pathSelector(item)) in selectedFolders
         }
     }
 }

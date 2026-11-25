@@ -35,10 +35,6 @@ fun SettingsScreen(
     onMenuClick: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val prefs = remember(context) { com.amresalehin.emregallery.data.PreferencesRepository(context.applicationContext) }
-    val aiConfig by prefs.aiConfig.collectAsStateWithLifecycle(
-        initialValue = com.amresalehin.emregallery.data.preferences.AiConfig()
-    )
     var query by remember { mutableStateOf("") }
 
     val entries = listOf(
@@ -260,11 +256,7 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "AI & API Key" -> when {
-                                            aiConfig.isConfigured -> "${aiConfig.modelId} · ${aiConfig.endpointHost}"
-                                            aiConfig.hasCredentials && !aiConfig.enabled -> "Paused · ${aiConfig.modelId}"
-                                            else -> "Custom API endpoint & key"
-                                        }
+                                        "AI & API Key" -> "Configure Cloud or Local Models"
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"

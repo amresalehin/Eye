@@ -95,7 +95,7 @@ class CustomAiClient(
                     }
                     isAnthropic -> when {
                         path.endsWith("/v1/models") -> path
-                        path.endsWith("/v1/messages") -> path.removeSuffix("/messages") + "models"
+                        path.endsWith("/v1/messages") -> path.removeSuffix("/messages") + "/models"
                         path.endsWith("/v1") -> "$path/models"
                         path.endsWith("/messages") -> path.removeSuffix("/messages") + "/models"
                         else -> "$path/v1/models"

@@ -305,7 +305,7 @@ class CustomAiFeatureTest {
                 analysis.suggestedCollections
             )
             assertEquals("Total $9.50", analysis.keyDetails)
-            assertEquals(listOf("receipt", "coffee", "espresso"), analysis.tags)
+            assertEquals(listOf("Receipt", "Coffee", "Espresso"), analysis.tags)
 
             val firstReqBody = server.takeRequest().body.readUtf8()
             assertTrue(firstReqBody.contains("response_format"))
@@ -318,7 +318,7 @@ class CustomAiFeatureTest {
             assertTrue(retryReqBody.contains("no fixed maximum"))
             assertTrue(retryReqBody.contains("granular"))
             assertTrue(retryReqBody.contains("Title Case"))
-            assertTrue(retryReqBody.contains("lowercase"))
+            assertTrue(retryReqBody.contains("Format every tag in Title Case"))
             assertFalse(retryReqBody.contains("Choose a clean collection name"))
             assertFalse(retryReqBody.contains("Receipts, Documents, Code"))
             assertFalse(retryReqBody.contains("Existing collections:"))
@@ -373,7 +373,7 @@ class CustomAiFeatureTest {
     }
 
     @Test
-    fun parseAnalysisJson_enforcesLowercaseTagsAndTitleCaseCollections() {
+    fun parseAnalysisJson_enforcesTitleCaseTagsAndCollections() {
         val analysis = client.parseAnalysisJson(
             mediaUri = "content://media/external/images/media/casing",
             rawText = """{
@@ -389,7 +389,7 @@ class CustomAiFeatureTest {
             modelUsed = "test-model"
         )
 
-        assertEquals(listOf("travel", "landscape photo", "camera"), analysis.tags)
+        assertEquals(listOf("Travel", "Landscape Photo", "Camera"), analysis.tags)
         assertEquals(
             listOf("Mountain Landscapes", "Winter Travel Photos", "NASA Images", "iPhone Screenshots"),
             analysis.suggestedCollections
@@ -540,7 +540,7 @@ class CustomAiFeatureTest {
         )
 
         val first = aiStore.getAnalysis(firstUri)!!
-        assertEquals(listOf("camera", "landscape photo"), first.tags)
+        assertEquals(listOf("Camera", "Landscape Photo"), first.tags)
         assertEquals(listOf("Winter Travel Photos", "NASA Images"), first.suggestedCollections)
 
         val winter = aiStore.getCollectionSummaries(setOf(firstUri, secondUri))
@@ -557,7 +557,7 @@ class CustomAiFeatureTest {
         manager.addTagsForMedia(uri, listOf("TRAVEL", "Places"))
 
         val tags = manager.customTagsMap.first()[uri]
-        assertEquals(setOf("travel", "landscape photo", "places"), tags)
+        assertEquals(setOf("Travel", "Landscape Photo", "Places"), tags)
     }
 
     @Test

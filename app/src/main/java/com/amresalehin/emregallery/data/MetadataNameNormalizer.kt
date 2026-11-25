@@ -4,7 +4,7 @@ import java.util.Locale
 
 /**
  * Canonical formatting for user-visible tags and AI-generated collection names.
- * Tags are lowercase; collection names use Title Case with standard acronyms retained.
+ * Tags and collection names use Title Case with standard acronyms retained.
  */
 object MetadataNameNormalizer {
     private val whitespace = Regex("\\s+")
@@ -31,7 +31,7 @@ object MetadataNameNormalizer {
     )
 
     fun normalizeTag(value: String): String =
-        value.trim().trimStart('#').trim().replace(whitespace, " ").lowercase(Locale.ROOT)
+        normalizeCollectionName(value.trim().trimStart('#'))
 
     fun normalizeTags(values: Collection<String>): List<String> {
         val unique = LinkedHashSet<String>()

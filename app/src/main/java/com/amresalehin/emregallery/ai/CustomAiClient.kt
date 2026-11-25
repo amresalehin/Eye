@@ -786,7 +786,7 @@ class CustomAiClient(
             append("Generate every distinct, genuinely relevant collection for this image with no fixed maximum. ")
             append("Use granular, specific, context-rich names rather than broad catch-all categories. ")
             append("Generate names independently; no existing collection list or preset examples are provided. ")
-            append("Format every tag in lowercase. ")
+            append("Format every tag in Title Case, preserving standard acronyms and established brand casing. ")
             append("Format each collection name in Title Case, preserving standard acronyms and established brand casing. ")
             append("Keep tags precise and grounded in visible content and OCR.")
         }

@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.amresalehin.emregallery.data.MetadataNameNormalizer
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -118,8 +119,9 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
 
     @Synchronized
     fun saveAnalysis(analysis: AiMediaAnalysis) {
-        val tagsArr = JSONArray()
-        analysis.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { tagsArr.put(it) }
+        val tagsArr = JSONArray().apply {
+            MetadataNameNormalizer.normalizeTags(analysis.tags).forEach(::put)
+        }
         val collections = normalizeCollectionNames(
             analysis.suggestedCollections.ifEmpty { listOf(analysis.suggestedCollection) }
         )
@@ -335,22 +337,17 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
         return normalizeCollectionNames(decoded.ifEmpty { listOf(legacyCollection.orEmpty()) })
     }
 
-    private fun normalizeCollectionNames(names: Collection<String>): List<String> {
-        val seen = HashSet<String>()
-        return names.map { it.trim() }
-            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
-    }
+    private fun normalizeCollectionNames(names: Collection<String>): List<String> =
+        MetadataNameNormalizer.normalizeCollectionNames(names)
 
     private fun readCursorRow(cursor: android.database.Cursor): AiMediaAnalysis {
         val tagsRaw = cursor.getString(3) ?: "[]"
-        val tags = mutableListOf<String>()
-        runCatching {
-            val arr = JSONArray(tagsRaw)
-            for (i in 0 until arr.length()) {
-                val tag = arr.optString(i).trim()
-                if (tag.isNotEmpty()) tags.add(tag)
-            }
-        }
+        val tags = MetadataNameNormalizer.normalizeTags(
+            runCatching {
+                val arr = JSONArray(tagsRaw)
+                (0 until arr.length()).map { arr.optString(it, "") }
+            }.getOrDefault(emptyList())
+        )
         val collections = decodeCollectionNames(cursor.getString(5), cursor.getString(4))
         return AiMediaAnalysis(
             mediaUri = cursor.getString(0),

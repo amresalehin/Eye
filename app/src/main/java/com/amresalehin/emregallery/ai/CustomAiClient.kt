@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
+import com.amresalehin.emregallery.data.MetadataNameNormalizer
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import com.amresalehin.emregallery.data.preferences.isOllamaEndpoint
 import kotlinx.coroutines.Dispatchers
@@ -785,6 +786,8 @@ class CustomAiClient(
             append("Generate every distinct, genuinely relevant collection for this image with no fixed maximum. ")
             append("Use granular, specific, context-rich names rather than broad catch-all categories. ")
             append("Generate names independently; no existing collection list or preset examples are provided. ")
+            append("Format every tag in lowercase. ")
+            append("Format each collection name in Title Case, preserving standard acronyms and established brand casing. ")
             append("Keep tags precise and grounded in visible content and OCR.")
         }
     }
@@ -800,13 +803,9 @@ class CustomAiClient(
         val collections = parseCollectionNames(obj)
         val keyDetails = obj.optString("key_details", "").trim()
         val tagsArr = obj.optJSONArray("tags") ?: JSONArray()
-        val tags = mutableListOf<String>()
-        for (i in 0 until tagsArr.length()) {
-            val cleaned = tagsArr.optString(i, "").trim().removePrefix("#").lowercase()
-            if (cleaned.isNotEmpty() && cleaned !in tags) {
-                tags.add(cleaned)
-            }
-        }
+        val tags = MetadataNameNormalizer.normalizeTags(
+            (0 until tagsArr.length()).map { tagsArr.optString(it, "") }
+        )
         return AiMediaAnalysis(
             mediaUri = mediaUri,
             title = title,
@@ -832,9 +831,7 @@ class CustomAiClient(
             is String -> listOf(rawCollections)
             else -> emptyList()
         }
-        val seen = HashSet<String>()
-        return candidates.map { it.trim() }
-            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
+        return MetadataNameNormalizer.normalizeCollectionNames(candidates)
     }
 
     internal fun extractJsonObject(rawText: String): JSONObject {

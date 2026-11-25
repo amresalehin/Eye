@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.amresalehin.emregallery.data.CustomAlbum
+import com.amresalehin.emregallery.data.MetadataNameNormalizer
 import com.amresalehin.emregallery.data.galleryDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -97,11 +98,8 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
             val map = mutableMapOf<String, Set<String>>()
             for (key in obj.keys()) {
                 val arr = obj.getJSONArray(key)
-                val set = mutableSetOf<String>()
-                for (i in 0 until arr.length()) {
-                    set.add(arr.getString(i))
-                }
-                map[key] = set
+                val tags = (0 until arr.length()).map { arr.optString(it, "") }
+                map[key] = MetadataNameNormalizer.normalizeTags(tags).toSet()
             }
             map
         } catch (e: Exception) {
@@ -312,17 +310,18 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
     }
 
     suspend fun addTagsForMedia(uri: String, tags: Collection<String>) {
-        val cleaned = tags.map { it.trim().removePrefix("#") }.filter { it.isNotEmpty() }.distinct()
-        if (cleaned.isEmpty()) return
+        val cleaned = MetadataNameNormalizer.normalizeTags(tags)
+        if (uri.isBlank() || cleaned.isEmpty()) return
         context.galleryDataStore.edit { prefs ->
             val raw = prefs[mediaTagsKey] ?: "{}"
             val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
             val arr = obj.optJSONArray(uri) ?: JSONArray()
-            val existing = linkedSetOf<String>()
-            for (i in 0 until arr.length()) existing.add(arr.getString(i))
-            if (existing.addAll(cleaned)) {
-                val newArr = JSONArray(existing.toList())
-                obj.put(uri, newArr)
+            val rawExisting = (0 until arr.length()).map { arr.optString(it, "") }
+            val existing = LinkedHashSet(MetadataNameNormalizer.normalizeTags(rawExisting))
+            existing.addAll(cleaned)
+            val updated = existing.toList()
+            if (updated != rawExisting) {
+                obj.put(uri, JSONArray(updated))
                 prefs[mediaTagsKey] = obj.toString()
             }
         }
@@ -334,9 +333,7 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
 
     suspend fun ensureAlbumsAndAddMedia(albumNames: Collection<String>, uri: String) {
         if (uri.isBlank()) return
-        val seen = HashSet<String>()
-        val names = albumNames.map { it.trim() }
-            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
+        val names = MetadataNameNormalizer.normalizeCollectionNames(albumNames)
         if (names.isEmpty()) return
 
         val updated = customAlbums.first().toMutableList()

@@ -61,6 +61,8 @@ Return ONLY a valid JSON object with this exact schema:
 }
 Rules:
 - Generate 3 to 7 concise, lowercase, searchable tags that describe concrete subjects, topics, entities, actions, and details visible in this specific image. Avoid vague filler tags.
+- Format every tag in lowercase.
+- Format every collection name in Title Case; keep short connecting words lowercase and preserve standard acronyms and established brand casing.
 - Generate every distinct collection that genuinely and meaningfully applies to this image. There is no fixed maximum number of collections; do not stop after one or a small preset number.
 - Make each collection granular and specific to the actual subject matter and context. Prefer precise multi-word collection names over broad, generic, catch-all categories.
 - Collections are semantic groupings, not a short list of broad media types. Derive them from the image and OCR content rather than from a preset taxonomy.

@@ -9,6 +9,7 @@ import com.amresalehin.emregallery.ai.AiMediaAnalysis
 import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.AiFilter
+import com.amresalehin.emregallery.data.preferences.MediaCollectionsPreferencesManager
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.SearchEngine
 import com.amresalehin.emregallery.data.SearchFilterState
@@ -16,6 +17,7 @@ import com.amresalehin.emregallery.data.SearchSortMode
 import com.amresalehin.emregallery.data.SuggestionType
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -256,7 +258,7 @@ class CustomAiFeatureTest {
                   "title": "Coffee Shop Receipt",
                   "description": "Paper receipt showing two espresso drinks and total amount.",
                   "tags": ["#Receipt", "Coffee", "Espresso", "receipt"],
-                  "collections": ["Coffee shop receipt details", "Espresso beverage purchases"],
+                  "collections": ["Coffee Shop Receipt Details", "Espresso Beverage Purchases"],
                   "key_details": "Total $9.50"
                 }
                 ```
@@ -297,9 +299,9 @@ class CustomAiFeatureTest {
             assertTrue("analyzeImage should succeed after fallback retry", analysisResult.isSuccess)
             val analysis = analysisResult.getOrThrow()
             assertEquals("Coffee Shop Receipt", analysis.title)
-            assertEquals("Coffee shop receipt details", analysis.suggestedCollection)
+            assertEquals("Coffee Shop Receipt Details", analysis.suggestedCollection)
             assertEquals(
-                listOf("Coffee shop receipt details", "Espresso beverage purchases"),
+                listOf("Coffee Shop Receipt Details", "Espresso Beverage Purchases"),
                 analysis.suggestedCollections
             )
             assertEquals("Total $9.50", analysis.keyDetails)
@@ -315,6 +317,8 @@ class CustomAiFeatureTest {
             assertTrue(retryReqBody.contains("collections"))
             assertTrue(retryReqBody.contains("no fixed maximum"))
             assertTrue(retryReqBody.contains("granular"))
+            assertTrue(retryReqBody.contains("Title Case"))
+            assertTrue(retryReqBody.contains("lowercase"))
             assertFalse(retryReqBody.contains("Choose a clean collection name"))
             assertFalse(retryReqBody.contains("Receipts, Documents, Code"))
             assertFalse(retryReqBody.contains("Existing collections:"))
@@ -349,23 +353,47 @@ class CustomAiFeatureTest {
                 "title": "Detailed image",
                 "description": "A single image with several distinct topics.",
                 "tags": ["topic"],
-                "collections": ["Specific topic A", "Specific topic B", "Specific topic C", "Specific topic D"],
+                "collections": ["Specific Topic A", "Specific Topic B", "Specific Topic C", "Specific Topic D"],
                 "key_details": ""
             }""",
             modelUsed = "test-model"
         )
         assertEquals(
-            listOf("Specific topic A", "Specific topic B", "Specific topic C", "Specific topic D"),
+            listOf("Specific Topic A", "Specific Topic B", "Specific Topic C", "Specific Topic D"),
             multiple.suggestedCollections
         )
 
         val legacy = client.parseAnalysisJson(
             mediaUri = "content://media/external/images/media/legacy",
-            rawText = """{"title":"Legacy","collection":"Legacy collection"}""",
+            rawText = """{"title":"Legacy","collection":"Legacy Collection"}""",
             modelUsed = "test-model"
         )
-        assertEquals(listOf("Legacy collection"), legacy.suggestedCollections)
-        assertEquals("Legacy collection", legacy.suggestedCollection)
+        assertEquals(listOf("Legacy Collection"), legacy.suggestedCollections)
+        assertEquals("Legacy Collection", legacy.suggestedCollection)
+    }
+
+    @Test
+    fun parseAnalysisJson_enforcesLowercaseTagsAndTitleCaseCollections() {
+        val analysis = client.parseAnalysisJson(
+            mediaUri = "content://media/external/images/media/casing",
+            rawText = """{
+                "tags": [" #TRAVEL ", "Travel", "LANDSCAPE PHOTO", "camera"],
+                "collections": [
+                    "mountain landscapes",
+                    "Mountain Landscapes",
+                    "winter TRAVEL photos",
+                    "NASA images",
+                    "iphone screenshots"
+                ]
+            }""",
+            modelUsed = "test-model"
+        )
+
+        assertEquals(listOf("travel", "landscape photo", "camera"), analysis.tags)
+        assertEquals(
+            listOf("Mountain Landscapes", "Winter Travel Photos", "NASA Images", "iPhone Screenshots"),
+            analysis.suggestedCollections
+        )
     }
 
     @Test
@@ -437,7 +465,7 @@ class CustomAiFeatureTest {
                 description = "Airline QR pass",
                 tags = listOf("travel", "flight"),
                 suggestedCollection = "Travel",
-                suggestedCollections = listOf("Rail boarding pass details", "Eurostar train journeys"),
+                suggestedCollections = listOf("Rail Boarding Pass Details", "Eurostar Train Journeys"),
                 keyDetails = "Gate B12",
                 modelUsed = "custom-model"
             )
@@ -449,7 +477,7 @@ class CustomAiFeatureTest {
                 description = "Supermarket checkout receipt",
                 tags = listOf("receipt", "groceries"),
                 suggestedCollection = "Receipts",
-                suggestedCollections = listOf("Grocery checkout receipts", "Food purchase receipts"),
+                suggestedCollections = listOf("Grocery Checkout Receipts", "Food Purchase Receipts"),
                 modelUsed = "custom-model"
             )
         )
@@ -468,10 +496,10 @@ class CustomAiFeatureTest {
         val collections = aiStore.getCollectionSummaries(setOf(uri1, uri2))
         assertEquals(4, collections.size)
         assertTrue(collections.any {
-            it.name == "Rail boarding pass details" && uri1 in it.mediaUris
+            it.name == "Rail Boarding Pass Details" && uri1 in it.mediaUris
         })
         assertTrue(collections.any {
-            it.name == "Eurostar train journeys" && uri1 in it.mediaUris
+            it.name == "Eurostar Train Journeys" && uri1 in it.mediaUris
         })
 
         aiStore.clearFailed()
@@ -481,6 +509,55 @@ class CustomAiFeatureTest {
 
         aiStore.clearAll()
         assertEquals(0, aiStore.getTotalCompletedCount())
+    }
+
+    @Test
+    fun aiMetadataStore_normalizesTagsAndMergesCollectionNamesAcrossCaseVariants() {
+        val firstUri = "content://media/external/images/media/casing-1"
+        val secondUri = "content://media/external/images/media/casing-2"
+
+        aiStore.saveAnalysis(
+            AiMediaAnalysis(
+                mediaUri = firstUri,
+                title = "First",
+                description = "",
+                tags = listOf("CAMERA", "Camera", " landscape PHOTO "),
+                suggestedCollection = "winter travel photos",
+                suggestedCollections = listOf("winter travel photos", "Winter Travel Photos", "NASA images"),
+                modelUsed = "test-model"
+            )
+        )
+        aiStore.saveAnalysis(
+            AiMediaAnalysis(
+                mediaUri = secondUri,
+                title = "Second",
+                description = "",
+                tags = listOf("CAMERA"),
+                suggestedCollection = "Winter Travel Photos",
+                suggestedCollections = listOf("Winter Travel Photos"),
+                modelUsed = "test-model"
+            )
+        )
+
+        val first = aiStore.getAnalysis(firstUri)!!
+        assertEquals(listOf("camera", "landscape photo"), first.tags)
+        assertEquals(listOf("Winter Travel Photos", "NASA Images"), first.suggestedCollections)
+
+        val winter = aiStore.getCollectionSummaries(setOf(firstUri, secondUri))
+            .single { it.name == "Winter Travel Photos" }
+        assertEquals(2, winter.count)
+    }
+
+    @Test
+    fun manualTags_areNormalizedAndDeduplicatedBeforePersistence() = runBlocking {
+        val uri = "content://media/external/images/media/manual-tag-casing"
+        val manager = MediaCollectionsPreferencesManager(context)
+
+        manager.addTagsForMedia(uri, listOf(" #TRAVEL ", "Travel", "LANDSCAPE PHOTO"))
+        manager.addTagsForMedia(uri, listOf("TRAVEL", "Places"))
+
+        val tags = manager.customTagsMap.first()[uri]
+        assertEquals(setOf("travel", "landscape photo", "places"), tags)
     }
 
     @Test
@@ -521,7 +598,7 @@ class CustomAiFeatureTest {
                 description = "IDE screenshot showing Flow collector code",
                 tags = listOf("kotlin", "coroutines", "snippet"),
                 suggestedCollection = "Code",
-                suggestedCollections = listOf("Code", "Kotlin coroutine snippets"),
+                suggestedCollections = listOf("Code", "Kotlin Coroutine Snippets"),
                 keyDetails = "Dispatchers.IO",
                 modelUsed = "custom-model"
             )
@@ -568,7 +645,7 @@ class CustomAiFeatureTest {
         val collectionFiltered = engine.searchMedia(
             query = "",
             media = sampleMedia,
-            filter = SearchFilterState(selectedAiCollection = "Kotlin coroutine snippets"),
+            filter = SearchFilterState(selectedAiCollection = "Kotlin Coroutine Snippets"),
             sortMode = SearchSortMode.RELEVANCE,
             customAlbums = emptyList(),
             customTagsMap = emptyMap(),
@@ -584,17 +661,17 @@ class CustomAiFeatureTest {
             customPeopleMap = emptyMap(),
             favourites = emptySet()
         )
-        assertTrue(discovery.aiCollections.any { it.title == "Kotlin coroutine snippets" })
+        assertTrue(discovery.aiCollections.any { it.title == "Kotlin Coroutine Snippets" })
 
         val suggestions = engine.getLiveSuggestions(
-            query = "Kotlin coroutine snippets",
+            query = "Kotlin Coroutine Snippets",
             media = sampleMedia,
             recentSearches = emptyList(),
             customAlbums = emptyList(),
             customTagsMap = emptyMap(),
             customPeopleMap = emptyMap()
         )
-        assertTrue(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Kotlin coroutine snippets" })
+        assertTrue(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Kotlin Coroutine Snippets" })
         assertFalse(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Unknown" })
     }
 

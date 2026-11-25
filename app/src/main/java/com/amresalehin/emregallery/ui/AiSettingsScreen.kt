@@ -559,8 +559,6 @@ fun AiSettingsScreen(
                 }
                         }
                     }
-                }
-            }
 
             Spacer(Modifier.navigationBarsPadding())
             Spacer(Modifier.height(16.dp))

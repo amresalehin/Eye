@@ -184,7 +184,10 @@ fun AiSettingsScreen(
                             Icon(Icons.Default.Edit, contentDescription = "Rename provider")
                         }
                         IconButton(
-                            onClick = { showAddProviderDialog = true },
+                            onClick = {
+                                providerNameInput = ""
+                                showAddProviderDialog = true
+                            },
                             modifier = Modifier.testTag("ai_add_provider_button")
                         ) {
                             Icon(Icons.Default.Add, contentDescription = "Add provider")

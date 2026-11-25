@@ -177,7 +177,29 @@ fun IndexingStatusScreen(
                 onRetryFailedAi = viewModel::retryFailedAi,
                 onClearCache = viewModel::clearAiCache,
                 onSelectProvider = viewModel::selectAiProvider,
-                onOpenAiSettings = onOpenAiSettings
+                onOpenAiSettings = onOpenAiSettings,
+                availableFolders = availableFolders,
+                onToggleFolder = { folderPath ->
+                    val isAll = uiState.ai.isAllFolders
+                    val currentSelected = uiState.ai.selectedFolders
+                    if (isAll) {
+                        viewModel.setAiIndexingFolders(allFolders = false, folders = setOf(folderPath))
+                    } else {
+                        val newSelected = if (folderPath in currentSelected) {
+                            currentSelected - folderPath
+                        } else {
+                            currentSelected + folderPath
+                        }
+                        if (newSelected.isEmpty() || newSelected.size >= availableFolders.size) {
+                            viewModel.setAiIndexingFolders(allFolders = true, folders = emptySet())
+                        } else {
+                            viewModel.setAiIndexingFolders(allFolders = false, folders = newSelected)
+                        }
+                    }
+                },
+                onSelectAllFolders = {
+                    viewModel.setAiIndexingFolders(allFolders = true, folders = emptySet())
+                }
             )
 
             // 2. Face Recognition (Finding & Clustering) Card

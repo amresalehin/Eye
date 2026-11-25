@@ -133,40 +133,28 @@ fun AiViewerInsightsCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 if (aiConfig.hasCredentials) {
-                    // Compact pill matching People section's engine selector pill
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    IconButton(
+                        onClick = ::triggerAnalysis,
+                        enabled = !isAnalyzing,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable(enabled = !isAnalyzing) { triggerAnalysis() }
+                            .size(32.dp)
                             .testTag("viewer_ai_analyze_button")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            if (isAnalyzing) {
-                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp)
-                            } else {
-                                Icon(
-                                    imageVector = if (currentAnalysis != null) Icons.Default.Refresh else Icons.Outlined.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                            Text(
-                                text = when {
-                                    isAnalyzing -> "Analyzing…"
-                                    currentAnalysis != null -> "Re-analyze"
-                                    else -> "Analyze"
+                        if (isAnalyzing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (currentAnalysis != null) {
+                                    Icons.Default.Refresh
+                                } else {
+                                    Icons.Outlined.AutoAwesome
                                 },
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                contentDescription = if (currentAnalysis != null) "Re-analyze photo" else "Analyze photo",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -222,10 +210,10 @@ fun AiViewerInsightsCard(
         } else {
             if (currentAnalysis != null) {
                 DetailCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = currentAnalysis.title,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )

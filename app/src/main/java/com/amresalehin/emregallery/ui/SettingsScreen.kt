@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,10 +35,15 @@ fun SettingsScreen(
     onMenuClick: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember(context) { com.amresalehin.emregallery.data.PreferencesRepository(context.applicationContext) }
+    val aiConfig by prefs.aiConfig.collectAsStateWithLifecycle(
+        initialValue = com.amresalehin.emregallery.data.preferences.AiConfig()
+    )
     var query by remember { mutableStateOf("") }
 
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
+        "AI & API Key" to Icons.Outlined.AutoAwesome,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -253,6 +260,11 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
+                                        "AI & API Key" -> when {
+                                            aiConfig.isConfigured -> "${aiConfig.provider.displayName} · ${aiConfig.modelId}"
+                                            aiConfig.hasApiKey && !aiConfig.enabled -> "Paused · ${aiConfig.modelId}"
+                                            else -> "Custom Gemini / OpenAI API key & smart tags"
+                                        }
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"

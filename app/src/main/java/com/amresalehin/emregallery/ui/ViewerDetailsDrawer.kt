@@ -155,6 +155,9 @@ fun ViewerDetailsDrawer(
     defaultOcrModel: String = "fast",
     defaultMlKitLanguages: Set<String> = setOf("latin"),
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
+    onAddTags: (Collection<String>) -> Unit = { tags -> tags.forEach(onAddTag) },
+    onAddToNamedAlbum: (String) -> Unit = {},
+    onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -538,6 +541,14 @@ fun ViewerDetailsDrawer(
                                             onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
                                         }
                                     }
+                                }
+                            },
+                            onAddTags = onAddTags,
+                            onAddToNamedAlbum = onAddToNamedAlbum,
+                            onOpenAiSettings = onOpenAiSettings?.let { openSettings ->
+                                {
+                                    onClose()
+                                    openSettings()
                                 }
                             }
                         )

@@ -78,10 +78,25 @@ data class EngineState(
     val enteModelFailure: String? = null
 )
 
+data class AiIndexingState(
+    val processed: Int = 0,
+    val failedCount: Int = 0,
+    val failedItems: List<Pair<String, String>> = emptyList(),
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val itemsPerMinute: Int = 0,
+    val currentItemName: String = "",
+    val error: String? = null,
+    val hasApiKey: Boolean = false,
+    val modelId: String = "gemini-2.5-flash",
+    val providerName: String = "Google Gemini API"
+)
+
 data class IndexingStatusUiState(
     val totalPhotos: Int = 0,
     val countsReady: Boolean = false,
     val ocr: OcrState = OcrState(),
+    val ai: AiIndexingState = AiIndexingState(),
     val faceFinding: FaceFindingState = FaceFindingState(),
     val location: LocationIndexingState = LocationIndexingState(),
     val modelDownload: ModelDownloadState = ModelDownloadState(),

@@ -23,6 +23,9 @@ import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.CustomAiClient
+import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -99,6 +102,7 @@ class IndexingForegroundService : Service() {
             ACTION_START_FACE -> "Face indexing"
             ACTION_START_LOCATION -> "Map location indexing"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
+            ACTION_START_AI -> "AI vision indexing"
             else -> "Media indexing"
         }
         startForegroundCompat(buildNotification(title, "Starting…", 0, 0))
@@ -126,6 +130,10 @@ class IndexingForegroundService : Service() {
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
+                    )
+                    ACTION_START_AI -> runAi(
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
                     )
                 }
                 prefs.edit().putBoolean(KEY_PAUSED, false).apply()
@@ -510,12 +518,133 @@ class IndexingForegroundService : Service() {
         }
     }
 
+    private suspend fun runAi(
+        rescanAll: Boolean = false,
+        retryFailedOnly: Boolean = false
+    ) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        val config = AiPreferencesManager(applicationContext).currentConfig()
+        if (!config.isConfigured) {
+            throw IllegalStateException("Custom AI API key is not configured.")
+        }
+        val aiStore = AiMetadataStore(applicationContext)
+        val aiClient = CustomAiClient()
+        val prefsRepo = PreferencesRepository(applicationContext)
+        val photos = loadPhotos()
+        try {
+            if (rescanAll) {
+                withContext(Dispatchers.IO) { aiStore.clearAll() }
+            }
+            val pending = withContext(Dispatchers.IO) {
+                if (retryFailedOnly) {
+                    val failedUris = aiStore.getFailedUris()
+                    photos.filter { it.uri in failedUris }
+                } else {
+                    val completedUris = aiStore.getCompletedUris()
+                    photos.filterNot { it.uri in completedUris }
+                }
+            }
+            val alreadyDone = withContext(Dispatchers.IO) {
+                aiStore.getCompletedCount(photos.map { it.uri })
+            }
+            var failedCount = withContext(Dispatchers.IO) {
+                if (retryFailedOnly) 0 else aiStore.getFailedItems(photos.map { it.uri }).size
+            }
+            val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+            pauseSignal.value = initialPaused
+            updateState(
+                task = TASK_AI,
+                running = true,
+                paused = initialPaused,
+                processed = alreadyDone,
+                total = photos.size,
+                failed = failedCount,
+                currentItemName = "",
+                error = null
+            )
+            postProgress("AI vision indexing", "Preparing ${pending.size} photos (${config.modelId})", alreadyDone, photos.size)
+
+            var completed = alreadyDone
+            for (item in pending) {
+                awaitResume()
+                currentCoroutineContext().ensureActive()
+                val itemName = item.name.ifBlank { item.uri.substringAfterLast('/') }
+                updateState(
+                    task = TASK_AI,
+                    processed = completed,
+                    total = photos.size,
+                    failed = failedCount,
+                    currentItemName = itemName,
+                    error = null
+                )
+                try {
+                    val ocrContext = if (config.includeOcrContext) {
+                        withContext(Dispatchers.IO) {
+                            TesseractOcr.readCachedResult(applicationContext, Uri.parse(item.uri))
+                        }
+                    } else null
+                    val existingCollections = runCatching {
+                        prefsRepo.customAlbums.first().map { it.name }.distinct()
+                    }.getOrDefault(emptyList())
+                    val result = aiClient.analyzeImage(
+                        context = applicationContext,
+                        mediaUri = item.uri,
+                        config = config,
+                        existingCollections = existingCollections,
+                        ocrContext = ocrContext
+                    )
+                    result.onSuccess { parsed ->
+                        withContext(Dispatchers.IO) { aiStore.saveAnalysis(parsed) }
+                        if (config.autoApplyTags && parsed.tags.isNotEmpty()) {
+                            prefsRepo.addTagsForMedia(item.uri, parsed.tags)
+                        }
+                        if (config.autoOrganizeCollections && parsed.suggestedCollection.isNotBlank()) {
+                            prefsRepo.ensureAlbumAndAddMedia(parsed.suggestedCollection, item.uri)
+                        }
+                        completed++
+                    }.onFailure { err ->
+                        failedCount++
+                        withContext(Dispatchers.IO) {
+                            aiStore.markFailed(item.uri, config.modelId, err.message ?: "AI analysis failed")
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    failedCount++
+                    withContext(Dispatchers.IO) {
+                        aiStore.markFailed(item.uri, config.modelId, e.message ?: "AI analysis failed")
+                    }
+                }
+
+                updateState(
+                    task = TASK_AI,
+                    processed = completed,
+                    total = photos.size,
+                    failed = failedCount,
+                    currentItemName = itemName,
+                    error = null
+                )
+                if (completed % 2 == 0 || completed == photos.size) {
+                    postProgress("AI vision indexing", "Analyzed $completed of ${photos.size} photos (${config.modelId})", completed, photos.size)
+                }
+                if (config.batchDelayMs > 0L) {
+                    delay(config.batchDelayMs)
+                }
+                kotlinx.coroutines.yield()
+            }
+        } finally {
+            runCatching { aiStore.close() }
+        }
+    }
+
     private fun refreshNotification(message: String) {
         val title = when (prefs.getString(KEY_TASK, "")) {
             TASK_OCR -> "OCR indexing"
             TASK_FACE -> "Face indexing"
             TASK_LOCATION -> "Map location indexing"
             TASK_MODEL -> "Downloading face model"
+            TASK_AI -> "AI vision indexing"
             else -> "Media indexing"
         }
         val p = prefs.getInt(KEY_PROCESSED, 0)
@@ -578,6 +707,7 @@ class IndexingForegroundService : Service() {
         const val KEY_PHOTOS_WITH_FACES = "photos_with_faces"
 
         const val TASK_LOCATION = "location"
+        const val TASK_AI = "ai"
         private const val TASK_OCR = "ocr"
         private const val TASK_FACE = "face"
         private const val TASK_MODEL = "model"
@@ -587,6 +717,7 @@ class IndexingForegroundService : Service() {
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
         private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
+        private const val ACTION_START_AI = "com.amresalehin.emregallery.indexing.START_AI"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
         private const val ACTION_CANCEL = "com.amresalehin.emregallery.indexing.CANCEL"
@@ -661,6 +792,16 @@ class IndexingForegroundService : Service() {
             command(context, ACTION_DOWNLOAD_MODEL) {
                 putExtra(EXTRA_FORCE, force)
                 putExtra(EXTRA_ENGINE_ID, engineId)
+            }
+
+        fun startAi(
+            context: Context,
+            rescanAll: Boolean = false,
+            retryFailedOnly: Boolean = false
+        ) =
+            command(context, ACTION_START_AI) {
+                putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                putExtra(EXTRA_RETRY_FAILED_ONLY, retryFailedOnly)
             }
 
         fun pause(context: Context) = command(context, ACTION_PAUSE)

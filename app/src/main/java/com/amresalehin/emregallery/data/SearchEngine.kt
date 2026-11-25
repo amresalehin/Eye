@@ -6,6 +6,8 @@ import android.location.Geocoder
 import android.net.Uri
 import android.os.Build
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.amresalehin.emregallery.ai.AiMediaAnalysis
+import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.ocr.TesseractOcr
@@ -24,7 +26,8 @@ enum class SuggestionType {
     ALBUM,
     FILE,
     TAG,
-    DOCUMENT
+    DOCUMENT,
+    AI_COLLECTION
 }
 
 data class SearchSuggestion(
@@ -88,6 +91,12 @@ enum class FaceFilter(val label: String) {
     NO_FACE("No Face")
 }
 
+enum class AiFilter(val label: String) {
+    ALL("All"),
+    AI_ANALYZED("AI Analyzed"),
+    NOT_ANALYZED("Not Analyzed")
+}
+
 sealed class TimeRangeFilter(val label: String) {
     object AllTime : TimeRangeFilter("Time")
     object Last30Days : TimeRangeFilter("Last 30 days")
@@ -119,7 +128,9 @@ data class SearchFilterState(
     val selectedTag: String? = null,
     val gpsFilter: GpsFilter = GpsFilter.ALL,
     val ocrTextFilter: OcrTextFilter = OcrTextFilter.ALL,
-    val faceFilter: FaceFilter = FaceFilter.ALL
+    val faceFilter: FaceFilter = FaceFilter.ALL,
+    val aiFilter: AiFilter = AiFilter.ALL,
+    val selectedAiCollection: String? = null
 ) {
     val isDefault: Boolean
         get() = mediaType == MediaTypeFilter.ALL &&
@@ -131,7 +142,9 @@ data class SearchFilterState(
                 selectedTag == null &&
                 gpsFilter == GpsFilter.ALL &&
                 ocrTextFilter == OcrTextFilter.ALL &&
-                faceFilter == FaceFilter.ALL
+                faceFilter == FaceFilter.ALL &&
+                aiFilter == AiFilter.ALL &&
+                selectedAiCollection == null
 
     val activeFilterCount: Int
         get() {
@@ -146,6 +159,8 @@ data class SearchFilterState(
             if (gpsFilter != GpsFilter.ALL) count++
             if (ocrTextFilter != OcrTextFilter.ALL) count++
             if (faceFilter != FaceFilter.ALL) count++
+            if (aiFilter != AiFilter.ALL) count++
+            if (selectedAiCollection != null) count++
             return count
         }
 }
@@ -191,6 +206,7 @@ class SearchEngine(private val context: Context) {
 
     private val faceStore = FaceClusterStore(context.applicationContext)
     private val locationCache = PhotoMapLocationCache(context.applicationContext)
+    private val aiStore = AiMetadataStore(context.applicationContext)
 
     /**
      * Builds real discovery sections for State A (Search opened, no query entered).
@@ -335,7 +351,24 @@ class SearchEngine(private val context: Context) {
             )
         }
 
-        // 5. Category Shortcuts: Photos, Videos, Documents (OCR text items), Favourites
+        // 4b. AI Analyzed & Smart Collections
+        val allowedUris = nonTrashMedia.map { it.uri }.toSet()
+        val aiAnalyses = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
+        val aiCollectionSummaries = runCatching {
+            aiStore.getCollectionSummaries(allowedUris)
+        }.getOrDefault(emptyList())
+        val aiCollectionItems = aiCollectionSummaries.take(10).map { summary ->
+            DiscoveryEntityItem(
+                id = "ai_col_${summary.name}",
+                title = summary.name,
+                subtitle = "${summary.count} items · AI",
+                thumbnailUri = summary.mediaUris.firstOrNull(),
+                queryAction = summary.name,
+                filterAction = SearchFilterState(selectedAiCollection = summary.name)
+            )
+        }
+
+        // 5. Category Shortcuts: Photos, Videos, Documents (OCR text items), AI Analyzed, Favourites
         val categories = mutableListOf<DiscoveryCategory>()
         val photos = nonTrashMedia.filterNot { it.isVideo }
         if (photos.isNotEmpty()) {
@@ -379,6 +412,20 @@ class SearchEngine(private val context: Context) {
             )
         }
 
+        val aiAnalyzedItems = nonTrashMedia.filter { it.uri in aiAnalyses }
+        if (aiAnalyzedItems.isNotEmpty()) {
+            categories.add(
+                DiscoveryCategory(
+                    id = "cat_ai",
+                    title = "AI Analyzed",
+                    itemCount = aiAnalyzedItems.size,
+                    sampleUris = aiAnalyzedItems.take(3).map { it.uri },
+                    queryAction = "AI Analyzed",
+                    filterAction = SearchFilterState(aiFilter = AiFilter.AI_ANALYZED)
+                )
+            )
+        }
+
         if (favourites.isNotEmpty()) {
             val favItems = nonTrashMedia.filter { it.uri in favourites }
             if (favItems.isNotEmpty()) {
@@ -399,7 +446,8 @@ class SearchEngine(private val context: Context) {
             people = peopleItems,
             places = placeItems,
             albums = albumItems,
-            tags = tagItems
+            tags = tagItems,
+            aiCollections = aiCollectionItems
         )
     }
 
@@ -579,6 +627,49 @@ class SearchEngine(private val context: Context) {
             }
         }
 
+        // 8. Matching AI Smart Collections & AI Titles
+        val aiCollections = runCatching {
+            aiStore.getCollectionSummaries(media.map { it.uri }.toSet())
+        }.getOrDefault(emptyList())
+        for (col in aiCollections.filter { it.name.contains(q, ignoreCase = true) }.take(2)) {
+            suggestions.add(
+                SearchSuggestion(
+                    id = "ai_col_${col.name}",
+                    type = SuggestionType.AI_COLLECTION,
+                    title = col.name,
+                    subtitle = "${col.count} items · AI Collection",
+                    thumbnailUri = col.mediaUris.firstOrNull(),
+                    targetQuery = col.name,
+                    targetFilter = SearchFilterState(selectedAiCollection = col.name)
+                )
+            )
+        }
+
+        val aiCompleted = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
+        if (aiCompleted.isNotEmpty()) {
+            val mediaByUri = media.associateBy { it.uri }
+            var aiTitleCount = 0
+            for ((uri, analysis) in aiCompleted) {
+                if (aiTitleCount >= 2) break
+                val item = mediaByUri[uri] ?: continue
+                if (analysis.title.contains(q, ignoreCase = true) ||
+                    analysis.tags.any { it.contains(q, ignoreCase = true) }
+                ) {
+                    suggestions.add(
+                        SearchSuggestion(
+                            id = "ai_item_${item.id}",
+                            type = SuggestionType.AI_COLLECTION,
+                            title = analysis.title.ifBlank { item.name },
+                            subtitle = analysis.suggestedCollection.ifBlank { "AI insight match" },
+                            thumbnailUri = item.uri,
+                            targetQuery = q
+                        )
+                    )
+                    aiTitleCount++
+                }
+            }
+        }
+
         suggestions
     }
 
@@ -733,16 +824,32 @@ class SearchEngine(private val context: Context) {
             }
         }
 
-        // Match query against fields
+        // Filter by AI analysis / smart collection
+        val aiAnalyses = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
+        if (filter.selectedAiCollection != null) {
+            candidateList = candidateList.filter { item ->
+                aiAnalyses[item.uri]?.suggestedCollection?.equals(filter.selectedAiCollection, ignoreCase = true) == true
+            }
+        }
+        candidateList = when (filter.aiFilter) {
+            AiFilter.ALL -> candidateList
+            AiFilter.AI_ANALYZED -> candidateList.filter { it.uri in aiAnalyses }
+            AiFilter.NOT_ANALYZED -> candidateList.filter { it.uri !in aiAnalyses }
+        }
+
+        // Match query against fields (including AI titles, descriptions, tags, collections, key details)
         val matchedList = if (q.isBlank()) {
             candidateList
         } else {
-            // Rank items:
-            // 1. Exact/prefix match on name or confirmed person/place/album
-            // 2. Token match on name/path
-            // 3. Match on OCR text or tags
             val scoredItems = candidateList.mapNotNull { item ->
-                val score = computeMatchScore(item, q, customAlbums, customTagsMap, customPeopleMap)
+                val score = computeMatchScore(
+                    item = item,
+                    query = q,
+                    customAlbums = customAlbums,
+                    customTagsMap = customTagsMap,
+                    customPeopleMap = customPeopleMap,
+                    aiAnalysis = aiAnalyses[item.uri]
+                )
                 if (score > 0) item to score else null
             }
             scoredItems.sortedByDescending { it.second }.map { it.first }
@@ -773,7 +880,8 @@ class SearchEngine(private val context: Context) {
         query: String,
         customAlbums: List<CustomAlbum>,
         customTagsMap: Map<String, Set<String>>,
-        customPeopleMap: Map<String, Set<String>>
+        customPeopleMap: Map<String, Set<String>>,
+        aiAnalysis: AiMediaAnalysis? = null
     ): Int {
         val q = query.lowercase(Locale.ROOT)
         val name = item.name.lowercase(Locale.ROOT)
@@ -806,6 +914,32 @@ class SearchEngine(private val context: Context) {
         // Cached OCR text
         val ocr = TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
         if (!ocr.isNullOrBlank() && ocr.contains(q, ignoreCase = true)) score += 40
+
+        // AI-generated metadata (title, description, tags, suggested collection, key details)
+        if (aiAnalysis != null && aiAnalysis.isCompleted) {
+            if (aiAnalysis.title.contains(q, ignoreCase = true)) score += 85
+            if (aiAnalysis.suggestedCollection.contains(q, ignoreCase = true)) score += 70
+            if (aiAnalysis.tags.any { it.equals(q, ignoreCase = true) }) score += 80
+            else if (aiAnalysis.tags.any { it.contains(q, ignoreCase = true) }) score += 60
+            if (aiAnalysis.description.contains(q, ignoreCase = true)) score += 50
+            if (aiAnalysis.keyDetails.contains(q, ignoreCase = true)) score += 45
+
+            // Multi-word natural query token match across AI fields
+            val tokens = q.split(Regex("\\s+")).filter { it.length >= 3 }
+            if (tokens.size > 1) {
+                val combinedAiText = buildString {
+                    append(aiAnalysis.title).append(' ')
+                    append(aiAnalysis.description).append(' ')
+                    append(aiAnalysis.tags.joinToString(" ")).append(' ')
+                    append(aiAnalysis.suggestedCollection).append(' ')
+                    append(aiAnalysis.keyDetails)
+                }.lowercase(Locale.ROOT)
+                val matchedTokens = tokens.count { combinedAiText.contains(it) }
+                if (matchedTokens > 0) {
+                    score += matchedTokens * 25
+                }
+            }
+        }
 
         return score
     }
@@ -909,7 +1043,8 @@ data class DiscoveryData(
     val people: List<DiscoveryEntityItem>,
     val places: List<DiscoveryEntityItem>,
     val albums: List<DiscoveryEntityItem>,
-    val tags: List<DiscoveryEntityItem>
+    val tags: List<DiscoveryEntityItem>,
+    val aiCollections: List<DiscoveryEntityItem> = emptyList()
 )
 
 data class SearchResultData(

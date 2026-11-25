@@ -734,6 +734,9 @@ fun OverviewTabContent(
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     onSelectEngine: (String) -> Unit = {},
+    onAddTags: (Collection<String>) -> Unit = {},
+    onAddToNamedAlbum: (String) -> Unit = {},
+    onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -926,6 +929,18 @@ fun OverviewTabContent(
                     }
                 }
             }
+        }
+
+        // 2b. AI Insights & Visual Q&A Card
+        item(key = "overview_ai_insights") {
+            AiViewerInsightsCard(
+                item = item,
+                customAlbums = customAlbums,
+                customTags = customTags,
+                onAddTags = onAddTags,
+                onAddToNamedAlbum = onAddToNamedAlbum,
+                onOpenAiSettings = onOpenAiSettings
+            )
         }
 
         // 3. People Section: 6 deterministic states with actionable controls

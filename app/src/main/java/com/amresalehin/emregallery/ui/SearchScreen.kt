@@ -17,7 +17,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.AiStoreEvents
+import com.amresalehin.emregallery.ai.CustomAiClient
+import com.amresalehin.emregallery.data.preferences.AiConfig
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,9 +41,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amresalehin.emregallery.data.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -57,7 +65,10 @@ fun SearchScreen(
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
     onBack: () -> Unit,
-    onOpenMedia: (MediaItem, List<MediaItem>) -> Unit
+    onOpenMedia: (MediaItem, List<MediaItem>) -> Unit,
+    initialFilter: SearchFilterState? = null,
+    onConsumeInitialFilter: () -> Unit = {},
+    onOpenAiSettings: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -72,13 +83,36 @@ fun SearchScreen(
     }
 
     val searchEngine = remember { SearchEngine(context) }
+    val prefsRepo = remember(context) { PreferencesRepository(context.applicationContext) }
+    val aiStore = remember(context) { AiMetadataStore(context.applicationContext) }
+    val aiClient = remember { CustomAiClient() }
+    val aiConfig by prefsRepo.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
 
     // Search & Filter State
-    var filterState by remember { mutableStateOf(SearchFilterState()) }
+    var filterState by remember { mutableStateOf(initialFilter ?: SearchFilterState()) }
     var sortMode by remember { mutableStateOf(SearchSortMode.RELEVANCE) }
     var viewMode by remember { mutableStateOf(SearchViewMode.MASONRY) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
+
+    // Semantic AI Search State
+    var isAiSearching by remember { mutableStateOf(false) }
+    var aiMatchedUris by remember { mutableStateOf<List<String>?>(null) }
+    var aiSearchSummary by remember { mutableStateOf<String?>(null) }
+    var aiSearchError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialFilter) {
+        if (initialFilter != null) {
+            filterState = initialFilter
+            onConsumeInitialFilter()
+        }
+    }
+
+    LaunchedEffect(query) {
+        aiMatchedUris = null
+        aiSearchSummary = null
+        aiSearchError = null
+    }
 
     // Collapsed Date Groups State for State C
     val collapsedGroups = remember { mutableStateMapOf<Long, Boolean>() }
@@ -95,8 +129,12 @@ fun SearchScreen(
         mutableStateOf(SearchResultData(query = "", items = emptyList(), dynamicChips = emptyList(), totalPhotosCount = 0, totalVideosCount = 0))
     }
 
-    // Load Discovery Data when entering Search / changing media
-    LaunchedEffect(allMedia, customAlbums, customTagsMap, customPeopleMap, favourites) {
+    // Load Discovery Data when entering Search / changing media / updating AI metadata
+    var aiUpdateTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        AiStoreEvents.updates.collect { aiUpdateTick++ }
+    }
+    LaunchedEffect(allMedia, customAlbums, customTagsMap, customPeopleMap, favourites, aiUpdateTick) {
         discoveryData = searchEngine.getDiscoveryContent(
             media = allMedia,
             customAlbums = customAlbums,
@@ -141,7 +179,7 @@ fun SearchScreen(
     }
 
     // Compute Search Results for State C or whenever query/filters/sort change
-    LaunchedEffect(query, stage, filterState, sortMode, allMedia, customAlbums, customTagsMap, customPeopleMap, favourites) {
+    LaunchedEffect(query, stage, filterState, sortMode, allMedia, customAlbums, customTagsMap, customPeopleMap, favourites, aiUpdateTick) {
         if (stage == SearchStage.RESULTS || !filterState.isDefault) {
             val results = searchEngine.searchMedia(
                 query = query,
@@ -154,6 +192,34 @@ fun SearchScreen(
                 favourites = favourites
             )
             searchResultsData = results
+        }
+    }
+
+    fun triggerSemanticAiSearch(searchText: String) {
+        val trimmed = searchText.trim()
+        if (trimmed.isEmpty() || isAiSearching) return
+        if (!aiConfig.isConfigured) {
+            onOpenAiSettings?.invoke()
+            return
+        }
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onQueryChange(trimmed)
+        onSubmitSearch(trimmed)
+        isAiSearching = true
+        aiSearchError = null
+        scope.launch {
+            val analyses = withContext(Dispatchers.IO) {
+                aiStore.getAllCompleted().values.toList()
+            }
+            val result = aiClient.semanticSearch(trimmed, analyses, aiConfig)
+            result.onSuccess { match ->
+                aiMatchedUris = match.matchingUris
+                aiSearchSummary = match.summary
+            }.onFailure { err ->
+                aiSearchError = err.message ?: "AI semantic search failed"
+            }
+            isAiSearching = false
         }
     }
 
@@ -291,10 +357,26 @@ fun SearchScreen(
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
                 when {
                     stage == SearchStage.RESULTS || (!filterState.isDefault && stage == SearchStage.DISCOVERY) -> {
-                        // Display matching search results if in results stage or if any filter pills are active
+                        val effectiveResults = remember(searchResultsData, aiMatchedUris, allMedia) {
+                            val semanticUris = aiMatchedUris
+                            if (semanticUris == null) {
+                                searchResultsData
+                            } else {
+                                val mediaMap = allMedia.filterNot { it.isTrashed }.associateBy { it.uri }
+                                val prioritized = semanticUris.mapNotNull { mediaMap[it] }
+                                val prioritizedSet = prioritized.map { it.uri }.toSet()
+                                val combined = prioritized + searchResultsData.items.filterNot { it.uri in prioritizedSet }
+                                searchResultsData.copy(
+                                    items = combined,
+                                    totalPhotosCount = combined.count { !it.isVideo },
+                                    totalVideosCount = combined.count { it.isVideo }
+                                )
+                            }
+                        }
+
                         SubmittedResultsContent(
                             query = query,
-                            resultsData = searchResultsData,
+                            resultsData = effectiveResults,
                             sortMode = sortMode,
                             onSortChange = { sortMode = it },
                             viewMode = viewMode,
@@ -306,8 +388,19 @@ fun SearchScreen(
                                 collapsedGroups[key] = !(collapsedGroups[key] ?: false)
                             },
                             onOpenMedia = { item ->
-                                onOpenMedia(item, searchResultsData.items)
+                                onOpenMedia(item, effectiveResults.items)
                             },
+                            hasAiKey = aiConfig.isConfigured,
+                            isAiSearching = isAiSearching,
+                            aiSearchSummary = aiSearchSummary,
+                            aiSearchError = aiSearchError,
+                            onRunAiSearch = { triggerSemanticAiSearch(query) },
+                            onClearAiSearch = {
+                                aiMatchedUris = null
+                                aiSearchSummary = null
+                                aiSearchError = null
+                            },
+                            onOpenAiSettings = onOpenAiSettings,
                             isDark = isDark
                         )
                     }
@@ -330,6 +423,8 @@ fun SearchScreen(
                                 keyboardController?.hide()
                                 onSubmitSearch(query.trim())
                             },
+                            hasAiKey = aiConfig.isConfigured,
+                            onAskAiQuery = { triggerSemanticAiSearch(query) },
                             isDark = isDark
                         )
                     }
@@ -541,6 +636,7 @@ private fun DiscoveryContent(
                                                     "cat_photos" -> Icons.Default.Image
                                                     "cat_videos" -> Icons.Default.Videocam
                                                     "cat_docs" -> Icons.Default.Description
+                                                    "cat_ai" -> Icons.Outlined.AutoAwesome
                                                     "cat_favs" -> Icons.Default.Favorite
                                                     else -> Icons.Default.Folder
                                                 }
@@ -863,6 +959,93 @@ private fun DiscoveryContent(
                 }
             }
         }
+
+        // 7. AI Smart Collections (Generated by Custom API Key AI)
+        if (discoveryData != null && discoveryData.aiCollections.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = textColor
+                        )
+                        Text(
+                            text = "AI Smart Collections",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            ),
+                            color = textColor
+                        )
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(discoveryData.aiCollections) { aiCol ->
+                            Surface(
+                                modifier = Modifier
+                                    .width(126.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onSelectEntity(aiCol) }
+                                    .testTag("discovery_${aiCol.id}"),
+                                shape = RoundedCornerShape(12.dp),
+                                color = cardSurface,
+                                border = BorderStroke(1.dp, dividerCol)
+                            ) {
+                                Column {
+                                    if (aiCol.thumbnailUri != null) {
+                                        AsyncImage(
+                                            model = remember(aiCol.thumbnailUri, context) {
+                                                ThumbnailUtils.buildThumbnailRequest(context, aiCol.thumbnailUri)
+                                            },
+                                            contentDescription = aiCol.title,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(76.dp),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(76.dp)
+                                                .background(dividerCol.copy(alpha = 0.5f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Outlined.AutoAwesome, null, tint = secondaryText)
+                                        }
+                                    }
+                                    Column(Modifier.padding(8.dp)) {
+                                        Text(
+                                            text = aiCol.title,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = textColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (!aiCol.subtitle.isNullOrBlank()) {
+                                            Text(
+                                                text = aiCol.subtitle,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                color = secondaryText,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -876,11 +1059,14 @@ private fun TypingLiveSuggestionsContent(
     suggestions: List<SearchSuggestion>,
     onSelectSuggestion: (SearchSuggestion) -> Unit,
     onSubmitQuery: () -> Unit,
+    hasAiKey: Boolean = false,
+    onAskAiQuery: () -> Unit = {},
     isDark: Boolean = false
 ) {
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
     val cardSurface = searchCardSurfaceColor(isDark)
+    val dividerCol = searchDividerColor(isDark)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -936,6 +1122,52 @@ private fun TypingLiveSuggestionsContent(
             }
         }
 
+        // Semantic AI Search Row
+        if (query.isNotBlank()) {
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onAskAiQuery)
+                        .testTag("search_ask_ai_typing_row"),
+                    shape = RoundedCornerShape(14.dp),
+                    color = cardSurface,
+                    border = BorderStroke(1.dp, dividerCol)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = "Ask AI",
+                            tint = textColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Ask AI: “$query”",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (hasAiKey) "Semantic search across AI-analyzed photos" else "Tap to add your custom API key",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = secondaryText
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Live Suggestion Rows (Grouped or ordered cleanly, max 1-2 per category)
         items(suggestions, key = { it.id }) { suggestion ->
             SearchSuggestionRow(
@@ -964,18 +1196,47 @@ private fun SubmittedResultsContent(
     collapsedGroups: Map<Long, Boolean>,
     onToggleGroupCollapse: (Long) -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
+    hasAiKey: Boolean = false,
+    isAiSearching: Boolean = false,
+    aiSearchSummary: String? = null,
+    aiSearchError: String? = null,
+    onRunAiSearch: () -> Unit = {},
+    onClearAiSearch: () -> Unit = {},
+    onOpenAiSettings: (() -> Unit)? = null,
     isDark: Boolean = false
 ) {
+    val textColor = searchPrimaryTextColor(isDark)
+    val secondaryText = searchSecondaryTextColor(isDark)
+    val cardSurface = searchCardSurfaceColor(isDark)
+    val dividerCol = searchDividerColor(isDark)
     val results = resultsData.items
     val totalCount = results.size
 
     if (totalCount == 0) {
-        SearchEmptyState(
-            query = query,
-            hasActiveFilters = hasActiveFilters,
-            onResetFilters = onResetFilters,
-            isDark = isDark
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (query.isNotBlank()) {
+                AiSemanticSearchBanner(
+                    query = query,
+                    hasAiKey = hasAiKey,
+                    isAiSearching = isAiSearching,
+                    aiSearchSummary = aiSearchSummary,
+                    aiSearchError = aiSearchError,
+                    onRunAiSearch = onRunAiSearch,
+                    onClearAiSearch = onClearAiSearch,
+                    onOpenAiSettings = onOpenAiSettings,
+                    textColor = textColor,
+                    secondaryText = secondaryText,
+                    cardSurface = cardSurface,
+                    dividerCol = dividerCol
+                )
+            }
+            SearchEmptyState(
+                query = query,
+                hasActiveFilters = hasActiveFilters,
+                onResetFilters = onResetFilters,
+                isDark = isDark
+            )
+        }
         return
     }
 
@@ -989,17 +1250,36 @@ private fun SubmittedResultsContent(
     ) {
         // Results Header: Query title, count, content summary, Sort & View controls
         item {
-            SearchResultsHeader(
-                queryTitle = query.ifBlank { "All results" },
-                totalCount = totalCount,
-                photosCount = resultsData.totalPhotosCount,
-                videosCount = resultsData.totalVideosCount,
-                sortMode = sortMode,
-                onSortChange = onSortChange,
-                viewMode = viewMode,
-                onViewModeChange = onViewModeChange,
-                isDark = isDark
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SearchResultsHeader(
+                    queryTitle = query.ifBlank { "All results" },
+                    totalCount = totalCount,
+                    photosCount = resultsData.totalPhotosCount,
+                    videosCount = resultsData.totalVideosCount,
+                    sortMode = sortMode,
+                    onSortChange = onSortChange,
+                    viewMode = viewMode,
+                    onViewModeChange = onViewModeChange,
+                    isDark = isDark
+                )
+
+                if (query.isNotBlank()) {
+                    AiSemanticSearchBanner(
+                        query = query,
+                        hasAiKey = hasAiKey,
+                        isAiSearching = isAiSearching,
+                        aiSearchSummary = aiSearchSummary,
+                        aiSearchError = aiSearchError,
+                        onRunAiSearch = onRunAiSearch,
+                        onClearAiSearch = onClearAiSearch,
+                        onOpenAiSettings = onOpenAiSettings,
+                        textColor = textColor,
+                        secondaryText = secondaryText,
+                        cardSurface = cardSurface,
+                        dividerCol = dividerCol
+                    )
+                }
+            }
         }
 
         // Date Groups
@@ -1056,6 +1336,99 @@ private fun SubmittedResultsContent(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiSemanticSearchBanner(
+    query: String,
+    hasAiKey: Boolean,
+    isAiSearching: Boolean,
+    aiSearchSummary: String?,
+    aiSearchError: String?,
+    onRunAiSearch: () -> Unit,
+    onClearAiSearch: () -> Unit,
+    onOpenAiSettings: (() -> Unit)?,
+    textColor: Color,
+    secondaryText: Color,
+    cardSurface: Color,
+    dividerCol: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = cardSurface,
+        border = BorderStroke(1.dp, dividerCol),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("search_ai_banner")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = textColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = when {
+                            isAiSearching -> "Searching with AI…"
+                            !aiSearchSummary.isNullOrBlank() -> aiSearchSummary
+                            hasAiKey -> "Semantic search across AI-analyzed photos"
+                            else -> "Set up a custom API key for semantic AI search"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (aiSearchSummary != null) textColor else secondaryText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (isAiSearching) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else if (aiSearchSummary != null) {
+                    TextButton(
+                        onClick = onClearAiSearch,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 40.dp)
+                            .testTag("search_clear_ai_button")
+                    ) {
+                        Text("Reset")
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            if (hasAiKey) onRunAiSearch() else onOpenAiSettings?.invoke()
+                        },
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 40.dp)
+                            .testTag("search_ask_ai_button")
+                    ) {
+                        Text(if (hasAiKey) "Ask AI" else "Set Key")
+                    }
+                }
+            }
+
+            aiSearchError?.let { err ->
+                Text(
+                    text = err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }

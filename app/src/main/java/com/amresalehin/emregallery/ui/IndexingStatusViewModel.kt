@@ -21,6 +21,8 @@ import com.amresalehin.emregallery.face.StageProgress
 import com.amresalehin.emregallery.face.StageState
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
+import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     private val context: Context get() = getApplication()
     private val faceStore = FaceClusterStore(context.applicationContext)
+    private val aiStore = AiMetadataStore(context.applicationContext)
+    private val aiPrefs = AiPreferencesManager(context.applicationContext)
 
     private val _uiState = MutableStateFlow(
         IndexingStatusUiState(
@@ -81,6 +85,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var enteFaceStartProcessed: Int = 0
     private var locationStartTimeMillis: Long = 0L
     private var locationStartProcessed: Int = 0
+    private var aiStartTimeMillis: Long = 0L
+    private var aiStartProcessed: Int = 0
 
     init {
         updateEngineState()
@@ -179,11 +185,18 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val lProcessed = photos.count { locMap.containsKey(it.uri) }
                 val lLocated = locMap.values.count { it.point != null }
 
+                val photoUris = photos.map { it.uri }
+                val aiProcessed = aiStore.getCompletedCount(photoUris)
+                val aiFailedItems = aiStore.getFailedItems(photoUris)
+                val aiConfig = aiPrefs.currentConfig()
+
                 FullCountsResult(
                     oCount, oFiles,
                     bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
-                    lProcessed, lLocated
+                    lProcessed, lLocated,
+                    aiProcessed, aiFailedItems.size, aiFailedItems,
+                    aiConfig.isConfigured, aiConfig.modelId, aiConfig.provider.displayName
                 )
             }
 
@@ -196,6 +209,14 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     ocr = state.ocr.copy(
                         processed = result.ocrProcessed.coerceIn(0, totalPhotos),
                         cachedCount = result.ocrCached
+                    ),
+                    ai = state.ai.copy(
+                        processed = result.aiProcessed.coerceIn(0, totalPhotos),
+                        failedCount = result.aiFailedCount,
+                        failedItems = result.aiFailedItems,
+                        hasApiKey = result.aiConfigured,
+                        modelId = result.aiModelId,
+                        providerName = result.aiProviderName
                     ),
                     faceFinding = state.faceFinding.copy(
                         processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, scopedFaceTotal),
@@ -248,7 +269,13 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val enteSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
         val enteFailedItems: List<Pair<String, String>>,
         val locProcessed: Int,
-        val locLocated: Int
+        val locLocated: Int,
+        val aiProcessed: Int,
+        val aiFailedCount: Int,
+        val aiFailedItems: List<Pair<String, String>>,
+        val aiConfigured: Boolean,
+        val aiModelId: String,
+        val aiProviderName: String
     )
 
     fun retryFailedFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
@@ -313,6 +340,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 _uiState.update { state ->
                     var newOcr = state.ocr
+                    var newAi = state.ai
                     var newFace = state.faceFinding
                     var newEnteFace = state.enteFaceFinding
                     var newLocation = state.location
@@ -421,10 +449,25 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 itemsPerMinute = ipm
                             )
                         }
+                        "ai" -> {
+                            val ipm = if (running && !paused) {
+                                calculateRate(processed - aiStartProcessed, aiStartTimeMillis)
+                            } else 0
+                            newAi = newAi.copy(
+                                isRunning = running,
+                                isPaused = paused,
+                                processed = if (total > 0) processed else newAi.processed,
+                                failedCount = if (failed >= 0) failed else newAi.failedCount,
+                                currentItemName = currentItem,
+                                error = error,
+                                itemsPerMinute = ipm
+                            )
+                        }
                     }
 
                     if (!running) {
                         newOcr = newOcr.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
+                        newAi = newAi.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newFace = newFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newEnteFace = newEnteFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newLocation = newLocation.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
@@ -434,6 +477,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                     state.copy(
                         ocr = newOcr,
+                        ai = newAi,
                         faceFinding = newFace,
                         enteFaceFinding = newEnteFace,
                         location = newLocation,
@@ -482,8 +526,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         }
 
         // Single heavy task constraint: do not run face finding if another heavy job is active
-        if (state.ocr.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading ||
-            state.faceFinding.isRunning || state.enteFaceFinding.isRunning
+        if (state.ocr.isRunning || state.ai.isRunning || state.modelDownload.isDownloading ||
+            state.enteModelDownload.isDownloading || state.faceFinding.isRunning || state.enteFaceFinding.isRunning
         ) return
 
         val scopedFacePhotos = FaceRecognitionSettings.filterMediaForFaceIndexing(context, currentPhotos) { it.relativePath }
@@ -540,8 +584,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         engineId: String = BuffaloLFaceEngine.ENGINE_ID
     ) {
         val state = _uiState.value
-        if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
-            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        if (state.ocr.isRunning || state.ai.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
         ) return
 
         val isInstalled = if (engineId == EnteFaceConstants.ENGINE_ID) state.engine.isEnteInstalled else state.engine.isBuffaloLInstalled
@@ -569,7 +613,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     ) {
         val state = _uiState.value
         if (state.modelDownload.isDownloading || state.enteModelDownload.isDownloading ||
-            state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning
+            state.ocr.isRunning || state.ai.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning
         ) return
 
         if (engineId == EnteFaceConstants.ENGINE_ID) {
@@ -922,8 +966,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
             return
         }
-        if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
-            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        if (state.ocr.isRunning || state.ai.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
         ) return
         if (state.location.processed >= currentPhotos.size) return
 
@@ -956,8 +1000,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
             return
         }
-        if (state.location.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
-            state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        if (state.location.isRunning || state.ai.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
         ) return
         if (state.ocr.processed >= currentPhotos.size) return
 
@@ -991,5 +1035,63 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             engineId = currentOcrEngine,
             mlKitLanguages = currentMlKitLanguages.toList()
         )
+    }
+
+    // --- AI Vision Actions ---
+
+    fun toggleAiIndexing() {
+        val state = _uiState.value
+        if (!state.countsReady || currentPhotos.isEmpty() || !state.ai.hasApiKey) return
+        if (state.ai.isRunning) {
+            val paused = !state.ai.isPaused
+            _uiState.update { it.copy(ai = it.ai.copy(isPaused = paused)) }
+            if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
+            return
+        }
+        if (state.ocr.isRunning || state.location.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        ) return
+        if (state.ai.processed >= currentPhotos.size) return
+
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = state.ai.processed
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = false, retryFailedOnly = false)
+    }
+
+    fun stopAiIndexing() {
+        IndexingForegroundService.cancel(context)
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")) }
+    }
+
+    fun clearAndReindexAi() {
+        val state = _uiState.value
+        if (!state.ai.hasApiKey) return
+        if (state.ocr.isRunning || state.location.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        ) return
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = 0
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, processed = 0, failedCount = 0, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = true, retryFailedOnly = false)
+    }
+
+    fun retryFailedAi() {
+        val state = _uiState.value
+        if (!state.ai.hasApiKey || state.ai.isRunning) return
+        if (state.ocr.isRunning || state.location.isRunning || state.faceFinding.isRunning ||
+            state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
+        ) return
+        aiStartTimeMillis = System.currentTimeMillis()
+        aiStartProcessed = state.ai.processed
+        _uiState.update { it.copy(ai = it.ai.copy(isRunning = true, isPaused = false, error = null)) }
+        IndexingForegroundService.startAi(context, rescanAll = false, retryFailedOnly = true)
+    }
+
+    fun clearAiCache() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { aiStore.clearAll() }
+            refreshCounts()
+        }
     }
 }

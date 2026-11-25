@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import com.amresalehin.emregallery.data.preferences.AiConfig
+import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
+import com.amresalehin.emregallery.data.preferences.AiProvider
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode
 import com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality
@@ -21,6 +24,7 @@ val Context.galleryDataStore: DataStore<Preferences> by preferencesDataStore(nam
  * - [vaultPrefs]: Security, locked folder PIN hash, and biometrics
  * - [ocrPrefs]: OCR models, languages, and engines
  * - [mediaPrefs]: Albums, tags, people, favorites, trash bin, archive, and search history
+ * - [aiPrefs]: Custom API key AI configuration & Shots Studio-style smart organization
  */
 class PreferencesRepository(context: Context) {
 
@@ -29,6 +33,7 @@ class PreferencesRepository(context: Context) {
     private val ocrPrefs = OcrPreferencesManager(context)
     private val mediaPrefs = MediaCollectionsPreferencesManager(context)
     val downloaderPrefs = DownloaderPreferencesManager(context)
+    val aiPrefs = AiPreferencesManager(context)
 
     // --- Onboarding & UI Navigation ---
     fun isWelcomeCompletedSync(): Boolean = uiPrefs.isWelcomeCompletedSync()
@@ -101,7 +106,22 @@ class PreferencesRepository(context: Context) {
     suspend fun addRecentSearch(query: String) = mediaPrefs.addRecentSearch(query)
     suspend fun clearRecentSearches() = mediaPrefs.clearRecentSearches()
     suspend fun addTagForMedia(uri: String, tag: String) = mediaPrefs.addTagForMedia(uri, tag)
+    suspend fun addTagsForMedia(uri: String, tags: Collection<String>) = mediaPrefs.addTagsForMedia(uri, tags)
+    suspend fun ensureAlbumAndAddMedia(albumName: String, uri: String) = mediaPrefs.ensureAlbumAndAddMedia(albumName, uri)
     suspend fun addPersonForMedia(uri: String, person: String) = mediaPrefs.addPersonForMedia(uri, person)
+
+    // --- Custom API Key AI ---
+    val aiConfig: Flow<AiConfig> get() = aiPrefs.aiConfig
+    suspend fun setAiEnabled(enabled: Boolean) = aiPrefs.setEnabled(enabled)
+    suspend fun setAiProvider(provider: AiProvider) = aiPrefs.setProvider(provider)
+    suspend fun setAiApiKey(apiKey: String) = aiPrefs.setApiKey(apiKey)
+    suspend fun setAiModelId(modelId: String) = aiPrefs.setModelId(modelId)
+    suspend fun setAiCustomBaseUrl(baseUrl: String) = aiPrefs.setCustomBaseUrl(baseUrl)
+    suspend fun setAiAutoApplyTags(enabled: Boolean) = aiPrefs.setAutoApplyTags(enabled)
+    suspend fun setAiAutoOrganizeCollections(enabled: Boolean) = aiPrefs.setAutoOrganizeCollections(enabled)
+    suspend fun setAiIncludeOcrContext(enabled: Boolean) = aiPrefs.setIncludeOcrContext(enabled)
+    suspend fun setAiCustomPromptInstructions(instructions: String) = aiPrefs.setCustomPromptInstructions(instructions)
+    suspend fun setAiBatchDelayMs(delayMs: Long) = aiPrefs.setBatchDelayMs(delayMs)
 
     // --- Media Downloader Customizability ---
     val videoQualityCap: Flow<DownloaderVideoQuality> get() = downloaderPrefs.videoQualityCap

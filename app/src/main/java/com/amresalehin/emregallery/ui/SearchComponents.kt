@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -500,6 +501,29 @@ fun SearchFilterChipsRow(
             dividerCol = dividerCol
         )
 
+        // 10b. AI ANALYZED Pill
+        val isAiSelected = filterState.aiFilter == AiFilter.AI_ANALYZED
+        SearchFilterPill(
+            label = "AI Analyzed",
+            isSelected = isAiSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        aiFilter = if (isAiSelected) AiFilter.ALL else AiFilter.AI_ANALYZED
+                    )
+                )
+            },
+            icon = Icons.Outlined.AutoAwesome,
+            contentDescription = "AI Analyzed",
+            showLabel = true,
+            testTag = "filter_pill_ai_analyzed",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
         // 11. Dynamic Entity Chips (Strictly derived from matching results)
         dynamicChips.forEach { chip ->
             val isChipSelected = when (chip.kind) {
@@ -886,6 +910,7 @@ fun SearchSuggestionRow(
                             SuggestionType.FILE -> Icons.Default.Image
                             SuggestionType.TAG -> Icons.Default.Tag
                             SuggestionType.DOCUMENT -> Icons.Default.Description
+                            SuggestionType.AI_COLLECTION -> Icons.Outlined.AutoAwesome
                         }
                         Icon(icon, contentDescription = null, tint = secondaryText, modifier = Modifier.size(20.dp))
                     }
@@ -1131,6 +1156,45 @@ fun SearchAdvancedFilterSheet(
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     ),
                                     color = textColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // AI Analysis Filter
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "AI Vision Analysis",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = textColor
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AiFilter.entries.forEach { aiOpt ->
+                        val selected = draftFilter.aiFilter == aiOpt
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { draftFilter = draftFilter.copy(aiFilter = aiOpt) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) selectedSurface else barSurface,
+                            border = BorderStroke(1.dp, if (selected) textColor.copy(alpha = 0.4f) else Color.Transparent)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = aiOpt.label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = textColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }

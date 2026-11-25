@@ -116,6 +116,9 @@ fun ViewerScreen(
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
+    onAddTags: (Collection<String>) -> Unit = { tags -> tags.forEach(onAddTag) },
+    onAddToNamedAlbum: (String) -> Unit = {},
+    onOpenAiSettings: (() -> Unit)? = null,
     transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) }
 ) {
     val context = LocalContext.current
@@ -729,7 +732,10 @@ fun ViewerScreen(
                     defaultOcrLanguages = defaultOcrLanguages,
                     defaultOcrModel = defaultOcrModel,
                     defaultMlKitLanguages = defaultMlKitLanguages,
-                    onOpenPerson = onOpenPerson
+                    onOpenPerson = onOpenPerson,
+                    onAddTags = onAddTags,
+                    onAddToNamedAlbum = onAddToNamedAlbum,
+                    onOpenAiSettings = onOpenAiSettings
                 )
             }
 

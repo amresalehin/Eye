@@ -52,6 +52,7 @@ import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.MediaSnapshotCache
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.data.SearchFilterState
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
@@ -108,6 +109,7 @@ fun GalleryApp(
     var searchQuery by remember { mutableStateOf("") }
     var submittedQuery by remember { mutableStateOf("") }
     var searchVideosOnly by remember { mutableStateOf(false) }
+    var pendingSearchFilter by remember { mutableStateOf<SearchFilterState?>(null) }
     var albumFilter by remember { mutableStateOf<String?>(null) }
     val favourites by prefs.favourites.collectAsStateWithLifecycle(initialValue = emptySet())
     val hidden by prefs.hidden.collectAsStateWithLifecycle(initialValue = emptySet())
@@ -753,6 +755,7 @@ fun GalleryApp(
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
+                Destination.AI_SETTINGS,
                 Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS
@@ -1007,7 +1010,14 @@ fun GalleryApp(
                             showCreateAlbumDialog = true
                         },
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
-                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
+                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } },
+                        onOpenAiCollection = { colName ->
+                            pendingSearchFilter = SearchFilterState(selectedAiCollection = colName)
+                            searchQuery = colName
+                            submittedQuery = colName
+                            searchStage = SearchStage.RESULTS
+                            navigateTo(Destination.SEARCH)
+                        }
                     )
                     }
                     }
@@ -1296,6 +1306,7 @@ fun GalleryApp(
                         onRefresh = { refreshMedia() },
                         onSettings = { label ->
                             when (label) {
+                                "AI & API Key" -> navigateTo(Destination.AI_SETTINGS)
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
@@ -1348,6 +1359,9 @@ fun GalleryApp(
                         onOpenMap = {
                             navigateTo(Destination.MAP)
                         },
+                        onOpenAiSettings = {
+                            navigateTo(Destination.AI_SETTINGS)
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
@@ -1384,6 +1398,13 @@ fun GalleryApp(
                             }
                             scope.launch { prefs.setMlKitLanguages(updated) }
                         },
+                        onBack = { performBackNavigation() }
+                    )
+                    Destination.AI_SETTINGS -> AiSettingsScreen(
+                        totalPhotos = media.count {
+                            !it.isVideo && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive
+                        },
+                        onOpenBatchIndexing = { navigateTo(Destination.INDEXING_STATUS) },
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(
@@ -1501,7 +1522,10 @@ fun GalleryApp(
                             },
                             onOpenMedia = { item, currentList ->
                                 openMediaInViewer(item, currentList)
-                            }
+                            },
+                            initialFilter = pendingSearchFilter,
+                            onConsumeInitialFilter = { pendingSearchFilter = null },
+                            onOpenAiSettings = { navigateTo(Destination.AI_SETTINGS) }
                         )
                     }
                     Destination.VIEWER -> {
@@ -1538,6 +1562,17 @@ fun GalleryApp(
                 customTags = customTagsMap[currentItem.uri] ?: emptySet(),
                 customPeople = customPeopleMap[currentItem.uri] ?: emptySet(),
                 onAddTag = { tag -> scope.launch { prefs.addTagForMedia(currentItem.uri, tag) } },
+                onAddTags = { tags -> scope.launch { prefs.addTagsForMedia(currentItem.uri, tags) } },
+                onAddToNamedAlbum = { albumName ->
+                    scope.launch {
+                        prefs.ensureAlbumAndAddMedia(albumName, currentItem.uri)
+                        snackbarHostState.showSnackbar("Added to $albumName", duration = SnackbarDuration.Short)
+                    }
+                },
+                onOpenAiSettings = {
+                    showDetails = false
+                    navigateTo(Destination.AI_SETTINGS, rememberPrevious = true, newSelectedMedia = null)
+                },
                 onAddPerson = { person -> scope.launch { prefs.addPersonForMedia(currentItem.uri, person) } },
                 onToggleControls = { showViewerControls = !showViewerControls },
                 onToggleDetails = { showDetails = !showDetails; showViewerControls = true },

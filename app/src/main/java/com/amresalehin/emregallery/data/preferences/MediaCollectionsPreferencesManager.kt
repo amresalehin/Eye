@@ -308,20 +308,45 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
     }
 
     suspend fun addTagForMedia(uri: String, tag: String) {
-        val trimmed = tag.trim()
-        if (trimmed.isEmpty()) return
+        addTagsForMedia(uri, listOf(tag))
+    }
+
+    suspend fun addTagsForMedia(uri: String, tags: Collection<String>) {
+        val cleaned = tags.map { it.trim().removePrefix("#") }.filter { it.isNotEmpty() }.distinct()
+        if (cleaned.isEmpty()) return
         context.galleryDataStore.edit { prefs ->
             val raw = prefs[mediaTagsKey] ?: "{}"
             val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
             val arr = obj.optJSONArray(uri) ?: JSONArray()
-            val existing = mutableSetOf<String>()
+            val existing = linkedSetOf<String>()
             for (i in 0 until arr.length()) existing.add(arr.getString(i))
-            if (existing.add(trimmed)) {
-                val newArr = JSONArray(existing)
+            if (existing.addAll(cleaned)) {
+                val newArr = JSONArray(existing.toList())
                 obj.put(uri, newArr)
                 prefs[mediaTagsKey] = obj.toString()
             }
         }
+    }
+
+    suspend fun ensureAlbumAndAddMedia(albumName: String, uri: String) {
+        val trimmed = albumName.trim()
+        if (trimmed.isEmpty() || uri.isBlank()) return
+        val current = customAlbums.first()
+        val existing = current.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
+        val updated = if (existing != null) {
+            if (uri in existing.mediaUris) return
+            current.map {
+                if (it.id == existing.id) it.copy(mediaUris = it.mediaUris + uri) else it
+            }
+        } else {
+            current + CustomAlbum(
+                id = UUID.randomUUID().toString(),
+                name = trimmed,
+                parentPath = "",
+                mediaUris = setOf(uri)
+            )
+        }
+        saveCustomAlbums(updated)
     }
 
     suspend fun addPersonForMedia(uri: String, person: String) {

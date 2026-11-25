@@ -53,6 +53,7 @@ fun IndexingStatusScreen(
     onToggleLanguage: ((String) -> Unit)? = null,
     onToggleMlKitLanguage: ((String) -> Unit)? = null,
     onOpenMap: (() -> Unit)? = null,
+    onOpenAiSettings: (() -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
 ) {
@@ -160,6 +161,22 @@ fun IndexingStatusScreen(
                         }
                     }
                 }
+            )
+
+            // 1b. AI Vision Batch Indexing Card
+            AiIndexingCard(
+                totalPhotos = uiState.totalPhotos,
+                aiState = uiState.ai,
+                countsReady = uiState.countsReady,
+                cardBackground = cardBackground,
+                cardBorder = cardBorder,
+                numberFormat = numberFormat,
+                onToggleAi = viewModel::toggleAiIndexing,
+                onStopAi = viewModel::stopAiIndexing,
+                onReindexAi = viewModel::clearAndReindexAi,
+                onRetryFailedAi = viewModel::retryFailedAi,
+                onClearCache = viewModel::clearAiCache,
+                onOpenAiSettings = onOpenAiSettings
             )
 
             // 2. Face Recognition (Finding & Clustering) Card

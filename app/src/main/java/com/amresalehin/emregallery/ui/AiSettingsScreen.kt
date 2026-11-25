@@ -202,6 +202,12 @@ fun AiSettingsScreen(
                                     IconButton(
                                         onClick = {
                                             isCreatingProvider = false
+                                            providerNameInput = provider.name
+                                            baseUrlInput = provider.baseUrl
+                                            apiKeyInput = provider.apiKey
+                                            modelInput = provider.modelId
+                                            availableModels = emptyList()
+                                            modelFetchError = null
                                             isAiSetupExpanded = true
                                             scope.launch {
                                                 prefs.selectAiProvider(provider.id)

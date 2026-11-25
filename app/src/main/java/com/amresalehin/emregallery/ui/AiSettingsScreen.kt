@@ -323,86 +323,100 @@ fun AiSettingsScreen(
                                     .testTag("ai_api_key_input")
                             )
     
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedButton(
-                                        onClick = { isModelMenuExpanded = true },
-                                        enabled = availableModels.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .testTag("ai_model_id_input")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = modelInput.ifBlank { "Select a model" },
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                color = if (modelInput.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
-                                                else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose model")
-                                        }
-                                    }
-                                    DropdownMenu(
-                                        expanded = isModelMenuExpanded,
-                                        onDismissRequest = { isModelMenuExpanded = false },
-                                        modifier = Modifier.heightIn(max = 320.dp)
-                                    ) {
-                                        availableModels.forEach { model ->
-                                            DropdownMenuItem(
-                                                text = { Text(model, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                                onClick = {
-                                                    modelInput = model
-                                                    isModelMenuExpanded = false
-                                                    capabilityReport = null
-                                                    testError = null
-                                                    actionFeedback = null
-                                                    testedEndpointSignature = null
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedButton(
                                     onClick = {
-                                        isFetchingModels = true
-                                        modelFetchError = null
-                                        scope.launch {
-                                            val fetchConfig = config.copy(
-                                                baseUrl = baseUrlInput.trim().trimEnd('/'),
-                                                apiKey = apiKeyInput.trim()
-                                            )
-                                            aiClient.fetchAvailableModels(fetchConfig)
-                                                .onSuccess { models ->
-                                                    availableModels = models
-                                                    if (modelInput !in models) modelInput = ""
-                                                    modelFetchError = null
-                                                }
-                                                .onFailure { error ->
-                                                    modelFetchError = error.message ?: "Could not fetch models"
-                                                }
-                                            isFetchingModels = false
+                                        if (availableModels.isEmpty()) {
+                                            isFetchingModels = true
+                                            modelFetchError = null
+                                            scope.launch {
+                                                val fetchConfig = config.copy(
+                                                    baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                    apiKey = apiKeyInput.trim()
+                                                )
+                                                aiClient.fetchAvailableModels(fetchConfig)
+                                                    .onSuccess { models ->
+                                                        availableModels = models
+                                                        if (modelInput !in models) modelInput = ""
+                                                        modelFetchError = null
+                                                        if (models.isNotEmpty()) isModelMenuExpanded = true
+                                                    }
+                                                    .onFailure { error ->
+                                                        modelFetchError = error.message ?: "Could not fetch models"
+                                                    }
+                                                isFetchingModels = false
+                                            }
+                                        } else {
+                                            isModelMenuExpanded = true
                                         }
                                     },
-                                    enabled = !isFetchingModels && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    enabled = !isFetchingModels && (
+                                        availableModels.isNotEmpty() ||
+                                            (baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank())
+                                        ),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp)
+                                        .testTag("ai_model_id_input")
                                 ) {
-                                    if (isFetchingModels) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(Modifier.width(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        if (isFetchingModels) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                                Text("Fetching models…")
+                                            }
+                                        } else {
+                                            Text(
+                                                text = when {
+                                                    availableModels.isNotEmpty() && modelInput.isNotBlank() -> modelInput
+                                                    availableModels.isNotEmpty() -> "Select model"
+                                                    else -> "Fetch models"
+                                                },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = if (availableModels.isEmpty() || modelInput.isBlank())
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Icon(
+                                                imageVector = if (availableModels.isEmpty()) Icons.Default.Refresh
+                                                else Icons.Default.ArrowDropDown,
+                                                contentDescription = if (availableModels.isEmpty()) "Fetch models" else "Select model"
+                                            )
+                                        }
                                     }
-                                    Text(if (isFetchingModels) "Fetching models…" else "Fetch models")
                                 }
+                                DropdownMenu(
+                                    expanded = isModelMenuExpanded,
+                                    onDismissRequest = { isModelMenuExpanded = false },
+                                    modifier = Modifier.heightIn(max = 320.dp)
+                                ) {
+                                    availableModels.forEach { model ->
+                                        DropdownMenuItem(
+                                            text = { Text(model, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                            onClick = {
+                                                modelInput = model
+                                                isModelMenuExpanded = false
+                                                capabilityReport = null
+                                                testError = null
+                                                actionFeedback = null
+                                                testedEndpointSignature = null
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                                 modelFetchError?.let { message ->
                                     Text(
                                         text = message,

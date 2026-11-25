@@ -6,9 +6,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -38,12 +36,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AiViewerInsightsCard(
     item: MediaItem,
     customAlbums: List<CustomAlbum>,
-    customTags: Set<String>,
     onAddTags: (Collection<String>) -> Unit,
     onAddToNamedAlbum: (String) -> Unit,
     onOpenAiSettings: (() -> Unit)? = null,
@@ -289,7 +285,7 @@ fun AiViewerInsightsCard(
                             )
                         }
 
-                        if (currentAnalysis.suggestedCollection.isNotBlank() || currentAnalysis.tags.isNotEmpty()) {
+                        if (currentAnalysis.suggestedCollection.isNotBlank()) {
                             HorizontalDivider(
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
@@ -333,71 +329,6 @@ fun AiViewerInsightsCard(
                             }
                         }
 
-                        if (currentAnalysis.tags.isNotEmpty()) {
-                            val unsavedTags = currentAnalysis.tags.filterNot { tag ->
-                                customTags.any { it.equals(tag, ignoreCase = true) }
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                currentAnalysis.tags.forEach { tag ->
-                                    val isSaved = customTags.any { it.equals(tag, ignoreCase = true) }
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                        ),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable(enabled = !isSaved) { onAddTags(listOf(tag)) }
-                                    ) {
-                                        Text(
-                                            text = tag,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (isSaved) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-                                if (unsavedTags.isNotEmpty()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable { onAddTags(unsavedTags) }
-                                            .testTag("viewer_ai_save_all_tags_button")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Add,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(14.dp),
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                            Text(
-                                                text = "Save tags",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }

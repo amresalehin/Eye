@@ -233,31 +233,49 @@ class AiPreferencesManager(private val context: Context) {
         saveEndpointConfig(config.baseUrl, config.apiKey, modelId)
     }
 
-    suspend fun saveEndpointConfig(baseUrl: String, apiKey: String, modelId: String) {
+    suspend fun saveProviderConfig(
+        providerId: String,
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        modelId: String
+    ): String {
+        val cleanName = name.trim()
+        require(cleanName.isNotEmpty()) { "Enter a provider name." }
+        require(baseUrl.isNotBlank() && apiKey.isNotBlank() && modelId.isNotBlank()) {
+            "Complete the endpoint, API key, and model before saving."
+        }
+        var savedId = providerId
         context.galleryDataStore.edit { prefs ->
             val profiles = decodeProfiles(prefs[aiProfilesKey]).ifEmpty {
                 listOfNotNull(legacyProfile(prefs))
             }.toMutableList()
-            val selectedId = prefs[aiActiveProfileIdKey]
-                ?.takeIf { id -> profiles.any { it.id == id } }
-                ?: profiles.firstOrNull()?.id
-                ?: "legacy"
-            val index = profiles.indexOfFirst { it.id == selectedId }
+            var index = profiles.indexOfFirst { it.id == providerId }
+            if (index < 0) {
+                savedId = UUID.randomUUID().toString()
+                index = -1
+            }
             val updated = AiProviderProfile(
-                id = selectedId,
-                name = profiles.getOrNull(index)?.name ?: "Default provider",
+                id = savedId,
+                name = cleanName,
                 baseUrl = baseUrl.trim().trimEnd('/'),
                 apiKey = apiKey.trim(),
                 modelId = modelId.trim()
             )
             if (index >= 0) profiles[index] = updated else profiles.add(updated)
             prefs[aiProfilesKey] = encodeProfiles(profiles)
-            prefs[aiActiveProfileIdKey] = selectedId
+            prefs[aiActiveProfileIdKey] = savedId
             // Keep legacy values synchronized for downgrade compatibility.
             prefs[aiBaseUrlKey] = updated.baseUrl
             prefs[aiApiKeyKey] = updated.apiKey
             prefs[aiModelIdKey] = updated.modelId
         }
+        return savedId
+    }
+
+    suspend fun saveEndpointConfig(baseUrl: String, apiKey: String, modelId: String) {
+        val current = currentConfig()
+        saveProviderConfig(current.providerId, current.providerName, baseUrl, apiKey, modelId)
     }
 
     suspend fun setAutoApplyTags(enabled: Boolean) {

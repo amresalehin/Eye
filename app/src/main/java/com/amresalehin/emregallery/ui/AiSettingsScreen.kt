@@ -62,6 +62,7 @@ fun AiSettingsScreen(
     var capabilityReport by remember { mutableStateOf<EndpointCapabilityReport?>(null) }
     var testError by remember { mutableStateOf<String?>(null) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
+    var saveError by remember { mutableStateOf<String?>(null) }
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -80,21 +81,21 @@ fun AiSettingsScreen(
     val endpointTestPassed = testedEndpointSignature == endpointSignature
     val canTest = !isTestingCapabilities && !isSavingConfig &&
         providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
-    val actionLabel = when {
+    val testActionLabel = when {
         isTestingCapabilities -> "Testing…"
-        isSavingConfig -> "Saving…"
-        actionFeedback == "Saved" -> "Saved"
-        testError != null && endpointTestPassed -> "Save failed · Retry"
         testError != null || capabilityReport?.fullyReady == false -> "Test failed · Retry"
-        endpointTestPassed -> "Save"
+        endpointTestPassed -> "Tested"
         else -> "Test"
     }
-    val actionEnabled = when {
-        isTestingCapabilities || isSavingConfig -> false
-        actionFeedback == "Saved" -> false
-        endpointTestPassed -> true
-        else -> canTest
+    val saveActionLabel = when {
+        isSavingConfig -> "Saving…"
+        actionFeedback == "Saved" -> "Saved"
+        saveError != null -> "Save failed · Retry"
+        else -> "Save"
     }
+    val testButtonEnabled = canTest && actionFeedback != "Saved"
+    val saveButtonEnabled = endpointTestPassed && !isTestingCapabilities &&
+        !isSavingConfig && actionFeedback != "Saved"
 
     Box(
         modifier = Modifier
@@ -159,6 +160,7 @@ fun AiSettingsScreen(
                                             capabilityReport = null
                                             testError = null
                                             actionFeedback = null
+                                            saveError = null
                                             testedEndpointSignature = null
                                         }
                                     }
@@ -210,6 +212,7 @@ fun AiSettingsScreen(
                                                 capabilityReport = null
                                                 testError = null
                                                 actionFeedback = null
+                                            saveError = null
                                                 testedEndpointSignature = null
                                             }
                                         },
@@ -259,6 +262,7 @@ fun AiSettingsScreen(
                                 capabilityReport = null
                                 testError = null
                                 actionFeedback = null
+                                            saveError = null
                                 testedEndpointSignature = null
                                 isAiSetupExpanded = true
                             },
@@ -289,6 +293,7 @@ fun AiSettingsScreen(
                                 onValueChange = {
                                     providerNameInput = it
                                     actionFeedback = null
+                                            saveError = null
                                 },
                                 placeholder = { Text("Name") },
                                 singleLine = true,
@@ -305,6 +310,7 @@ fun AiSettingsScreen(
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
+                                            saveError = null
                                 },
                                 label = { Text("Base URL") },
                                 placeholder = { Text("https://api.openai.com/v1") },
@@ -322,6 +328,7 @@ fun AiSettingsScreen(
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
+                                            saveError = null
                                 },
                                 label = { Text("API Key") },
                                 singleLine = true,
@@ -435,6 +442,7 @@ fun AiSettingsScreen(
                                                 capabilityReport = null
                                                 testError = null
                                                 actionFeedback = null
+                                            saveError = null
                                                 testedEndpointSignature = null
                                             }
                                         )
@@ -450,98 +458,143 @@ fun AiSettingsScreen(
                                 }
                             }
     
-                            // One full-width action advances from Test to Save after a successful test.
-                            Button(
-                                onClick = {
-                                    val cleanUrl = baseUrlInput.trim().trimEnd('/')
-                                    val cleanKey = apiKeyInput.trim()
-                                    val cleanModel = modelInput.trim()
-                                    val cleanPrompt = promptInput.trim()
-                                    if (endpointTestPassed) {
-                                        isSavingConfig = true
-                                        scope.launch {
-                                            runCatching {
-                                                prefs.saveAiProviderConfig(
-                                                    providerId = if (isCreatingProvider) "__new_provider__" else config.providerId,
-                                                    name = providerNameInput,
-                                                    baseUrl = cleanUrl,
-                                                    apiKey = cleanKey,
-                                                    modelId = cleanModel
-                                                )
-                                                prefs.setAiCustomPromptInstructions(cleanPrompt)
-                                            }.onSuccess {
-                                                isCreatingProvider = false
-                                                actionFeedback = "Saved"
-                                                testError = null
-                                            }.onFailure { error ->
-                                                actionFeedback = null
-                                                testError = error.message ?: "Could not save AI provider"
-                                            }
-                                            isSavingConfig = false
-                                        }
-                                    } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
                                         isTestingCapabilities = true
                                         capabilityReport = null
                                         testError = null
+                                        saveError = null
                                         actionFeedback = null
                                         val testConfig = config.copy(
-                                            baseUrl = cleanUrl,
-                                            apiKey = cleanKey,
-                                            modelId = cleanModel
+                                            baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                            apiKey = apiKeyInput.trim(),
+                                            modelId = modelInput.trim()
                                         )
                                         scope.launch {
-                                            val result = aiClient.testEndpointCapabilities(testConfig)
-                                            isTestingCapabilities = false
-                                            result.onSuccess { report ->
-                                                capabilityReport = report
-                                                testedEndpointSignature = if (report.fullyReady) {
-                                                    endpointSignature
-                                                } else {
-                                                    null
-                                                }
-                                            }.onFailure { err ->
-                                                testError = err.message ?: "Endpoint test failed"
+                                            try {
+                                                aiClient.testEndpointCapabilities(testConfig)
+                                                    .onSuccess { report ->
+                                                        capabilityReport = report
+                                                        testedEndpointSignature = if (report.fullyReady) {
+                                                            endpointSignature
+                                                        } else {
+                                                            null
+                                                        }
+                                                    }
+                                                    .onFailure { err ->
+                                                        testError = err.message ?: "Endpoint test failed"
+                                                    }
+                                            } finally {
+                                                isTestingCapabilities = false
                                             }
                                         }
-                                    }
-                                },
-                                enabled = actionEnabled,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 18.dp)
-                                    .height(56.dp)
-                                    .testTag("ai_primary_config_action_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                                    },
+                                    enabled = testButtonEnabled,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(56.dp)
+                                        .testTag("ai_primary_config_action_button")
                                 ) {
-                                    val actionStatusIcon = when {
-                                        actionFeedback == "Saved" ||
-                                            (endpointTestPassed && capabilityReport?.fullyReady == true) ->
-                                            Icons.Default.CheckCircle
-                                        testError != null || capabilityReport?.fullyReady == false ->
-                                            Icons.Default.ErrorOutline
-                                        else -> null
-                                    }
-                                    actionStatusIcon?.let { icon ->
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        val testStatusIcon = when {
+                                            endpointTestPassed && capabilityReport?.fullyReady == true ->
+                                                Icons.Default.CheckCircle
+                                            testError != null || capabilityReport?.fullyReady == false ->
+                                                Icons.Default.ErrorOutline
+                                            else -> null
+                                        }
+                                        testStatusIcon?.let { icon ->
+                                            Icon(
+                                                imageVector = icon,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = testActionLabel,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
                                         )
-                                        Spacer(Modifier.width(8.dp))
                                     }
-                                    Text(
-                                        text = actionLabel,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        isSavingConfig = true
+                                        saveError = null
+                                        scope.launch {
+                                            try {
+                                                runCatching {
+                                                    prefs.saveAiProviderConfig(
+                                                        providerId = if (isCreatingProvider) "__new_provider__" else config.providerId,
+                                                        name = providerNameInput,
+                                                        baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                        apiKey = apiKeyInput.trim(),
+                                                        modelId = modelInput.trim()
+                                                    )
+                                                    prefs.setAiCustomPromptInstructions(promptInput.trim())
+                                                }.onSuccess {
+                                                    isCreatingProvider = false
+                                                    actionFeedback = "Saved"
+                                                    testError = null
+                                                }.onFailure { error ->
+                                                    actionFeedback = null
+                                                    saveError = error.message ?: "Could not save AI provider"
+                                                }
+                                            } finally {
+                                                isSavingConfig = false
+                                            }
+                                        }
+                                    },
+                                    enabled = saveButtonEnabled,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(56.dp)
+                                        .testTag("ai_save_config_action_button")
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        if (actionFeedback == "Saved") {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                        } else if (saveError != null) {
+                                            Icon(
+                                                imageVector = Icons.Default.ErrorOutline,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = saveActionLabel,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
-    
+
                             // Capability details remain visible only when a capability check fails.
                             capabilityReport?.takeUnless { it.fullyReady }?.let { report ->
                                 Surface(
@@ -583,7 +636,7 @@ fun AiSettingsScreen(
                                 }
                             }
     
-                            testError?.let { errMsg ->
+                            (testError ?: saveError)?.let { errMsg ->
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
                                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
@@ -684,6 +737,7 @@ fun AiSettingsScreen(
                     onValueChange = {
                         promptInput = it
                         actionFeedback = null
+                                            saveError = null
                     },
                     label = { Text("Custom prompt") },
                     minLines = 2,
@@ -740,6 +794,7 @@ fun AiSettingsScreen(
                             capabilityReport = null
                             testError = null
                             actionFeedback = null
+                                            saveError = null
                             testedEndpointSignature = null
                         }
                     }

@@ -24,6 +24,7 @@ import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.AiIndexingSettings
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
@@ -530,10 +531,10 @@ class IndexingForegroundService : Service() {
         val aiStore = AiMetadataStore(applicationContext)
         val aiClient = CustomAiClient()
         val prefsRepo = PreferencesRepository(applicationContext)
-        val photos = loadPhotos()
+        val photos = AiIndexingSettings.filterMediaForAiIndexing(applicationContext, loadPhotos()) { it.relativePath }
         try {
             if (rescanAll) {
-                withContext(Dispatchers.IO) { aiStore.clearAll() }
+                withContext(Dispatchers.IO) { aiStore.clearForUris(photos.map { it.uri }) }
             }
             val pending = withContext(Dispatchers.IO) {
                 if (retryFailedOnly) {

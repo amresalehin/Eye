@@ -433,10 +433,10 @@ fun AiSettingsScreen(
                                         enabled = !isFetchingModels &&
                                             baseUrlInput.isNotBlank() &&
                                             (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                        contentPadding = PaddingValues(0.dp),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier
-                                            .height(48.dp)
+                                            .size(48.dp)
                                             .testTag("ai_fetch_models_button")
                                     ) {
                                         if (isFetchingModels) {
@@ -445,7 +445,11 @@ fun AiSettingsScreen(
                                                 strokeWidth = 2.dp
                                             )
                                         } else {
-                                            Text("Fetch")
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Fetch models",
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
                                     }
                                 }

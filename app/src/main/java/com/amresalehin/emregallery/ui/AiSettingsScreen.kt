@@ -241,30 +241,26 @@ fun AiSettingsScreen(
                     .fillMaxWidth()
                     .testTag("ai_unified_config_card")
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { isAiSetupExpanded = !isAiSetupExpanded }
-                    .padding(horizontal = 12.dp)
-                    .testTag("ai_setup_expand_bar"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Add Provider",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Icon(
-                    imageVector = if (isAiSetupExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (isAiSetupExpanded) "Collapse AI setup" else "Expand AI setup",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(76.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    IconButton(
+                        onClick = { isAiSetupExpanded = !isAiSetupExpanded },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("ai_setup_expand_bar")
+                    ) {
+                        Icon(
+                            imageVector = if (isAiSetupExpanded) Icons.Default.Close else Icons.Default.Add,
+                            contentDescription = if (isAiSetupExpanded) "Close provider form" else "Add provider",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
                     if (isAiSetupExpanded) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                         // Provider name is a normal editable field, matching the endpoint fields.

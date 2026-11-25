@@ -120,7 +120,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     @Synchronized
     fun saveAnalysis(analysis: AiMediaAnalysis) {
         val tagsArr = JSONArray().apply {
-            MetadataNameNormalizer.normalizeTags(analysis.tags).forEach(::put)
+            MetadataNameNormalizer.normalizeTags(analysis.tags).forEach { put(it) }
         }
         val collections = normalizeCollectionNames(
             analysis.suggestedCollections.ifEmpty { listOf(analysis.suggestedCollection) }

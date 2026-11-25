@@ -51,7 +51,9 @@ fun AiSettingsScreen(
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
     val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
     var providerNameInput by remember(config.providerId, config.providerName) {
-        mutableStateOf(config.providerName.takeUnless { it == "No provider selected" }.orEmpty())
+        mutableStateOf(config.providerName.takeUnless {
+            it == "No provider selected" || it.equals("New provider", ignoreCase = true)
+        }.orEmpty())
     }
     var baseUrlInput by remember(config.providerId, config.baseUrl) { mutableStateOf(config.baseUrl) }
     var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
@@ -278,8 +280,7 @@ fun AiSettingsScreen(
                                     providerNameInput = it
                                     actionFeedback = null
                                 },
-                                label = { Text("Name") },
-                                placeholder = { Text("e.g. My OpenAI") },
+                                placeholder = { Text("Name") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier

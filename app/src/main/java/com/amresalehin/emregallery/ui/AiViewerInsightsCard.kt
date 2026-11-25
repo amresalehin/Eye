@@ -207,7 +207,7 @@ fun AiViewerInsightsCard(
                     }
                     !aiConfig.hasApiKey -> {
                         Text(
-                            text = "Add your custom Gemini or OpenAI-compatible API key to generate titles, descriptions, smart tags, collections, and visual Q&A.",
+                            text = "Configure a compatible API base URL, key and model to generate titles, descriptions, smart tags, collections, and visual Q&A.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

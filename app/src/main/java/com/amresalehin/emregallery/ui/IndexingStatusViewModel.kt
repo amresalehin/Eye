@@ -196,7 +196,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated,
                     aiProcessed, aiFailedItems.size, aiFailedItems,
-                    aiConfig.isConfigured, aiConfig.modelId, aiConfig.provider.displayName
+                    aiConfig.isConfigured, aiConfig.modelId, "Custom API"
                 )
             }
 

@@ -9,7 +9,6 @@ import android.net.Uri
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import com.amresalehin.emregallery.data.preferences.AiProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,8 +28,8 @@ data class AiSearchMatchResult(
 )
 
 /**
- * Shots Studio-inspired multimodal AI client supporting user-supplied custom API keys
- * for both Google Gemini API and OpenAI-compatible endpoints.
+ * Multimodal AI client using one OpenAI-compatible Chat Completions interface.
+ * Gemini and other providers are configured through their compatible API base URLs.
  */
 class CustomAiClient(
     private val httpClient: OkHttpClient = defaultHttpClient()
@@ -317,20 +316,12 @@ class CustomAiClient(
         config: AiConfig,
         expectJson: Boolean
     ): String {
-        return when (config.provider) {
-            AiProvider.GEMINI -> callGeminiApi(
-                prompt = prompt,
-                jpegBase64 = null,
-                config = config,
-                expectJson = expectJson
-            )
-            AiProvider.OPENAI_COMPATIBLE -> callOpenAiCompatibleApi(
-                prompt = prompt,
-                jpegBase64 = null,
-                config = config,
-                expectJson = expectJson
-            )
-        }
+        return callOpenAiCompatibleApi(
+            prompt = prompt,
+            jpegBase64 = null,
+            config = config,
+            expectJson = expectJson
+        )
     }
 
     private fun executeVisionPrompt(
@@ -339,101 +330,12 @@ class CustomAiClient(
         config: AiConfig,
         expectJson: Boolean
     ): String {
-        return when (config.provider) {
-            AiProvider.GEMINI -> callGeminiApi(
-                prompt = prompt,
-                jpegBase64 = jpegBase64,
-                config = config,
-                expectJson = expectJson
-            )
-            AiProvider.OPENAI_COMPATIBLE -> callOpenAiCompatibleApi(
-                prompt = prompt,
-                jpegBase64 = jpegBase64,
-                config = config,
-                expectJson = expectJson
-            )
-        }
-    }
-
-    private fun callGeminiApi(
-        prompt: String,
-        jpegBase64: String?,
-        config: AiConfig,
-        expectJson: Boolean
-    ): String {
-        val baseUrl = config.customBaseUrl.ifBlank { AiConfig.DEFAULT_GEMINI_BASE_URL }.trimEnd('/')
-        val model = config.modelId.removePrefix("models/")
-        val url = "$baseUrl/v1beta/models/$model:generateContent"
-
-        val parts = JSONArray().apply {
-            if (jpegBase64 != null) {
-                put(
-                    JSONObject().put(
-                        "inline_data",
-                        JSONObject().apply {
-                            put("mime_type", "image/jpeg")
-                            put("data", jpegBase64)
-                        }
-                    )
-                )
-            }
-            put(JSONObject().put("text", prompt))
-        }
-
-        val payload = JSONObject().apply {
-            put(
-                "contents",
-                JSONArray().put(
-                    JSONObject().apply {
-                        put("role", "user")
-                        put("parts", parts)
-                    }
-                )
-            )
-            put(
-                "generationConfig",
-                JSONObject().apply {
-                    put("temperature", 0.2)
-                    if (expectJson) {
-                        put("responseMimeType", "application/json")
-                    }
-                }
-            )
-        }
-
-        val request = Request.Builder()
-            .url(url)
-            .header("x-goog-api-key", config.apiKey)
-            .header("Content-Type", "application/json")
-            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            val bodyStr = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                error(formatHttpError("Gemini", response.code, bodyStr))
-            }
-            val root = JSONObject(bodyStr)
-            val candidates = root.optJSONArray("candidates")
-            val firstCandidate = candidates?.optJSONObject(0)
-            val respParts = firstCandidate?.optJSONObject("content")?.optJSONArray("parts")
-            val textBuilder = StringBuilder()
-            if (respParts != null) {
-                for (i in 0 until respParts.length()) {
-                    val partText = respParts.optJSONObject(i)?.optString("text").orEmpty()
-                    if (partText.isNotEmpty()) textBuilder.append(partText)
-                }
-            }
-            val resultText = textBuilder.toString().trim()
-            if (resultText.isEmpty()) {
-                val finishReason = firstCandidate?.optString("finishReason").orEmpty()
-                error(
-                    if (finishReason.isNotBlank()) "Empty AI response ($finishReason)"
-                    else "Empty response from Gemini API"
-                )
-            }
-            return resultText
-        }
+        return callOpenAiCompatibleApi(
+            prompt = prompt,
+            jpegBase64 = jpegBase64,
+            config = config,
+            expectJson = expectJson
+        )
     }
 
     private fun callOpenAiCompatibleApi(

@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
-import com.amresalehin.emregallery.data.preferences.AiProvider
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode
 import com.amresalehin.emregallery.data.preferences.DownloaderVideoQuality
@@ -113,7 +112,8 @@ class PreferencesRepository(context: Context) {
     // --- Custom API Key AI ---
     val aiConfig: Flow<AiConfig> get() = aiPrefs.aiConfig
     suspend fun setAiEnabled(enabled: Boolean) = aiPrefs.setEnabled(enabled)
-    suspend fun setAiProvider(provider: AiProvider) = aiPrefs.setProvider(provider)
+    suspend fun setAiConfiguration(apiKey: String, modelId: String, baseUrl: String) =
+        aiPrefs.setConfiguration(apiKey, modelId, baseUrl)
     suspend fun setAiApiKey(apiKey: String) = aiPrefs.setApiKey(apiKey)
     suspend fun setAiModelId(modelId: String) = aiPrefs.setModelId(modelId)
     suspend fun setAiCustomBaseUrl(baseUrl: String) = aiPrefs.setCustomBaseUrl(baseUrl)

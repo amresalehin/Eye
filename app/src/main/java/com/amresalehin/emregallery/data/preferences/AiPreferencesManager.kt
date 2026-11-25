@@ -11,22 +11,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-enum class AiProvider(val id: String, val displayName: String) {
-    GEMINI("gemini", "Google Gemini API"),
-    OPENAI_COMPATIBLE("openai_compatible", "OpenAI-Compatible Endpoint");
-
-    companion object {
-        fun fromId(id: String?): AiProvider =
-            entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: GEMINI
-    }
-}
-
 data class AiConfig(
     val enabled: Boolean = true,
-    val provider: AiProvider = AiProvider.GEMINI,
     val apiKey: String = "",
-    val modelId: String = DEFAULT_GEMINI_MODEL,
-    val customBaseUrl: String = "",
+    val modelId: String = DEFAULT_MODEL_ID,
+    val customBaseUrl: String = DEFAULT_API_BASE_URL,
     val autoApplyTags: Boolean = true,
     val autoOrganizeCollections: Boolean = true,
     val includeOcrContext: Boolean = true,
@@ -34,38 +23,31 @@ data class AiConfig(
     val batchDelayMs: Long = 500L
 ) {
     val isConfigured: Boolean
-        get() = enabled && apiKey.isNotBlank() && modelId.isNotBlank()
+        get() = enabled && apiKey.isNotBlank() && modelId.isNotBlank() && customBaseUrl.isNotBlank()
 
     val hasApiKey: Boolean
         get() = apiKey.isNotBlank()
 
     companion object {
-        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-        const val DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
-        const val DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+        const val DEFAULT_MODEL_ID = "gpt-4o-mini"
+        const val DEFAULT_API_BASE_URL = "https://api.openai.com/v1"
 
-        val GEMINI_PRESET_MODELS = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.0-flash"
-        )
-
-        val OPENAI_PRESET_MODELS = listOf(
-            "gpt-4o-mini",
-            "gpt-4o",
-            "gpt-4.1-mini"
-        )
+        // Legacy constants only support migration from earlier native-Gemini configuration.
+        const val LEGACY_GEMINI_MODEL = "gemini-2.5-flash"
+        const val LEGACY_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
+        const val GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+        const val UNIFIED_API_PROVIDER_ID = "unified"
     }
 }
 
 /**
- * Persists user-supplied custom API key AI configuration in DataStore.
+ * Stores one provider-independent API configuration. The old ai_provider preference is read
+ * only to migrate older installations; it is not part of the current UI or request client.
  */
 class AiPreferencesManager(private val context: Context) {
 
     private val aiEnabledKey = booleanPreferencesKey("ai_enabled")
-    private val aiProviderKey = stringPreferencesKey("ai_provider")
+    private val legacyAiProviderKey = stringPreferencesKey("ai_provider")
     private val aiApiKeyKey = stringPreferencesKey("ai_api_key")
     private val aiModelIdKey = stringPreferencesKey("ai_model_id")
     private val aiCustomBaseUrlKey = stringPreferencesKey("ai_custom_base_url")
@@ -76,18 +58,35 @@ class AiPreferencesManager(private val context: Context) {
     private val aiBatchDelayMsKey = longPreferencesKey("ai_batch_delay_ms")
 
     val aiConfig: Flow<AiConfig> = context.galleryDataStore.data.map { prefs ->
-        val provider = AiProvider.fromId(prefs[aiProviderKey])
-        val defaultModel = if (provider == AiProvider.GEMINI) {
-            AiConfig.DEFAULT_GEMINI_MODEL
+        val legacyProvider = prefs[legacyAiProviderKey]?.trim()?.lowercase()
+        val savedApiKey = prefs[aiApiKeyKey]?.trim().orEmpty()
+        val savedModelId = prefs[aiModelIdKey]?.trim().orEmpty()
+        val savedBaseUrl = prefs[aiCustomBaseUrlKey]?.trim()?.trimEnd('/').orEmpty()
+
+        // Earlier versions defaulted to Gemini without always saving ai_provider.
+        val isLegacyGemini = legacyProvider == "gemini" ||
+            (legacyProvider.isNullOrBlank() && (
+                savedModelId.startsWith("gemini-", ignoreCase = true) ||
+                    (savedModelId.isBlank() && savedApiKey.isNotBlank())
+                ))
+
+        val effectiveBaseUrl = if (isLegacyGemini) {
+            when {
+                savedBaseUrl.isBlank() || savedBaseUrl == AiConfig.LEGACY_GEMINI_BASE_URL ->
+                    AiConfig.GEMINI_OPENAI_BASE_URL
+                else -> savedBaseUrl
+            }
         } else {
-            AiConfig.DEFAULT_OPENAI_MODEL
+            savedBaseUrl.ifBlank { AiConfig.DEFAULT_API_BASE_URL }
         }
+
         AiConfig(
             enabled = prefs[aiEnabledKey] ?: true,
-            provider = provider,
-            apiKey = prefs[aiApiKeyKey]?.trim() ?: "",
-            modelId = prefs[aiModelIdKey]?.trim()?.ifBlank { defaultModel } ?: defaultModel,
-            customBaseUrl = prefs[aiCustomBaseUrlKey]?.trim() ?: "",
+            apiKey = savedApiKey,
+            modelId = savedModelId.ifBlank {
+                if (isLegacyGemini) AiConfig.LEGACY_GEMINI_MODEL else AiConfig.DEFAULT_MODEL_ID
+            },
+            customBaseUrl = effectiveBaseUrl,
             autoApplyTags = prefs[aiAutoApplyTagsKey] ?: true,
             autoOrganizeCollections = prefs[aiAutoOrganizeCollectionsKey] ?: true,
             includeOcrContext = prefs[aiIncludeOcrContextKey] ?: true,
@@ -102,15 +101,12 @@ class AiPreferencesManager(private val context: Context) {
         context.galleryDataStore.edit { it[aiEnabledKey] = enabled }
     }
 
-    suspend fun setProvider(provider: AiProvider) {
+    suspend fun setConfiguration(apiKey: String, modelId: String, baseUrl: String) {
         context.galleryDataStore.edit { prefs ->
-            prefs[aiProviderKey] = provider.id
-            val currentModel = prefs[aiModelIdKey].orEmpty()
-            if (provider == AiProvider.GEMINI && (currentModel.isBlank() || currentModel in AiConfig.OPENAI_PRESET_MODELS)) {
-                prefs[aiModelIdKey] = AiConfig.DEFAULT_GEMINI_MODEL
-            } else if (provider == AiProvider.OPENAI_COMPATIBLE && (currentModel.isBlank() || currentModel in AiConfig.GEMINI_PRESET_MODELS)) {
-                prefs[aiModelIdKey] = AiConfig.DEFAULT_OPENAI_MODEL
-            }
+            prefs[aiApiKeyKey] = apiKey.trim()
+            prefs[aiModelIdKey] = modelId.trim().ifBlank { AiConfig.DEFAULT_MODEL_ID }
+            prefs[aiCustomBaseUrlKey] = baseUrl.trim().trimEnd('/').ifBlank { AiConfig.DEFAULT_API_BASE_URL }
+            prefs[legacyAiProviderKey] = AiConfig.UNIFIED_API_PROVIDER_ID
         }
     }
 

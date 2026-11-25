@@ -5,7 +5,6 @@ import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,14 +25,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import com.amresalehin.emregallery.data.preferences.AiProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -129,7 +126,7 @@ fun AiSettingsScreen(
                             Text(
                                 text = when {
                                     !config.enabled -> "AI features paused"
-                                    config.isConfigured -> "Configured · ${config.provider.displayName} · test text and vision separately"
+                                    config.isConfigured -> "Configured · ${config.modelId} · test text and vision separately"
                                     else -> "Enter your own API key to analyze & search"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -189,52 +186,11 @@ fun AiSettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        text = "Provider & API Key",
+                        text = "API Configuration",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-
-                    // Provider selector pills
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AiProvider.entries.forEach { provider ->
-                            val selected = config.provider == provider
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable {
-                                        scope.launch { prefs.setAiProvider(provider) }
-                                        connectionStatus = null
-                                    }
-                                    .testTag("ai_provider_${provider.id}")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)
-                                ) {
-                                    Text(
-                                        text = if (provider == AiProvider.GEMINI) "Gemini API" else "OpenAI-Compatible",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
 
                     OutlinedTextField(
                         value = apiKeyInput,
@@ -242,14 +198,8 @@ fun AiSettingsScreen(
                             apiKeyInput = it
                             connectionStatus = null
                         },
-                        label = {
-                            Text(
-                                if (config.provider == AiProvider.GEMINI) "Gemini API Key" else "API Bearer Key"
-                            )
-                        },
-                        placeholder = {
-                            Text(if (config.provider == AiProvider.GEMINI) "AIza..." else "sk-...")
-                        },
+                        label = { Text("API Key") },
+                        placeholder = { Text("Paste provider API key") },
                         singleLine = true,
                         visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                         trailingIcon = {
@@ -270,6 +220,39 @@ fun AiSettingsScreen(
                             .testTag("ai_api_key_input")
                     )
 
+                    OutlinedTextField(
+                        value = modelInput,
+                        onValueChange = {
+                            modelInput = it
+                            connectionStatus = null
+                        },
+                        label = { Text("Model ID") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ai_model_id_input")
+                    )
+
+                    OutlinedTextField(
+                        value = baseUrlInput,
+                        onValueChange = {
+                            baseUrlInput = it
+                            connectionStatus = null
+                        },
+                        label = { Text("API Base URL") },
+                        placeholder = { Text(AiConfig.DEFAULT_API_BASE_URL) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ai_base_url_input")
+                    )
+
+                    Text(
+                        text = "OpenAI-compatible Chat Completions endpoint. Gemini (AI Studio): https://generativelanguage.googleapis.com/v1beta",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -280,7 +263,13 @@ fun AiSettingsScreen(
                                 val pasted = cm?.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
                                 if (pasted.isNotEmpty()) {
                                     apiKeyInput = pasted
-                                    scope.launch { prefs.setAiApiKey(pasted) }
+                                    scope.launch {
+                                        prefs.setAiConfiguration(
+                                            pasted,
+                                            modelInput.trim().ifBlank { config.modelId },
+                                            baseUrlInput.trim().trimEnd('/')
+                                        )
+                                    }
                                     actionFeedback = "API key pasted and saved locally"
                                 }
                             },
@@ -313,14 +302,10 @@ fun AiSettingsScreen(
                         Button(
                             onClick = {
                                 val cleanedKey = apiKeyInput.trim()
-                                val cleanedModel = modelInput.trim().ifBlank {
-                                    if (config.provider == AiProvider.GEMINI) AiConfig.DEFAULT_GEMINI_MODEL else AiConfig.DEFAULT_OPENAI_MODEL
-                                }
+                                val cleanedModel = modelInput.trim().ifBlank { AiConfig.DEFAULT_MODEL_ID }
                                 val cleanedUrl = baseUrlInput.trim().trimEnd('/')
                                 scope.launch {
-                                    prefs.setAiApiKey(cleanedKey)
-                                    prefs.setAiModelId(cleanedModel)
-                                    prefs.setAiCustomBaseUrl(cleanedUrl)
+                                    prefs.setAiConfiguration(cleanedKey, cleanedModel, cleanedUrl)
                                     actionFeedback = "AI configuration saved on device"
                                 }
                             },
@@ -350,9 +335,11 @@ fun AiSettingsScreen(
                                         customBaseUrl = baseUrlInput.trim().trimEnd('/')
                                     )
                                     scope.launch {
-                                        prefs.setAiApiKey(testConfig.apiKey)
-                                        prefs.setAiModelId(testConfig.modelId)
-                                        prefs.setAiCustomBaseUrl(testConfig.customBaseUrl)
+                                        prefs.setAiConfiguration(
+                                            testConfig.apiKey,
+                                            testConfig.modelId,
+                                            testConfig.customBaseUrl
+                                        )
                                         val result = aiClient.testConnection(testConfig)
                                         isTestingConnection = false
                                         connectionStatus = result.fold(
@@ -389,9 +376,11 @@ fun AiSettingsScreen(
                                         customBaseUrl = baseUrlInput.trim().trimEnd('/')
                                     )
                                     scope.launch {
-                                        prefs.setAiApiKey(testConfig.apiKey)
-                                        prefs.setAiModelId(testConfig.modelId)
-                                        prefs.setAiCustomBaseUrl(testConfig.customBaseUrl)
+                                        prefs.setAiConfiguration(
+                                            testConfig.apiKey,
+                                            testConfig.modelId,
+                                            testConfig.customBaseUrl
+                                        )
                                         val result = aiClient.testVisionConnection(testConfig)
                                         isTestingVision = false
                                         connectionStatus = result.fold(
@@ -456,87 +445,6 @@ fun AiSettingsScreen(
                             }
                         }
                     }
-                }
-            }
-
-            // 3. Model & Endpoint Card
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = cardBackground),
-                border = cardBorder,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "Model & Endpoint",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    val presets = if (config.provider == AiProvider.GEMINI) {
-                        AiConfig.GEMINI_PRESET_MODELS
-                    } else {
-                        AiConfig.OPENAI_PRESET_MODELS
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        presets.forEach { preset ->
-                            val selected = modelInput == preset
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    modelInput = preset
-                                    scope.launch { prefs.setAiModelId(preset) }
-                                },
-                                label = { Text(preset) },
-                                modifier = Modifier.testTag("ai_model_chip_$preset")
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = modelInput,
-                        onValueChange = {
-                            modelInput = it
-                            connectionStatus = null
-                        },
-                        label = { Text("Model ID") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("ai_model_id_input")
-                    )
-
-                    OutlinedTextField(
-                        value = baseUrlInput,
-                        onValueChange = {
-                            baseUrlInput = it
-                            connectionStatus = null
-                        },
-                        label = { Text("Custom Base URL (optional)") },
-                        placeholder = {
-                            Text(
-                                if (config.provider == AiProvider.GEMINI) {
-                                    AiConfig.DEFAULT_GEMINI_BASE_URL
-                                } else {
-                                    AiConfig.DEFAULT_OPENAI_BASE_URL
-                                }
-                            )
-                        },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("ai_base_url_input")
-                    )
                 }
             }
 

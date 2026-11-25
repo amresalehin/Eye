@@ -261,9 +261,9 @@ fun SettingsScreen(
                                 Text(
                                     when (label) {
                                         "AI & API Key" -> when {
-                                            aiConfig.isConfigured -> "${aiConfig.provider.displayName} · ${aiConfig.modelId}"
+                                            aiConfig.isConfigured -> "Custom API · ${aiConfig.modelId}"
                                             aiConfig.hasApiKey && !aiConfig.enabled -> "Paused · ${aiConfig.modelId}"
-                                            else -> "Custom Gemini / OpenAI API key & smart tags"
+                                            else -> "Configure any compatible API endpoint, key and model"
                                         }
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"

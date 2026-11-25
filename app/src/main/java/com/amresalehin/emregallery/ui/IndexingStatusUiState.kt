@@ -88,8 +88,8 @@ data class AiIndexingState(
     val currentItemName: String = "",
     val error: String? = null,
     val hasApiKey: Boolean = false,
-    val modelId: String = "gemini-2.5-flash",
-    val providerName: String = "Google Gemini API"
+    val modelId: String = "gpt-4o-mini",
+    val providerName: String = "Custom API"
 )
 
 data class IndexingStatusUiState(

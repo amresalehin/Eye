@@ -5,17 +5,22 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.amresalehin.emregallery.ai.AiMediaAnalysis
 import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.AiFilter
+import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.data.galleryDataStore
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.SearchEngine
 import com.amresalehin.emregallery.data.SearchFilterState
 import com.amresalehin.emregallery.data.SearchSortMode
 import com.amresalehin.emregallery.data.SuggestionType
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import com.amresalehin.emregallery.data.preferences.AiProvider
+import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -47,6 +52,7 @@ class CustomAiFeatureTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        context.galleryDataStore.edit { it.clear() }
         server = MockWebServer()
         server.start()
         client = CustomAiClient(OkHttpClient())
@@ -58,49 +64,78 @@ class CustomAiFeatureTest {
     fun tearDown() {
         aiStore.clearAll()
         aiStore.close()
+        context.galleryDataStore.edit { it.clear() }
         server.shutdown()
     }
 
     @Test
-    fun testConnection_geminiAndOpenAi_useExpectedAuthAndEndpoints() = runBlocking {
+    fun geminiAndOtherProvidersUseTheSameChatCompletionsProtocol() = runBlocking {
         server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setBody("""{"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}""")
+            MockResponse().setResponseCode(200)
+                .setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
         )
         val geminiConfig = AiConfig(
             enabled = true,
-            provider = AiProvider.GEMINI,
             apiKey = "test-gemini-key",
             modelId = "gemini-2.5-flash",
-            customBaseUrl = server.url("/").toString().trimEnd('/')
+            customBaseUrl = server.url("/v1beta").toString().trimEnd('/')
         )
         val geminiResult = client.testConnection(geminiConfig)
-        assertTrue("Gemini connection should succeed", geminiResult.isSuccess)
-        assertTrue(geminiResult.getOrThrow().contains("Text API connected"))
-
+        assertTrue("Gemini OpenAI-compatible endpoint should succeed", geminiResult.isSuccess)
         val geminiReq = server.takeRequest()
-        assertEquals("/v1beta/models/gemini-2.5-flash:generateContent", geminiReq.path)
-        assertEquals("test-gemini-key", geminiReq.getHeader("x-goog-api-key"))
+        assertEquals("/v1beta/chat/completions", geminiReq.path)
+        assertEquals("Bearer test-gemini-key", geminiReq.getHeader("Authorization"))
+        val geminiPayload = JSONObject(geminiReq.body.readUtf8())
+        assertEquals("gemini-2.5-flash", geminiPayload.getString("model"))
 
         server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
+            MockResponse().setResponseCode(200)
                 .setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
         )
         val openAiConfig = AiConfig(
             enabled = true,
-            provider = AiProvider.OPENAI_COMPATIBLE,
             apiKey = "sk-test-openai",
             modelId = "gpt-4o-mini",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')
         )
         val openAiResult = client.testConnection(openAiConfig)
-        assertTrue("OpenAI-compatible connection should succeed", openAiResult.isSuccess)
-
+        assertTrue("OpenAI-compatible endpoint should succeed", openAiResult.isSuccess)
         val openAiReq = server.takeRequest()
         assertEquals("/v1/chat/completions", openAiReq.path)
         assertEquals("Bearer sk-test-openai", openAiReq.getHeader("Authorization"))
+    }
+
+    @Test
+    fun legacyGeminiSettingsMigrateToGoogleOpenAiCompatibleEndpoint() = runBlocking {
+        context.galleryDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("ai_provider")] = "gemini"
+            prefs[stringPreferencesKey("ai_api_key")] = "legacy-gemini-key"
+            prefs[stringPreferencesKey("ai_model_id")] = "gemini-2.5-flash"
+        }
+        val config = AiPreferencesManager(context).currentConfig()
+        assertEquals("legacy-gemini-key", config.apiKey)
+        assertEquals("gemini-2.5-flash", config.modelId)
+        assertEquals(AiConfig.GEMINI_OPENAI_BASE_URL, config.customBaseUrl)
+        assertTrue(config.isConfigured)
+    }
+
+    @Test
+    fun newUnifiedConfigurationUsesOneEndpointKeyAndModel() = runBlocking {
+        val repository = PreferencesRepository(context)
+        repository.setAiConfiguration("custom-provider-key", "provider/vision-model", "https://api.example.com/v1")
+        val config = repository.aiConfig.first()
+        assertEquals("custom-provider-key", config.apiKey)
+        assertEquals("provider/vision-model", config.modelId)
+        assertEquals("https://api.example.com/v1", config.customBaseUrl)
+        assertTrue(config.isConfigured)
+    }
+
+    @Test
+    fun freshInstallUsesUnifiedOpenAiCompatibleDefaults() = runBlocking {
+        val config = AiPreferencesManager(context).currentConfig()
+        assertEquals(AiConfig.DEFAULT_MODEL_ID, config.modelId)
+        assertEquals(AiConfig.DEFAULT_API_BASE_URL, config.customBaseUrl)
+        assertFalse(config.hasApiKey)
     }
 
     @Test
@@ -112,7 +147,6 @@ class CustomAiFeatureTest {
         )
         val config = AiConfig(
             enabled = true,
-            provider = AiProvider.OPENAI_COMPATIBLE,
             apiKey = "nvidia-test-key",
             modelId = "vendor/example-vision-model",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')
@@ -147,7 +181,6 @@ class CustomAiFeatureTest {
         )
         val config = AiConfig(
             enabled = true,
-            provider = AiProvider.OPENAI_COMPATIBLE,
             apiKey = "provider-test-key",
             modelId = "provider/custom-model-id",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')
@@ -194,8 +227,7 @@ class CustomAiFeatureTest {
             server.enqueue(MockResponse().setResponseCode(200).setBody(successBody))
             val config = AiConfig(
                 enabled = true,
-                provider = AiProvider.OPENAI_COMPATIBLE,
-                apiKey = "provider-test-key",
+                    apiKey = "provider-test-key",
                 modelId = "provider/vision-model",
                 customBaseUrl = server.url("/v1").toString().trimEnd('/')
             )
@@ -230,7 +262,6 @@ class CustomAiFeatureTest {
         )
         val config = AiConfig(
             enabled = true,
-            provider = AiProvider.OPENAI_COMPATIBLE,
             apiKey = "test-key",
             modelId = "vendor/custom-model",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')
@@ -261,29 +292,20 @@ class CustomAiFeatureTest {
                 }
                 ```
             """.trimIndent()
-            val geminiJsonBody = org.json.JSONObject().put(
-                "candidates",
+            val compatibleResponse = JSONObject().put(
+                "choices",
                 org.json.JSONArray().put(
-                    org.json.JSONObject().put(
-                        "content",
-                        org.json.JSONObject().put(
-                            "parts",
-                            org.json.JSONArray().put(
-                                org.json.JSONObject().put("text", fencedJson)
-                            )
-                        )
-                    )
+                    JSONObject().put("message", JSONObject().put("content", fencedJson))
                 )
             ).toString()
 
-            server.enqueue(MockResponse().setResponseCode(200).setBody(geminiJsonBody))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(compatibleResponse))
 
             val config = AiConfig(
                 enabled = true,
-                provider = AiProvider.GEMINI,
                 apiKey = "key-123",
                 modelId = "gemini-2.5-flash",
-                customBaseUrl = server.url("/").toString().trimEnd('/'),
+                customBaseUrl = server.url("/v1beta").toString().trimEnd('/'),
                 customPromptInstructions = "Highlight totals on receipts"
             )
 
@@ -303,14 +325,14 @@ class CustomAiFeatureTest {
             assertEquals(listOf("receipt", "coffee", "espresso"), analysis.tags)
 
             val analyzeReqBody = server.takeRequest().body.readUtf8()
-            assertTrue(analyzeReqBody.contains("inline_data"))
+            assertTrue(analyzeReqBody.contains("image_url"))
             assertTrue(analyzeReqBody.contains("TOTAL $9.50"))
             assertTrue(analyzeReqBody.contains("Highlight totals on receipts"))
 
             server.enqueue(
                 MockResponse()
                     .setResponseCode(200)
-                    .setBody("""{"candidates":[{"content":{"parts":[{"text":"The total on the receipt is $9.50."}]}}]}""")
+                    .setBody("""{"choices":[{"message":{"content":"The total on the receipt is $9.50."}}]}""")
             )
             val qaResult = client.askAboutImage(
                 context = context,
@@ -364,7 +386,6 @@ class CustomAiFeatureTest {
 
         val config = AiConfig(
             enabled = true,
-            provider = AiProvider.OPENAI_COMPATIBLE,
             apiKey = "sk-search",
             modelId = "gpt-4o-mini",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')

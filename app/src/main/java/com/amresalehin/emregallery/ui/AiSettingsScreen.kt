@@ -170,6 +170,7 @@ fun AiSettingsScreen(
                         }
                         FilledTonalButton(
                             onClick = onOpenBatchIndexing,
+                            enabled = selectedVisionWarning == null,
                             modifier = Modifier
                                 .defaultMinSize(minHeight = 48.dp)
                                 .testTag("ai_settings_open_indexing_button")

@@ -660,7 +660,7 @@ class SearchEngine(private val context: Context) {
                             id = "ai_item_${item.id}",
                             type = SuggestionType.AI_COLLECTION,
                             title = analysis.title.ifBlank { item.name },
-                            subtitle = analysis.suggestedCollection.ifBlank { "AI insight match" },
+                            subtitle = analysis.suggestedCollections.take(3).joinToString(", ").ifBlank { "AI insight match" },
                             thumbnailUri = item.uri,
                             targetQuery = q
                         )
@@ -828,7 +828,9 @@ class SearchEngine(private val context: Context) {
         val aiAnalyses = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
         if (filter.selectedAiCollection != null) {
             candidateList = candidateList.filter { item ->
-                aiAnalyses[item.uri]?.suggestedCollection?.equals(filter.selectedAiCollection, ignoreCase = true) == true
+                aiAnalyses[item.uri]?.suggestedCollections?.any {
+                    it.equals(filter.selectedAiCollection, ignoreCase = true)
+                } == true
             }
         }
         candidateList = when (filter.aiFilter) {
@@ -918,7 +920,7 @@ class SearchEngine(private val context: Context) {
         // AI-generated metadata (title, description, tags, suggested collection, key details)
         if (aiAnalysis != null && aiAnalysis.isCompleted) {
             if (aiAnalysis.title.contains(q, ignoreCase = true)) score += 85
-            if (aiAnalysis.suggestedCollection.contains(q, ignoreCase = true)) score += 70
+            if (aiAnalysis.suggestedCollections.any { it.contains(q, ignoreCase = true) }) score += 70
             if (aiAnalysis.tags.any { it.equals(q, ignoreCase = true) }) score += 80
             else if (aiAnalysis.tags.any { it.contains(q, ignoreCase = true) }) score += 60
             if (aiAnalysis.description.contains(q, ignoreCase = true)) score += 50
@@ -931,7 +933,7 @@ class SearchEngine(private val context: Context) {
                     append(aiAnalysis.title).append(' ')
                     append(aiAnalysis.description).append(' ')
                     append(aiAnalysis.tags.joinToString(" ")).append(' ')
-                    append(aiAnalysis.suggestedCollection).append(' ')
+                    append(aiAnalysis.suggestedCollections.joinToString(" ")).append(' ')
                     append(aiAnalysis.keyDetails)
                 }.lowercase(Locale.ROOT)
                 val matchedTokens = tokens.count { combinedAiText.contains(it) }

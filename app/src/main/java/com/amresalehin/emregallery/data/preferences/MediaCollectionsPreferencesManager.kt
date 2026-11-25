@@ -329,24 +329,37 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
     }
 
     suspend fun ensureAlbumAndAddMedia(albumName: String, uri: String) {
-        val trimmed = albumName.trim()
-        if (trimmed.isEmpty() || uri.isBlank()) return
-        val current = customAlbums.first()
-        val existing = current.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
-        val updated = if (existing != null) {
-            if (uri in existing.mediaUris) return
-            current.map {
-                if (it.id == existing.id) it.copy(mediaUris = it.mediaUris + uri) else it
+        ensureAlbumsAndAddMedia(listOf(albumName), uri)
+    }
+
+    suspend fun ensureAlbumsAndAddMedia(albumNames: Collection<String>, uri: String) {
+        if (uri.isBlank()) return
+        val seen = HashSet<String>()
+        val names = albumNames.map { it.trim() }
+            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
+        if (names.isEmpty()) return
+
+        val updated = customAlbums.first().toMutableList()
+        var changed = false
+        names.forEach { name ->
+            val existingIndex = updated.indexOfFirst { it.name.equals(name, ignoreCase = true) }
+            if (existingIndex >= 0) {
+                val existing = updated[existingIndex]
+                if (uri !in existing.mediaUris) {
+                    updated[existingIndex] = existing.copy(mediaUris = existing.mediaUris + uri)
+                    changed = true
+                }
+            } else {
+                updated += CustomAlbum(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    parentPath = "",
+                    mediaUris = setOf(uri)
+                )
+                changed = true
             }
-        } else {
-            current + CustomAlbum(
-                id = UUID.randomUUID().toString(),
-                name = trimmed,
-                parentPath = "",
-                mediaUris = setOf(uri)
-            )
         }
-        saveCustomAlbums(updated)
+        if (changed) saveCustomAlbums(updated)
     }
 
     suspend fun addPersonForMedia(uri: String, person: String) {

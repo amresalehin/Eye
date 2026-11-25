@@ -1559,10 +1559,20 @@ fun GalleryApp(
                 customPeople = customPeopleMap[currentItem.uri] ?: emptySet(),
                 onAddTag = { tag -> scope.launch { prefs.addTagForMedia(currentItem.uri, tag) } },
                 onAddTags = { tags -> scope.launch { prefs.addTagsForMedia(currentItem.uri, tags) } },
-                onAddToNamedAlbum = { albumName ->
+                onAddToNamedAlbum = { albumNames ->
                     scope.launch {
-                        prefs.ensureAlbumAndAddMedia(albumName, currentItem.uri)
-                        snackbarHostState.showSnackbar("Added to $albumName", duration = SnackbarDuration.Short)
+                        val cleanNames = albumNames.map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinctBy { it.lowercase(java.util.Locale.ROOT) }
+                        prefs.ensureAlbumsAndAddMedia(cleanNames, currentItem.uri)
+                        if (cleanNames.isNotEmpty()) {
+                            val message = if (cleanNames.size == 1) {
+                                "Added to ${cleanNames.first()}"
+                            } else {
+                                "Added to ${cleanNames.size} collections"
+                            }
+                            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+                        }
                     }
                 },
                 onOpenAiSettings = {

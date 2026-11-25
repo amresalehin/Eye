@@ -213,7 +213,6 @@ class CustomAiClient(
         context: Context,
         mediaUri: String,
         config: AiConfig,
-        existingCollections: List<String> = emptyList(),
         ocrContext: String? = null
     ): Result<AiMediaAnalysis> = withContext(Dispatchers.IO) {
         runCatching {
@@ -225,7 +224,6 @@ class CustomAiClient(
 
             val prompt = buildAnalysisPrompt(
                 template = config.analysisPromptTemplate,
-                existingCollections = existingCollections,
                 ocrContext = ocrContext
             )
 
@@ -316,8 +314,8 @@ class CustomAiClient(
                         put("title", item.title)
                         put("desc", item.description.take(180))
                         put("tags", JSONArray(item.tags.take(8)))
-                        if (item.suggestedCollection.isNotBlank()) {
-                            put("col", item.suggestedCollection)
+                        if (item.suggestedCollections.isNotEmpty()) {
+                            put("collections", JSONArray(item.suggestedCollections))
                         }
                         if (item.keyDetails.isNotBlank()) {
                             put("details", item.keyDetails.take(120))
@@ -714,17 +712,32 @@ class CustomAiClient(
 
     private fun buildAnalysisPrompt(
         template: String,
-        existingCollections: List<String>,
         ocrContext: String?
     ): String {
-        val collectionContext = existingCollections
-            .distinct()
-            .take(20)
-            .joinToString(", ")
         val ocrText = ocrContext.orEmpty().take(1500)
-        return template.ifBlank { AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE }
-            .replace("{{existing_collections}}", collectionContext)
+        val editablePrompt = template.ifBlank { AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE }
+            .replace("{{existing_collections}}", "")
+            .replace(Regex("(?im)^Existing collections:\\s*$"), "")
+            .replace(
+                "- Choose a clean collection name such as Receipts, Documents, Code, Chats, Notes, Travel, Food, Shopping, Design, Memes, Nature, People, or Devices.",
+                ""
+            )
+            .replace("- Prefer reusing one of the existing collections below when it fits well.", "")
+            .replace(
+                "\"collection\": \"Single concise collection name\",",
+                "\"collections\": [\"granular, specific collection name\"],"
+            )
             .replace("{{ocr_context}}", ocrText)
+
+        return buildString {
+            append(editablePrompt.trim())
+            append("\n\nMandatory output requirements:\n")
+            append("Return the collections key as an array of strings, never as a single collection string. ")
+            append("Generate every distinct, genuinely relevant collection for this image with no fixed maximum. ")
+            append("Use granular, specific, context-rich names rather than broad catch-all categories. ")
+            append("Generate names independently; no existing collection list or preset examples are provided. ")
+            append("Keep tags precise and grounded in visible content and OCR.")
+        }
     }
 
     internal fun parseAnalysisJson(
@@ -735,7 +748,7 @@ class CustomAiClient(
         val obj = extractJsonObject(rawText)
         val title = obj.optString("title", "").trim().ifBlank { "Analyzed Image" }
         val description = obj.optString("description", "").trim()
-        val collection = obj.optString("collection", "").trim()
+        val collections = parseCollectionNames(obj)
         val keyDetails = obj.optString("key_details", "").trim()
         val tagsArr = obj.optJSONArray("tags") ?: JSONArray()
         val tags = mutableListOf<String>()
@@ -750,12 +763,29 @@ class CustomAiClient(
             title = title,
             description = description,
             tags = tags,
-            suggestedCollection = collection,
+            suggestedCollection = collections.firstOrNull().orEmpty(),
+            suggestedCollections = collections,
             keyDetails = keyDetails,
             modelUsed = modelUsed,
             analyzedAtMillis = System.currentTimeMillis(),
             status = AiMediaAnalysis.STATUS_COMPLETED
         )
+    }
+
+    private fun parseCollectionNames(obj: JSONObject): List<String> {
+        val rawCollections = obj.opt("collections") ?: obj.opt("collection")
+        val candidates = when (rawCollections) {
+            is JSONArray -> buildList {
+                for (index in 0 until rawCollections.length()) {
+                    add(rawCollections.optString(index, ""))
+                }
+            }
+            is String -> listOf(rawCollections)
+            else -> emptyList()
+        }
+        val seen = HashSet<String>()
+        return candidates.map { it.trim() }
+            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
     }
 
     internal fun extractJsonObject(rawText: String): JSONObject {

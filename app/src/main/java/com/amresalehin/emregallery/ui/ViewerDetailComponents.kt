@@ -735,7 +735,7 @@ fun OverviewTabContent(
     selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     onSelectEngine: (String) -> Unit = {},
     onAddTags: (Collection<String>) -> Unit = {},
-    onAddToNamedAlbum: (String) -> Unit = {},
+    onAddToNamedAlbum: (Collection<String>) -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {

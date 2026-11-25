@@ -108,6 +108,8 @@ class PreferencesRepository(context: Context) {
     suspend fun addTagForMedia(uri: String, tag: String) = mediaPrefs.addTagForMedia(uri, tag)
     suspend fun addTagsForMedia(uri: String, tags: Collection<String>) = mediaPrefs.addTagsForMedia(uri, tags)
     suspend fun ensureAlbumAndAddMedia(albumName: String, uri: String) = mediaPrefs.ensureAlbumAndAddMedia(albumName, uri)
+    suspend fun ensureAlbumsAndAddMedia(albumNames: Collection<String>, uri: String) =
+        mediaPrefs.ensureAlbumsAndAddMedia(albumNames, uri)
     suspend fun addPersonForMedia(uri: String, person: String) = mediaPrefs.addPersonForMedia(uri, person)
 
     // --- Unified Custom API AI ---

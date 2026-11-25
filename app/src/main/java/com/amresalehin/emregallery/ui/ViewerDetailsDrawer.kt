@@ -156,7 +156,7 @@ fun ViewerDetailsDrawer(
     defaultMlKitLanguages: Set<String> = setOf("latin"),
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
     onAddTags: (Collection<String>) -> Unit = { tags -> tags.forEach(onAddTag) },
-    onAddToNamedAlbum: (String) -> Unit = {},
+    onAddToNamedAlbum: (Collection<String>) -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {

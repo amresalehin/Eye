@@ -584,14 +584,10 @@ class IndexingForegroundService : Service() {
                             TesseractOcr.readCachedResult(applicationContext, Uri.parse(item.uri))
                         }
                     } else null
-                    val existingCollections = runCatching {
-                        prefsRepo.customAlbums.first().map { it.name }.distinct()
-                    }.getOrDefault(emptyList())
                     val result = aiClient.analyzeImage(
                         context = applicationContext,
                         mediaUri = item.uri,
                         config = config,
-                        existingCollections = existingCollections,
                         ocrContext = ocrContext
                     )
                     result.onSuccess { parsed ->
@@ -599,8 +595,8 @@ class IndexingForegroundService : Service() {
                         if (config.autoApplyTags && parsed.tags.isNotEmpty()) {
                             prefsRepo.addTagsForMedia(item.uri, parsed.tags)
                         }
-                        if (config.autoOrganizeCollections && parsed.suggestedCollection.isNotBlank()) {
-                            prefsRepo.ensureAlbumAndAddMedia(parsed.suggestedCollection, item.uri)
+                        if (config.autoOrganizeCollections && parsed.suggestedCollections.isNotEmpty()) {
+                            prefsRepo.ensureAlbumsAndAddMedia(parsed.suggestedCollections, item.uri)
                         }
                         completed++
                     }.onFailure { err ->

@@ -41,7 +41,28 @@ data class AiConfig(
     val providerName: String = "Default provider"
 ) {
     companion object {
-        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo & screenshot organizer.
+        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo and screenshot organizer.
+Return ONLY a valid JSON object with this exact schema:
+{
+  "title": "",
+  "description": "",
+  "tags": [],
+  "collections": [],
+  "key_details": ""
+}
+Rules:
+- Generate 3 to 7 concise, lowercase, searchable tags that describe concrete subjects, topics, entities, actions, and details visible in this specific image. Avoid vague filler tags.
+- Generate every distinct collection that genuinely and meaningfully applies to this image. There is no fixed maximum number of collections; do not stop after one or a small preset number.
+- Make each collection granular and specific to the actual subject matter and context. Prefer precise multi-word collection names over broad, generic, catch-all categories.
+- Collections are semantic groupings, not a short list of broad media types. Derive them from the image and OCR content rather than from a preset taxonomy.
+- Do not choose from, imitate, or expect a supplied list of existing collection names. Generate the most accurate names independently for this image.
+- Do not create redundant variations of the same collection, and do not infer details that are not supported by the image or OCR.
+- Return an empty collections array only when no meaningful collection can be identified.
+
+On-device OCR text detected in this image:
+{{ocr_context}}""";
+
+        const val LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo & screenshot organizer.
 Return ONLY a valid JSON object with this exact schema:
 {
   "title": "Short 2-5 word descriptive title",
@@ -163,6 +184,29 @@ class AiPreferencesManager(private val context: Context) {
             ?: profiles.firstOrNull()?.id.orEmpty()
     }.distinctUntilChanged()
 
+    private fun resolveAnalysisPromptTemplate(
+        storedTemplate: String?,
+        legacyInstructions: String?
+    ): String {
+        if (storedTemplate.isNullOrBlank()) {
+            return buildString {
+                append(AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE)
+                val extra = legacyInstructions.orEmpty().trim()
+                if (extra.isNotBlank()) {
+                    append("\n\nAdditional user instructions:\n")
+                    append(extra.take(500))
+                }
+            }
+        }
+
+        val legacyDefault = AiConfig.LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE
+        return if (storedTemplate.startsWith(legacyDefault)) {
+            AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE + storedTemplate.removePrefix(legacyDefault)
+        } else {
+            storedTemplate
+        }
+    }
+
     val aiConfig: Flow<AiConfig> = context.galleryDataStore.data.map { prefs ->
         val profiles = decodeProfiles(prefs[aiProfilesKey]).ifEmpty {
             listOfNotNull(legacyProfile(prefs))
@@ -178,14 +222,10 @@ class AiPreferencesManager(private val context: Context) {
             autoOrganizeCollections = prefs[aiAutoOrganizeCollectionsKey] ?: true,
             includeOcrContext = prefs[aiIncludeOcrContextKey] ?: true,
             customPromptInstructions = prefs[aiCustomPromptKey] ?: "",
-            analysisPromptTemplate = prefs[aiAnalysisPromptTemplateKey] ?: buildString {
-                append(AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE)
-                val legacyInstructions = prefs[aiCustomPromptKey].orEmpty().trim()
-                if (legacyInstructions.isNotBlank()) {
-                    append("\n\nAdditional user instructions:\n")
-                    append(legacyInstructions.take(500))
-                }
-            },
+            analysisPromptTemplate = resolveAnalysisPromptTemplate(
+                storedTemplate = prefs[aiAnalysisPromptTemplateKey],
+                legacyInstructions = prefs[aiCustomPromptKey]
+            ),
             batchDelayMs = (prefs[aiBatchDelayMsKey] ?: 500L).coerceAtLeast(0L),
             providerId = selected?.id ?: "legacy",
             providerName = selected?.name ?: "No provider selected"

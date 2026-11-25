@@ -117,7 +117,7 @@ fun ViewerScreen(
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
     onAddTags: (Collection<String>) -> Unit = { tags -> tags.forEach(onAddTag) },
-    onAddToNamedAlbum: (String) -> Unit = {},
+    onAddToNamedAlbum: (Collection<String>) -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null,
     transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) }
 ) {

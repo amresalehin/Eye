@@ -19,7 +19,11 @@ data class AiMediaAnalysis(
     val modelUsed: String = "",
     val analyzedAtMillis: Long = System.currentTimeMillis(),
     val status: String = STATUS_COMPLETED,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val suggestedCollections: List<String> = suggestedCollection
+        .takeIf { it.isNotBlank() }
+        ?.let { listOf(it) }
+        ?: emptyList()
 ) {
     val isCompleted: Boolean get() = status == STATUS_COMPLETED
     val isFailed: Boolean get() = status == STATUS_FAILED
@@ -66,6 +70,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
                 description TEXT NOT NULL DEFAULT '',
                 tags_json TEXT NOT NULL DEFAULT '[]',
                 suggested_collection TEXT NOT NULL DEFAULT '',
+                suggested_collections_json TEXT NOT NULL DEFAULT '[]',
                 key_details TEXT NOT NULL DEFAULT '',
                 model_used TEXT NOT NULL DEFAULT '',
                 analyzed_at_millis INTEGER NOT NULL DEFAULT 0,
@@ -79,19 +84,53 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        onCreate(db)
+        if (oldVersion < 2) {
+            db.execSQL(
+                "ALTER TABLE $TABLE_ANALYSIS ADD COLUMN suggested_collections_json TEXT NOT NULL DEFAULT '[]'"
+            )
+            val legacyRows = mutableListOf<Pair<String, String>>()
+            db.query(
+                TABLE_ANALYSIS,
+                arrayOf("media_uri", "suggested_collection"),
+                null,
+                null,
+                null,
+                null,
+                null
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    legacyRows += cursor.getString(0) to cursor.getString(1).orEmpty().trim()
+                }
+            }
+            legacyRows.forEach { (uri, collection) ->
+                val collectionsJson = JSONArray().apply {
+                    if (collection.isNotBlank()) put(collection)
+                }.toString()
+                db.update(
+                    TABLE_ANALYSIS,
+                    ContentValues().apply { put("suggested_collections_json", collectionsJson) },
+                    "media_uri=?",
+                    arrayOf(uri)
+                )
+            }
+        }
     }
 
     @Synchronized
     fun saveAnalysis(analysis: AiMediaAnalysis) {
         val tagsArr = JSONArray()
         analysis.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { tagsArr.put(it) }
+        val collections = normalizeCollectionNames(
+            analysis.suggestedCollections.ifEmpty { listOf(analysis.suggestedCollection) }
+        )
+        val collectionsArr = JSONArray().apply { collections.forEach { put(it) } }
         val cv = ContentValues().apply {
             put("media_uri", analysis.mediaUri)
             put("title", analysis.title.trim())
             put("description", analysis.description.trim())
             put("tags_json", tagsArr.toString())
-            put("suggested_collection", analysis.suggestedCollection.trim())
+            put("suggested_collection", collections.firstOrNull().orEmpty())
+            put("suggested_collections_json", collectionsArr.toString())
             put("key_details", analysis.keyDetails.trim())
             put("model_used", analysis.modelUsed.trim())
             put("analyzed_at_millis", analysis.analyzedAtMillis)
@@ -114,6 +153,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
             put("description", "")
             put("tags_json", "[]")
             put("suggested_collection", "")
+            put("suggested_collections_json", "[]")
             put("key_details", "")
             put("model_used", modelUsed)
             put("analyzed_at_millis", System.currentTimeMillis())
@@ -127,7 +167,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     @Synchronized
     fun getAnalysis(uri: String): AiMediaAnalysis? {
         readableDatabase.rawQuery(
-            "SELECT media_uri, title, description, tags_json, suggested_collection, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE media_uri=?",
+            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE media_uri=?",
             arrayOf(uri)
         ).use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -139,7 +179,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     fun getAllCompleted(): Map<String, AiMediaAnalysis> {
         val map = LinkedHashMap<String, AiMediaAnalysis>()
         readableDatabase.rawQuery(
-            "SELECT media_uri, title, description, tags_json, suggested_collection, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE status=?",
+            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE status=?",
             arrayOf(AiMediaAnalysis.STATUS_COMPLETED)
         ).use { cursor ->
             while (cursor.moveToNext()) {
@@ -207,15 +247,16 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     fun getCollectionSummaries(allowedUris: Set<String>? = null): List<AiCollectionSummary> {
         val grouped = LinkedHashMap<String, MutableList<String>>()
         readableDatabase.rawQuery(
-            "SELECT media_uri, suggested_collection FROM $TABLE_ANALYSIS WHERE status=? AND suggested_collection != '' ORDER BY analyzed_at_millis DESC",
+            "SELECT media_uri, suggested_collection, suggested_collections_json FROM $TABLE_ANALYSIS WHERE status=? ORDER BY analyzed_at_millis DESC",
             arrayOf(AiMediaAnalysis.STATUS_COMPLETED)
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 val uri = cursor.getString(0)
                 if (allowedUris != null && uri !in allowedUris) continue
-                val collection = cursor.getString(1).trim()
-                if (collection.isNotEmpty()) {
-                    grouped.getOrPut(collection) { mutableListOf() }.add(uri)
+                val collections = decodeCollectionNames(cursor.getString(2), cursor.getString(1))
+                collections.forEach { collection ->
+                    val uris = grouped.getOrPut(collection) { mutableListOf() }
+                    if (uri !in uris) uris.add(uri)
                 }
             }
         }
@@ -282,6 +323,24 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
         AiStoreEvents.notifyMediaUpdated()
     }
 
+    private fun decodeCollectionNames(collectionsJson: String?, legacyCollection: String?): List<String> {
+        val decoded = runCatching {
+            val array = JSONArray(collectionsJson ?: "[]")
+            buildList {
+                for (index in 0 until array.length()) {
+                    add(array.optString(index, ""))
+                }
+            }
+        }.getOrDefault(emptyList())
+        return normalizeCollectionNames(decoded.ifEmpty { listOf(legacyCollection.orEmpty()) })
+    }
+
+    private fun normalizeCollectionNames(names: Collection<String>): List<String> {
+        val seen = HashSet<String>()
+        return names.map { it.trim() }
+            .filter { it.isNotBlank() && seen.add(it.lowercase(java.util.Locale.ROOT)) }
+    }
+
     private fun readCursorRow(cursor: android.database.Cursor): AiMediaAnalysis {
         val tagsRaw = cursor.getString(3) ?: "[]"
         val tags = mutableListOf<String>()
@@ -292,23 +351,25 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
                 if (tag.isNotEmpty()) tags.add(tag)
             }
         }
+        val collections = decodeCollectionNames(cursor.getString(5), cursor.getString(4))
         return AiMediaAnalysis(
             mediaUri = cursor.getString(0),
             title = cursor.getString(1) ?: "",
             description = cursor.getString(2) ?: "",
             tags = tags,
-            suggestedCollection = cursor.getString(4) ?: "",
-            keyDetails = cursor.getString(5) ?: "",
-            modelUsed = cursor.getString(6) ?: "",
-            analyzedAtMillis = cursor.getLong(7),
-            status = cursor.getString(8) ?: AiMediaAnalysis.STATUS_COMPLETED,
-            errorMessage = cursor.getString(9)
+            suggestedCollection = collections.firstOrNull().orEmpty(),
+            suggestedCollections = collections,
+            keyDetails = cursor.getString(6) ?: "",
+            modelUsed = cursor.getString(7) ?: "",
+            analyzedAtMillis = cursor.getLong(8),
+            status = cursor.getString(9) ?: AiMediaAnalysis.STATUS_COMPLETED,
+            errorMessage = cursor.getString(10)
         )
     }
 
     companion object {
         private const val DB_NAME = "emre_ai_metadata.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
         private const val TABLE_ANALYSIS = "ai_media_analysis"
     }
 }

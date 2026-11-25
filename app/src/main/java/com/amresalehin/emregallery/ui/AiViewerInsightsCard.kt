@@ -3,6 +3,8 @@ package com.amresalehin.emregallery.ui
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,7 +40,7 @@ fun AiViewerInsightsCard(
     item: MediaItem,
     customAlbums: List<CustomAlbum>,
     onAddTags: (Collection<String>) -> Unit,
-    onAddToNamedAlbum: (String) -> Unit,
+    onAddToNamedAlbum: (Collection<String>) -> Unit,
     onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -83,12 +85,10 @@ fun AiViewerInsightsCard(
                     TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
                 }
             } else null
-            val existingCollections = customAlbums.map { it.name }.distinct()
             val result = aiClient.analyzeImage(
                 context = context,
                 mediaUri = item.uri,
                 config = aiConfig,
-                existingCollections = existingCollections,
                 ocrContext = ocrText
             )
             result.onSuccess { parsed ->
@@ -96,8 +96,8 @@ fun AiViewerInsightsCard(
                 if (aiConfig.autoApplyTags && parsed.tags.isNotEmpty()) {
                     onAddTags(parsed.tags)
                 }
-                if (aiConfig.autoOrganizeCollections && parsed.suggestedCollection.isNotBlank()) {
-                    onAddToNamedAlbum(parsed.suggestedCollection)
+                if (aiConfig.autoOrganizeCollections && parsed.suggestedCollections.isNotEmpty()) {
+                    onAddToNamedAlbum(parsed.suggestedCollections)
                 }
                 analysis = parsed
             }.onFailure { err ->
@@ -316,46 +316,62 @@ fun AiViewerInsightsCard(
                             )
                         }
 
-                        if (currentAnalysis.suggestedCollection.isNotBlank()) {
+                        val suggestedCollections = currentAnalysis.suggestedCollections
+                            .ifEmpty { listOf(currentAnalysis.suggestedCollection).filter { it.isNotBlank() } }
+                        if (suggestedCollections.isNotEmpty()) {
                             HorizontalDivider(
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
                             )
-                        }
-
-                        if (currentAnalysis.suggestedCollection.isNotBlank()) {
-                            val alreadyInAlbum = customAlbums.any {
-                                it.name.equals(currentAnalysis.suggestedCollection, ignoreCase = true) &&
-                                    item.uri in it.mediaUris
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            Row(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable(enabled = !alreadyInAlbum) {
-                                        onAddToNamedAlbum(currentAnalysis.suggestedCollection)
-                                    }
-                                    .testTag("viewer_ai_collection_chip")
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (alreadyInAlbum) Icons.Default.Check else Icons.Default.PhotoAlbum,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = currentAnalysis.suggestedCollection,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                suggestedCollections.forEachIndexed { index, collection ->
+                                    val alreadyInAlbum = customAlbums.any {
+                                        it.name.equals(collection, ignoreCase = true) &&
+                                            item.uri in it.mediaUris
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                        ),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable(enabled = !alreadyInAlbum) {
+                                                onAddToNamedAlbum(listOf(collection))
+                                            }
+                                            .testTag(
+                                                if (index == 0) "viewer_ai_collection_chip"
+                                                else "viewer_ai_collection_chip_$index"
+                                            )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (alreadyInAlbum) Icons.Default.Check else Icons.Default.PhotoAlbum,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = collection,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -202,7 +202,7 @@ class CustomAiFeatureTest {
                   "title": "Coffee Shop Receipt",
                   "description": "Paper receipt showing two espresso drinks and total amount.",
                   "tags": ["#Receipt", "Coffee", "Espresso", "receipt"],
-                  "collection": "Receipts",
+                  "collections": ["Coffee shop receipt details", "Espresso beverage purchases"],
                   "key_details": "Total $9.50"
                 }
                 ```
@@ -237,14 +237,17 @@ class CustomAiFeatureTest {
                 context = context,
                 mediaUri = imageUri,
                 config = config,
-                existingCollections = listOf("Receipts", "Travel"),
                 ocrContext = "TOTAL $9.50"
             )
 
             assertTrue("analyzeImage should succeed after fallback retry", analysisResult.isSuccess)
             val analysis = analysisResult.getOrThrow()
             assertEquals("Coffee Shop Receipt", analysis.title)
-            assertEquals("Receipts", analysis.suggestedCollection)
+            assertEquals("Coffee shop receipt details", analysis.suggestedCollection)
+            assertEquals(
+                listOf("Coffee shop receipt details", "Espresso beverage purchases"),
+                analysis.suggestedCollections
+            )
             assertEquals("Total $9.50", analysis.keyDetails)
             assertEquals(listOf("receipt", "coffee", "espresso"), analysis.tags)
 
@@ -254,7 +257,13 @@ class CustomAiFeatureTest {
             assertFalse(retryReqBody.contains("response_format"))
             assertTrue(retryReqBody.contains("image_url"))
             assertTrue(retryReqBody.contains("TOTAL $9.50"))
-            assertTrue(retryReqBody.contains("Receipts, Travel"))
+            assertFalse(retryReqBody.contains("Receipts, Travel"))
+            assertTrue(retryReqBody.contains("collections"))
+            assertTrue(retryReqBody.contains("no fixed maximum"))
+            assertTrue(retryReqBody.contains("granular"))
+            assertFalse(retryReqBody.contains("Choose a clean collection name"))
+            assertFalse(retryReqBody.contains("Receipts, Documents, Code"))
+            assertFalse(retryReqBody.contains("Existing collections:"))
             assertFalse(retryReqBody.contains("{{existing_collections}}"))
             assertFalse(retryReqBody.contains("{{ocr_context}}"))
             assertTrue(retryReqBody.contains("Highlight totals on receipts"))
@@ -276,6 +285,33 @@ class CustomAiFeatureTest {
         } finally {
             tempImage.delete()
         }
+    }
+
+    @Test
+    fun parseAnalysisJson_supportsMultipleCollectionsAndLegacySingleCollection() {
+        val multiple = client.parseAnalysisJson(
+            mediaUri = "content://media/external/images/media/multiple",
+            rawText = """{
+                "title": "Detailed image",
+                "description": "A single image with several distinct topics.",
+                "tags": ["topic"],
+                "collections": ["Specific topic A", "Specific topic B", "Specific topic C", "Specific topic D"],
+                "key_details": ""
+            }""",
+            modelUsed = "test-model"
+        )
+        assertEquals(
+            listOf("Specific topic A", "Specific topic B", "Specific topic C", "Specific topic D"),
+            multiple.suggestedCollections
+        )
+
+        val legacy = client.parseAnalysisJson(
+            mediaUri = "content://media/external/images/media/legacy",
+            rawText = """{"title":"Legacy","collection":"Legacy collection"}""",
+            modelUsed = "test-model"
+        )
+        assertEquals(listOf("Legacy collection"), legacy.suggestedCollections)
+        assertEquals("Legacy collection", legacy.suggestedCollection)
     }
 
     @Test
@@ -347,6 +383,7 @@ class CustomAiFeatureTest {
                 description = "Airline QR pass",
                 tags = listOf("travel", "flight"),
                 suggestedCollection = "Travel",
+                suggestedCollections = listOf("Rail boarding pass details", "Eurostar train journeys"),
                 keyDetails = "Gate B12",
                 modelUsed = "custom-model"
             )
@@ -358,6 +395,7 @@ class CustomAiFeatureTest {
                 description = "Supermarket checkout receipt",
                 tags = listOf("receipt", "groceries"),
                 suggestedCollection = "Receipts",
+                suggestedCollections = listOf("Grocery checkout receipts", "Food purchase receipts"),
                 modelUsed = "custom-model"
             )
         )
@@ -374,7 +412,13 @@ class CustomAiFeatureTest {
         assertEquals("429 Rate limit", failed.first().second)
 
         val collections = aiStore.getCollectionSummaries(setOf(uri1, uri2))
-        assertEquals(2, collections.size)
+        assertEquals(4, collections.size)
+        assertTrue(collections.any {
+            it.name == "Rail boarding pass details" && uri1 in it.mediaUris
+        })
+        assertTrue(collections.any {
+            it.name == "Eurostar train journeys" && uri1 in it.mediaUris
+        })
 
         aiStore.clearFailed()
         assertTrue(aiStore.getFailedItems().isEmpty())
@@ -423,6 +467,7 @@ class CustomAiFeatureTest {
                 description = "IDE screenshot showing Flow collector code",
                 tags = listOf("kotlin", "coroutines", "snippet"),
                 suggestedCollection = "Code",
+                suggestedCollections = listOf("Code", "Kotlin coroutine snippets"),
                 keyDetails = "Dispatchers.IO",
                 modelUsed = "custom-model"
             )
@@ -469,7 +514,7 @@ class CustomAiFeatureTest {
         val collectionFiltered = engine.searchMedia(
             query = "",
             media = sampleMedia,
-            filter = SearchFilterState(selectedAiCollection = "Code"),
+            filter = SearchFilterState(selectedAiCollection = "Kotlin coroutine snippets"),
             sortMode = SearchSortMode.RELEVANCE,
             customAlbums = emptyList(),
             customTagsMap = emptyMap(),
@@ -485,17 +530,17 @@ class CustomAiFeatureTest {
             customPeopleMap = emptyMap(),
             favourites = emptySet()
         )
-        assertTrue(discovery.aiCollections.any { it.title == "Code" })
+        assertTrue(discovery.aiCollections.any { it.title == "Kotlin coroutine snippets" })
 
         val suggestions = engine.getLiveSuggestions(
-            query = "Code",
+            query = "Kotlin coroutine snippets",
             media = sampleMedia,
             recentSearches = emptyList(),
             customAlbums = emptyList(),
             customTagsMap = emptyMap(),
             customPeopleMap = emptyMap()
         )
-        assertTrue(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Code" })
+        assertTrue(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Kotlin coroutine snippets" })
         assertFalse(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Unknown" })
     }
 

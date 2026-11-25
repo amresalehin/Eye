@@ -176,6 +176,7 @@ fun IndexingStatusScreen(
                 onReindexAi = viewModel::clearAndReindexAi,
                 onRetryFailedAi = viewModel::retryFailedAi,
                 onClearCache = viewModel::clearAiCache,
+                onSelectProvider = viewModel::selectAiProvider,
                 onOpenAiSettings = onOpenAiSettings
             )
 

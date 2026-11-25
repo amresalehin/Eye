@@ -444,7 +444,7 @@ fun AiSettingsScreen(
                                             contentColor = MaterialTheme.colorScheme.onSurface
                                         ),
                                         modifier = Modifier
-                                            .size(width = 48.dp, height = 56.dp)
+                                            .size(56.dp)
                                             .testTag("ai_fetch_models_button")
                                     ) {
                                         if (isFetchingModels) {

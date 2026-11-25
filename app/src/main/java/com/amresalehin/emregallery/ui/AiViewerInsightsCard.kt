@@ -135,34 +135,6 @@ fun AiViewerInsightsCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (aiConfig.hasCredentials) {
-                    IconButton(
-                        onClick = ::triggerAnalysis,
-                        enabled = !isAnalyzing,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .testTag("viewer_ai_analyze_button")
-                    ) {
-                        if (isAnalyzing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = if (currentAnalysis != null) {
-                                    Icons.Default.Refresh
-                                } else {
-                                    Icons.Outlined.AutoAwesome
-                                },
-                                contentDescription = if (currentAnalysis != null) "Re-analyze photo" else "Analyze photo",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
                 if (configuredProviders.isNotEmpty()) {
                     Box {
                         Surface(
@@ -255,6 +227,41 @@ fun AiViewerInsightsCard(
                         )
                     }
                 }
+            }
+        }
+
+        if (aiConfig.hasCredentials) {
+            Button(
+                onClick = ::triggerAnalysis,
+                enabled = !isAnalyzing,
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("viewer_ai_analyze_button")
+            ) {
+                if (isAnalyzing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.5.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (currentAnalysis != null) {
+                            Icons.Default.Refresh
+                        } else {
+                            Icons.Outlined.AutoAwesome
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = when {
+                        isAnalyzing -> "Analyzing..."
+                        currentAnalysis != null -> "Re-analyze Photo"
+                        else -> "Analyze This Photo"
+                    }
+                )
             }
         }
 

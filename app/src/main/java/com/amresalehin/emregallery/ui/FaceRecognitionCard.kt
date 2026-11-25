@@ -529,31 +529,20 @@ fun FaceRecognitionCard(
                 if (selectedOption != "disable") {
                     Spacer(Modifier.height(16.dp))
 
-                    // Folders Header Row: Icon + "Folders" on left, "All folders" pill on right
+                    // Folders label matches the other card subheaders; All folders toggle stays right-aligned.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Folder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
+                        Text(
+                            text = "Folders",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Folders",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                        }
+                        )
 
                         // "All folders" toggle pill
                         Surface(

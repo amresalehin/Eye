@@ -64,7 +64,7 @@ fun AiSettingsScreen(
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var isAiSetupExpanded by remember { mutableStateOf(false) }
+    var isAiSetupExpanded by remember(providers.isEmpty()) { mutableStateOf(providers.none { it.isConfigured }) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background

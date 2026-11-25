@@ -33,6 +33,7 @@ import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
+import com.amresalehin.emregallery.data.preferences.AiProviderProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,10 +50,11 @@ fun AiSettingsScreen(
     val aiStore = remember { AiMetadataStore(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
-    var baseUrlInput by remember(config.baseUrl) { mutableStateOf(config.baseUrl) }
-    var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
+    val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
+    var baseUrlInput by remember(config.providerId, config.baseUrl) { mutableStateOf(config.baseUrl) }
+    var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
-    var modelInput by remember(config.modelId) { mutableStateOf(config.modelId) }
+    var modelInput by remember(config.providerId, config.modelId) { mutableStateOf(config.modelId) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
 
     var isTestingCapabilities by remember { mutableStateOf(false) }
@@ -62,6 +64,11 @@ fun AiSettingsScreen(
     var actionFeedback by remember { mutableStateOf<String?>(null) }
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
+    var providerMenuExpanded by remember { mutableStateOf(false) }
+    var showAddProviderDialog by remember { mutableStateOf(false) }
+    var showRenameProviderDialog by remember { mutableStateOf(false) }
+    var showDeleteProviderDialog by remember { mutableStateOf(false) }
+    var providerNameInput by remember { mutableStateOf("") }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -73,7 +80,7 @@ fun AiSettingsScreen(
     val activePillBg = if (lightAppearance) Color(0xFF161A20) else MaterialTheme.colorScheme.primary
     val activePillText = if (lightAppearance) Color.White else MaterialTheme.colorScheme.onPrimary
 
-    val endpointSignature = "${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
+    val endpointSignature = "${config.providerId}|${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
     val endpointTestPassed = testedEndpointSignature == endpointSignature
     val canTest = !isTestingCapabilities && !isSavingConfig &&
         baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
@@ -118,6 +125,79 @@ fun AiSettingsScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    // Named provider profiles: each profile stores its own endpoint, key and model.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 18.dp, end = 12.dp, top = 14.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = { providerMenuExpanded = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_provider_selector"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = config.providerName,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(Icons.Default.ExpandMore, contentDescription = "Choose provider")
+                            }
+                            DropdownMenu(
+                                expanded = providerMenuExpanded,
+                                onDismissRequest = { providerMenuExpanded = false }
+                            ) {
+                                providers.forEach { provider ->
+                                    DropdownMenuItem(
+                                        text = { Text(provider.name) },
+                                        leadingIcon = {
+                                            if (provider.id == config.providerId) {
+                                                Icon(Icons.Default.Check, contentDescription = "Selected")
+                                            }
+                                        },
+                                        onClick = {
+                                            providerMenuExpanded = false
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            testedEndpointSignature = null
+                                            scope.launch { prefs.selectAiProvider(provider.id) }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                providerNameInput = config.providerName
+                                showRenameProviderDialog = true
+                            },
+                            enabled = providers.any { it.id == config.providerId },
+                            modifier = Modifier.testTag("ai_rename_provider_button")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Rename provider")
+                        }
+                        IconButton(
+                            onClick = { showAddProviderDialog = true },
+                            modifier = Modifier.testTag("ai_add_provider_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add provider")
+                        }
+                        IconButton(
+                            onClick = { showDeleteProviderDialog = true },
+                            enabled = providers.size > 1 && providers.any { it.id == config.providerId },
+                            modifier = Modifier.testTag("ai_delete_provider_button")
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = "Remove provider")
+                        }
+                    }
+
                     // Endpoint Fields
                     Column(
                         modifier = Modifier
@@ -447,6 +527,94 @@ fun AiSettingsScreen(
                 )
             }
         }
+    }
+
+    if (showAddProviderDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddProviderDialog = false },
+            title = { Text("Add provider") },
+            text = {
+                OutlinedTextField(
+                    value = providerNameInput,
+                    onValueChange = { providerNameInput = it },
+                    label = { Text("Provider name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = providerNameInput.isNotBlank(),
+                    onClick = {
+                        val name = providerNameInput.trim()
+                        showAddProviderDialog = false
+                        providerNameInput = ""
+                        scope.launch {
+                            prefs.addAiProvider(name)
+                            capabilityReport = null
+                            testError = null
+                            actionFeedback = null
+                            testedEndpointSignature = null
+                        }
+                    }
+                ) { Text("Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddProviderDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showRenameProviderDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameProviderDialog = false },
+            title = { Text("Rename provider") },
+            text = {
+                OutlinedTextField(
+                    value = providerNameInput,
+                    onValueChange = { providerNameInput = it },
+                    label = { Text("Provider name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = providerNameInput.isNotBlank(),
+                    onClick = {
+                        val name = providerNameInput.trim()
+                        showRenameProviderDialog = false
+                        scope.launch { prefs.renameAiProvider(config.providerId, name) }
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameProviderDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showDeleteProviderDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteProviderDialog = false },
+            title = { Text("Remove provider?") },
+            text = { Text("Remove ${config.providerName} and its saved API key? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteProviderDialog = false
+                        scope.launch {
+                            prefs.deleteAiProvider(config.providerId)
+                            capabilityReport = null
+                            testError = null
+                            actionFeedback = null
+                            testedEndpointSignature = null
+                        }
+                    }
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteProviderDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showClearCacheConfirm) {

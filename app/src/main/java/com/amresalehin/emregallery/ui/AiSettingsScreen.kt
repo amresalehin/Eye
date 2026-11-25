@@ -493,31 +493,6 @@ fun AiSettingsScreen(
                                 .padding(horizontal = 18.dp, vertical = 14.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            AiMinimalToggleRow(
-                                title = "Auto-tag",
-                                checked = config.autoApplyTags,
-                                onCheckedChange = { scope.launch { prefs.setAiAutoApplyTags(it) } },
-                                testTag = "ai_auto_apply_tags_switch"
-                            )
-    
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-    
-                            AiMinimalToggleRow(
-                                title = "Auto-albums",
-                                checked = config.autoOrganizeCollections,
-                                onCheckedChange = { scope.launch { prefs.setAiAutoOrganizeCollections(it) } },
-                                testTag = "ai_auto_organize_collections_switch"
-                            )
-    
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-    
-                            AiMinimalToggleRow(
-                                title = "OCR context",
-                                checked = config.includeOcrContext,
-                                onCheckedChange = { scope.launch { prefs.setAiIncludeOcrContext(it) } },
-                                testTag = "ai_include_ocr_switch"
-                            )
-    
                             Spacer(Modifier.height(4.dp))
     
                             OutlinedTextField(

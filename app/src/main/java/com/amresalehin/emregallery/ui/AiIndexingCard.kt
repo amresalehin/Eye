@@ -93,7 +93,7 @@ fun AiIndexingCard(
     onSelectAllFolders: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val aiTotalPhotos = if (countsReady) aiState.scopedTotalPhotos else totalPhotos
+    val aiTotalPhotos = if (countsReady) aiState.scopedTotalPhotos else aiState.scopedTotalPhotos.takeIf { it > 0 } ?: totalPhotos
     val progress = if (aiTotalPhotos > 0) (aiState.processed.toFloat() / aiTotalPhotos).coerceIn(0f, 1f) else 0f
     val animatedProgress by animateFloatAsState(targetValue = progress, label = "ai_progress")
     val percent = (progress * 100f).roundToInt()

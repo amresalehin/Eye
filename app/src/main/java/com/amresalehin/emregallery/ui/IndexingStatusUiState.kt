@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.ui
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterSummary
+import com.amresalehin.emregallery.data.preferences.AiProviderProfile
 
 import com.amresalehin.emregallery.face.StageProgress
 import com.amresalehin.emregallery.face.StageState
@@ -89,7 +90,9 @@ data class AiIndexingState(
     val error: String? = null,
     val hasApiKey: Boolean = false,
     val modelId: String = "",
-    val endpointLabel: String = ""
+    val endpointLabel: String = "",
+    val selectedProviderId: String = "",
+    val configuredProviders: List<AiProviderProfile> = emptyList()
 )
 
 data class IndexingStatusUiState(

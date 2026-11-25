@@ -371,10 +371,10 @@ fun AiSettingsScreen(
                                     .testTag("ai_api_key_input")
                             )
     
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedTextField(
                                     value = when {
-                                        isFetchingModels -> "Fetching models…"
+                                        isFetchingModels -> "Fetching…"
                                         availableModels.isNotEmpty() -> modelInput
                                         else -> ""
                                     },
@@ -438,7 +438,9 @@ fun AiSettingsScreen(
                                 DropdownMenu(
                                     expanded = isModelMenuExpanded && !isFetchingModels && availableModels.isNotEmpty(),
                                     onDismissRequest = { isModelMenuExpanded = false },
-                                    modifier = Modifier.heightIn(max = 320.dp)
+                                    modifier = Modifier
+                                        .width(maxWidth)
+                                        .heightIn(max = 320.dp)
                                 ) {
                                     availableModels.forEach { model ->
                                         DropdownMenuItem(

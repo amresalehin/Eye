@@ -258,7 +258,7 @@ class CustomAiFeatureTest {
                   "title": "Coffee Shop Receipt",
                   "description": "Paper receipt showing two espresso drinks and total amount.",
                   "tags": ["#Receipt", "Coffee", "Espresso", "receipt"],
-                  "collections": ["Coffee Shop Receipt Details", "Espresso Beverage Purchases"],
+                  "collections": ["Coffee Shop Receipt Details", "Espresso Beverage Purchases"]
                 }
                 ```
             """.trimIndent()
@@ -352,7 +352,7 @@ class CustomAiFeatureTest {
                 "title": "Detailed image",
                 "description": "A single image with several distinct topics.",
                 "tags": ["topic"],
-                "collections": ["Specific Topic A", "Specific Topic B", "Specific Topic C", "Specific Topic D"],
+                "collections": ["Specific Topic A", "Specific Topic B", "Specific Topic C", "Specific Topic D"]
             }""",
             modelUsed = "test-model"
         )

@@ -528,26 +528,7 @@ fun AiIndexingCard(
                     }
                 }
 
-                if (aiState.isRunning || aiState.processed > 0) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(aiTotalPhotos)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "$percent%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                } else {
+                if (!aiState.isRunning && aiState.processed <= 0) {
                     aiState.error?.takeIf { it.isNotBlank() && it != "Cancelled" }?.let { err ->
                         Text(
                             text = err,

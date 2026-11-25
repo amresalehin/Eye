@@ -306,6 +306,24 @@ class CustomAiFeatureTest {
     }
 
     @Test
+    fun semanticCandidateRetrieval_matchesCommonPluralForms() {
+        val target = AiMediaAnalysis(
+            mediaUri = "content://media/external/images/media/train_collection",
+            title = "Railway station",
+            description = "A platform with several trains.",
+            tags = listOf("trains", "tickets"),
+            suggestedCollection = "Travel"
+        )
+
+        val candidates = AiSemanticCandidateRetriever.retrieve(
+            query = "Find train tickets",
+            analyses = listOf(target)
+        )
+
+        assertEquals(listOf(target), candidates)
+    }
+
+    @Test
     fun semanticSearch_sendsFullLibraryCandidatesToLlm_notFirst120Records() = runBlocking {
         val distractors = (0 until 150).map { index ->
             AiMediaAnalysis(

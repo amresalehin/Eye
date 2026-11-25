@@ -27,15 +27,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.CapabilityCheckResult
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun AiSettingsScreen(
@@ -46,7 +43,6 @@ fun AiSettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context.applicationContext) }
-    val aiStore = remember { AiMetadataStore(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
     val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -64,7 +60,6 @@ fun AiSettingsScreen(
     var isTestingCapabilities by remember { mutableStateOf(false) }
     var capabilityReport by remember { mutableStateOf<EndpointCapabilityReport?>(null) }
     var testError by remember { mutableStateOf<String?>(null) }
-    var showClearCacheConfirm by remember { mutableStateOf(false) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
@@ -470,70 +465,6 @@ fun AiSettingsScreen(
                             }
                         }
     
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                            modifier = Modifier.padding(horizontal = 18.dp)
-                        )
-    
-                        // Minimal Behavior Toggles & Utilities inside the same unified card
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Spacer(Modifier.height(6.dp))
-    
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AiActionChip(
-                                    label = "Clear cache",
-                                    onClick = { showClearCacheConfirm = true },
-                                    testTag = "ai_clear_cache_button"
-                                )
-    
-                                Surface(
-                                    onClick = onOpenBatchIndexing,
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier
-                                        .height(38.dp)
-                                        .testTag("ai_settings_open_indexing_button")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Bolt,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                        Text(
-                                            text = "Batch Index",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                            }
-    
-                            actionFeedback?.let { feedback ->
-                                Text(
-                                    text = feedback,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                        }
                     }
                 }
 
@@ -617,31 +548,6 @@ fun AiSettingsScreen(
         )
     }
 
-    if (showClearCacheConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearCacheConfirm = false },
-            title = { Text("Clear AI cache?") },
-            text = { Text("Remove cached AI metadata.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showClearCacheConfirm = false
-                        scope.launch {
-                            withContext(Dispatchers.IO) { aiStore.clearAll() }
-                            actionFeedback = "Cache cleared"
-                        }
-                    }
-                ) {
-                    Text("Clear")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearCacheConfirm = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 }
 
 @Composable

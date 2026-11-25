@@ -108,7 +108,7 @@ class CustomAiFeatureTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"choices":[{"message":{"content":"VISION OK"}}]}""")
+                .setBody("""{"choices":[{"message":{"content":"blue"}}]}""")
         )
         val config = AiConfig(
             enabled = true,
@@ -121,7 +121,7 @@ class CustomAiFeatureTest {
         val result = client.testVisionConnection(config)
 
         assertTrue("Vision test should succeed for a vision-capable endpoint", result.isSuccess)
-        assertTrue(result.getOrThrow().contains("Vision API connected"))
+        assertTrue(result.getOrThrow().contains("Vision API verified"))
 
         val request = server.takeRequest()
         assertEquals("/v1/chat/completions", request.path)
@@ -139,38 +139,73 @@ class CustomAiFeatureTest {
     }
 
     @Test
-    fun knownTextOnlyNemotronRejectsVisionOperationsBeforeNetworkCall() = runBlocking {
+    fun visionCapabilityIsDeterminedByActualProviderResponseNotModelName() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("""{"error":{"message":"This model only supports text input","code":"unsupported_modality"}}""")
+        )
         val config = AiConfig(
             enabled = true,
             provider = AiProvider.OPENAI_COMPATIBLE,
-            apiKey = "nvidia-test-key",
-            modelId = "nvidia/nemotron-3.5-lightning-30b-a3b",
+            apiKey = "provider-test-key",
+            modelId = "provider/custom-model-id",
             customBaseUrl = server.url("/v1").toString().trimEnd('/')
         )
 
-        val visionTest = client.testVisionConnection(config)
-        val analysis = client.analyzeImage(
-            context = context,
-            mediaUri = "file:///not-opened.jpg",
-            config = config
-        )
-        val question = client.askAboutImage(
-            context = context,
-            mediaUri = "file:///not-opened.jpg",
-            question = "What is in this photo?",
-            config = config
-        )
+        val result = client.testVisionConnection(config)
 
-        assertFalse(visionTest.isSuccess)
-        assertFalse(analysis.isSuccess)
-        assertFalse(question.isSuccess)
-        listOf(visionTest, analysis, question).forEach { result ->
-            assertTrue(
-                result.exceptionOrNull()?.message.orEmpty()
-                    .contains("text-only model", ignoreCase = true)
+        assertFalse(result.isSuccess)
+        val message = result.exceptionOrNull()?.message.orEmpty()
+        assertTrue(message.contains("HTTP 400"))
+        assertTrue(message.contains("only supports text input"))
+        assertEquals("The endpoint must be probed instead of guessing from its model ID", 1, server.requestCount)
+        val request = server.takeRequest()
+        assertEquals("/v1/chat/completions", request.path)
+        val payload = JSONObject(request.body.readUtf8())
+        assertFalse(payload.optBoolean("stream", true))
+        assertEquals("provider/custom-model-id", payload.getString("model"))
+    }
+
+    @Test
+    fun openAiCompatibleVisionRetriesWithoutUnsupportedJsonMode() = runBlocking {
+        val tempImage = createTempJpegFile("openai_compatible_vision.jpg")
+        try {
+            server.enqueue(
+                MockResponse().setResponseCode(400)
+                    .setBody("""{"error":{"message":"response_format is not supported by this model","code":"unsupported_parameter"}}""")
             )
+            server.enqueue(
+                MockResponse().setResponseCode(200)
+                    .setBody("""{"choices":[{"message":{"content":"{\\"title\\":\\"Blue Mug\\",\\"description\\":\\"A blue mug on a table.\\",\\"tags\\":[\\"mug\\",\\"blue\\",\\"table\\"],\\"collection\\":\\"Objects\\",\\"key_details\\":\\"\\"}"}}]}""")
+            )
+            val config = AiConfig(
+                enabled = true,
+                provider = AiProvider.OPENAI_COMPATIBLE,
+                apiKey = "provider-test-key",
+                modelId = "provider/vision-model",
+                customBaseUrl = server.url("/v1").toString().trimEnd('/')
+            )
+
+            val result = client.analyzeImage(
+                context = context,
+                mediaUri = Uri.fromFile(tempImage).toString(),
+                config = config
+            )
+
+            assertTrue("Image analysis should retry without the optional JSON-mode field", result.isSuccess)
+            assertEquals("Blue Mug", result.getOrThrow().title)
+            val firstPayload = JSONObject(server.takeRequest().body.readUtf8())
+            val retryPayload = JSONObject(server.takeRequest().body.readUtf8())
+            assertTrue(firstPayload.has("response_format"))
+            assertFalse(retryPayload.has("response_format"))
+            assertFalse(retryPayload.optBoolean("stream", true))
+            val retryContent = retryPayload.getJSONArray("messages")
+                .getJSONObject(0).getJSONArray("content")
+            assertEquals("image_url", retryContent.getJSONObject(1).getString("type"))
+        } finally {
+            tempImage.delete()
         }
-        assertEquals("Known text-only models must be rejected locally", 0, server.requestCount)
     }
 
     @Test

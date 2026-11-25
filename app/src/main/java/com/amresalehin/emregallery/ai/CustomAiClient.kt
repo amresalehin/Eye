@@ -61,11 +61,10 @@ class CustomAiClient(
         runCatching {
             require(config.apiKey.isNotBlank()) { "Please enter an API key first." }
             require(config.modelId.isNotBlank()) { "Please specify a model ID." }
-            config.visionSupportWarning?.let { error(it) }
 
             val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
             val jpegBase64 = try {
-                bitmap.eraseColor(Color.rgb(48, 112, 196))
+                bitmap.eraseColor(Color.BLUE)
                 ByteArrayOutputStream().use { output ->
                     check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) {
                         "Could not prepare the vision test image."
@@ -78,13 +77,16 @@ class CustomAiClient(
 
             val started = System.currentTimeMillis()
             val response = executeVisionPrompt(
-                prompt = "This is a vision capability test. If you can see the attached image, respond with exactly: VISION OK",
+                prompt = "Identify the dominant color in the attached image. Reply with a single color word only.",
                 jpegBase64 = jpegBase64,
                 config = config,
                 expectJson = false
             )
+            if (!Regex("\\bblue\\b", RegexOption.IGNORE_CASE).containsMatchIn(response)) {
+                error("The endpoint accepted an image request but did not identify the test image. Vision capability could not be confirmed. Model response: ${response.trim().take(180)}")
+            }
             val latencyMs = (System.currentTimeMillis() - started).coerceAtLeast(1L)
-            "Vision API connected (${latencyMs}ms) · ${response.trim().take(48)}"
+            "Vision API verified (${latencyMs}ms) · image input recognized"
         }
     }
 
@@ -98,7 +100,6 @@ class CustomAiClient(
         runCatching {
             require(config.enabled) { "AI features are currently disabled in settings." }
             require(config.apiKey.isNotBlank()) { "API key is missing. Add your custom API key in AI Settings." }
-            config.visionSupportWarning?.let { error(it) }
 
             val jpegBase64 = encodeImageToJpegBase64(context, mediaUri)
                 ?: error("Could not decode image for AI analysis.")
@@ -134,7 +135,6 @@ class CustomAiClient(
         runCatching {
             require(config.enabled) { "AI features are disabled in settings." }
             require(config.apiKey.isNotBlank()) { "API key is missing. Add your custom API key in AI Settings." }
-            config.visionSupportWarning?.let { error(it) }
             val trimmedQuestion = question.trim()
             require(trimmedQuestion.isNotEmpty()) { "Enter a question first." }
 
@@ -453,74 +453,79 @@ class CustomAiClient(
                 })
                 put(JSONObject().apply {
                     put("type", "image_url")
-                    put(
-                        "image_url",
-                        JSONObject().put("url", "data:image/jpeg;base64,$jpegBase64")
-                    )
+                    put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$jpegBase64"))
                 })
             }
         } else {
             prompt
         }
 
-        val payload = JSONObject().apply {
-            put("model", config.modelId)
-            put(
-                "messages",
-                JSONArray().put(
-                    JSONObject().apply {
-                        put("role", "user")
-                        put("content", contentValue)
-                    }
+        fun buildRequest(includeJsonMode: Boolean): Request {
+            val payload = JSONObject().apply {
+                put("model", config.modelId)
+                put("messages", JSONArray().put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", contentValue)
+                }))
+                put("stream", false)
+                put("temperature", 0.2)
+                if (includeJsonMode) put("response_format", JSONObject().put("type", "json_object"))
+            }
+            return Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer ${config.apiKey}")
+                .header("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+        }
+
+        val (statusCode, bodyStr) = httpClient.newCall(buildRequest(expectJson)).execute().use { response ->
+            response.code to response.body?.string().orEmpty()
+        }
+        if (statusCode !in 200..299) {
+            if (expectJson && isJsonModeUnsupported(statusCode, bodyStr)) {
+                return callOpenAiCompatibleApi(
+                    prompt = prompt,
+                    jpegBase64 = jpegBase64,
+                    config = config,
+                    expectJson = false
                 )
-            )
-            // NVIDIA's hosted endpoint defaults to streaming. Eye parses a single JSON
-            // response, so explicitly disable SSE for all OpenAI-compatible providers.
-            put("stream", false)
-            put("temperature", 0.2)
-            if (expectJson) {
-                put("response_format", JSONObject().put("type", "json_object"))
             }
+            error(formatHttpError("OpenAI-compatible", statusCode, bodyStr))
         }
-
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${config.apiKey}")
-            .header("Content-Type", "application/json")
-            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            val bodyStr = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                error(formatHttpError("OpenAI-compatible", response.code, bodyStr))
-            }
-            if (bodyStr.trimStart().startsWith("data:")) {
-                error("The endpoint returned a streamed response despite stream=false. This provider must return a non-streaming chat completion.")
-            }
-            val root = runCatching { JSONObject(bodyStr) }.getOrElse {
-                error("The endpoint returned a non-JSON response (HTTP ${response.code}): ${bodyStr.take(800)}")
-            }
-            val message = root.optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-            val contentValue = message?.opt("content")
-            val content = when (contentValue) {
-                is String -> contentValue.trim()
-                is JSONArray -> buildString {
-                    for (index in 0 until contentValue.length()) {
-                        val text = contentValue.optJSONObject(index)?.optString("text").orEmpty()
-                        if (text.isNotBlank()) {
-                            if (isNotEmpty()) append("\n")
-                            append(text)
-                        }
+        if (bodyStr.trimStart().startsWith("data:")) {
+            error("The endpoint returned a streamed response despite stream=false. This provider must return a non-streaming chat completion.")
+        }
+        val root = runCatching { JSONObject(bodyStr) }.getOrElse {
+            error("The endpoint returned a non-JSON response (HTTP $statusCode): ${bodyStr.take(800)}")
+        }
+        val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+        val responseContent = message?.opt("content")
+        val content = when (responseContent) {
+            is String -> responseContent.trim()
+            is JSONArray -> buildString {
+                for (index in 0 until responseContent.length()) {
+                    val text = responseContent.optJSONObject(index)?.optString("text").orEmpty()
+                    if (text.isNotBlank()) {
+                        if (isNotEmpty()) append("\n")
+                        append(text)
                     }
-                }.trim()
-                else -> ""
-            }
-            if (content.isEmpty()) error("Empty response from AI endpoint. The provider returned no assistant message content.")
-            return content
+                }
+            }.trim()
+            else -> ""
         }
+        if (content.isEmpty()) error("Empty response from AI endpoint. The provider returned no assistant message content.")
+        return content
+    }
+
+    private fun isJsonModeUnsupported(statusCode: Int, responseBody: String): Boolean {
+        if (statusCode !in 400..499) return false
+        val message = responseBody.lowercase()
+        if (!message.contains("response_format")) return false
+        return listOf(
+            "not supported", "does not support", "unsupported", "unknown parameter",
+            "unknown field", "unrecognized", "not allowed", "invalid parameter", "extra fields"
+        ).any(message::contains)
     }
 
     internal fun formatHttpError(providerName: String, statusCode: Int, body: String): String {

@@ -527,7 +527,6 @@ class IndexingForegroundService : Service() {
         if (!config.isConfigured) {
             throw IllegalStateException("Custom AI API key is not configured.")
         }
-        config.visionSupportWarning?.let { throw IllegalStateException(it) }
         val aiStore = AiMetadataStore(applicationContext)
         val aiClient = CustomAiClient()
         val prefsRepo = PreferencesRepository(applicationContext)

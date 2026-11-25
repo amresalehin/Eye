@@ -39,21 +39,6 @@ data class AiConfig(
     val hasApiKey: Boolean
         get() = apiKey.isNotBlank()
 
-    /**
-     * Known model capability checks. Unknown custom model IDs remain eligible for a live
-     * vision test because OpenAI-compatible endpoints can expose different model families.
-     */
-    val visionSupportWarning: String?
-        get() {
-            if (provider != AiProvider.OPENAI_COMPATIBLE) return null
-            val normalizedModel = modelId.substringAfterLast('/').trim().lowercase()
-            return when (normalizedModel) {
-                "nemotron-3.5-lightning-30b-a3b" ->
-                    "$modelId is a text-only model and cannot accept image input. Choose a vision-capable model for photo analysis and visual Q&A."
-                else -> null
-            }
-        }
-
     companion object {
         const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
         const val DEFAULT_OPENAI_MODEL = "gpt-4o-mini"

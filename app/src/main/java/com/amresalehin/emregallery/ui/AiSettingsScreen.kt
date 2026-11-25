@@ -62,10 +62,6 @@ fun AiSettingsScreen(
     var modelInput by remember(config.modelId) { mutableStateOf(config.modelId) }
     var baseUrlInput by remember(config.customBaseUrl) { mutableStateOf(config.customBaseUrl) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
-    val selectedVisionWarning = config.copy(
-        modelId = modelInput.trim().ifBlank { config.modelId }
-    ).visionSupportWarning
-
     var isTestingConnection by remember { mutableStateOf(false) }
     var isTestingVision by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
@@ -133,7 +129,6 @@ fun AiSettingsScreen(
                             Text(
                                 text = when {
                                     !config.enabled -> "AI features paused"
-                                    config.isConfigured && selectedVisionWarning != null -> "Text-only model · photo analysis unavailable"
                                     config.isConfigured -> "Configured · ${config.provider.displayName} · test text and vision separately"
                                     else -> "Enter your own API key to analyze & search"
                                 },
@@ -170,7 +165,6 @@ fun AiSettingsScreen(
                         }
                         FilledTonalButton(
                             onClick = onOpenBatchIndexing,
-                            enabled = selectedVisionWarning == null,
                             modifier = Modifier
                                 .defaultMinSize(minHeight = 48.dp)
                                 .testTag("ai_settings_open_indexing_button")
@@ -521,22 +515,6 @@ fun AiSettingsScreen(
                             .fillMaxWidth()
                             .testTag("ai_model_id_input")
                     )
-
-                    selectedVisionWarning?.let { warning ->
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = warning,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(12.dp)
-                            )
-                        }
-                    }
 
                     OutlinedTextField(
                         value = baseUrlInput,

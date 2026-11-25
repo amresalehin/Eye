@@ -67,6 +67,7 @@ fun AiSettingsScreen(
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var isAiSetupExpanded by remember { mutableStateOf(false) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -135,22 +136,7 @@ fun AiSettingsScreen(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    prefs.addAiProvider("New provider")
-                                    capabilityReport = null
-                                    testError = null
-                                    actionFeedback = null
-                                    testedEndpointSignature = null
-                                }
-                            },
-                            modifier = Modifier.testTag("ai_add_provider_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add")
-                        }
+
                     }
 
                     val configuredProviders = providers.filter { it.isConfigured }
@@ -245,6 +231,44 @@ fun AiSettingsScreen(
             }
 
 
+            Surface(
+                onClick = { isAiSetupExpanded = !isAiSetupExpanded },
+                shape = RoundedCornerShape(16.dp),
+                color = cardBackground,
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .testTag("ai_setup_expand_bar")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "AI Setup",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Configure Cloud or Local Models",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = if (isAiSetupExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isAiSetupExpanded) "Collapse AI setup" else "Expand AI setup",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isAiSetupExpanded) {
             // Unified Custom API Configuration Card
             Card(
                 shape = RoundedCornerShape(26.dp),
@@ -580,6 +604,7 @@ fun AiSettingsScreen(
                         }
                     }
                 }
+            }
             }
 
             Spacer(Modifier.navigationBarsPadding())

@@ -83,14 +83,14 @@ fun AiSettingsScreen(
         providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
     val testActionLabel = when {
         isTestingCapabilities -> "Testing…"
-        testError != null || capabilityReport?.fullyReady == false -> "Test failed · Retry"
+        testError != null || capabilityReport?.fullyReady == false -> "Retry test"
         endpointTestPassed -> "Tested"
         else -> "Test"
     }
     val saveActionLabel = when {
         isSavingConfig -> "Saving…"
         actionFeedback == "Saved" -> "Saved"
-        saveError != null -> "Save failed · Retry"
+        saveError != null -> "Retry save"
         else -> "Save"
     }
     val testButtonEnabled = canTest && actionFeedback != "Saved"
@@ -212,7 +212,7 @@ fun AiSettingsScreen(
                                                 capabilityReport = null
                                                 testError = null
                                                 actionFeedback = null
-                                            saveError = null
+                                                saveError = null
                                                 testedEndpointSignature = null
                                             }
                                         },
@@ -262,7 +262,7 @@ fun AiSettingsScreen(
                                 capabilityReport = null
                                 testError = null
                                 actionFeedback = null
-                                            saveError = null
+                                saveError = null
                                 testedEndpointSignature = null
                                 isAiSetupExpanded = true
                             },
@@ -293,7 +293,7 @@ fun AiSettingsScreen(
                                 onValueChange = {
                                     providerNameInput = it
                                     actionFeedback = null
-                                            saveError = null
+                                    saveError = null
                                 },
                                 placeholder = { Text("Name") },
                                 singleLine = true,
@@ -310,7 +310,7 @@ fun AiSettingsScreen(
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
-                                            saveError = null
+                                    saveError = null
                                 },
                                 label = { Text("Base URL") },
                                 placeholder = { Text("https://api.openai.com/v1") },
@@ -328,7 +328,7 @@ fun AiSettingsScreen(
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
-                                            saveError = null
+                                    saveError = null
                                 },
                                 label = { Text("API Key") },
                                 singleLine = true,
@@ -442,7 +442,7 @@ fun AiSettingsScreen(
                                                 capabilityReport = null
                                                 testError = null
                                                 actionFeedback = null
-                                            saveError = null
+                                                saveError = null
                                                 testedEndpointSignature = null
                                             }
                                         )
@@ -737,7 +737,7 @@ fun AiSettingsScreen(
                     onValueChange = {
                         promptInput = it
                         actionFeedback = null
-                                            saveError = null
+                        saveError = null
                     },
                     label = { Text("Custom prompt") },
                     minLines = 2,
@@ -794,7 +794,7 @@ fun AiSettingsScreen(
                             capabilityReport = null
                             testError = null
                             actionFeedback = null
-                                            saveError = null
+                            saveError = null
                             testedEndpointSignature = null
                         }
                     }

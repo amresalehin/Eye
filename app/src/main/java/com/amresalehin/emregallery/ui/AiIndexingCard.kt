@@ -88,9 +88,13 @@ fun AiIndexingCard(
     onClearCache: () -> Unit,
     onSelectProvider: (String) -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null,
+    availableFolders: List<FaceFolderInfo> = emptyList(),
+    onToggleFolder: (String) -> Unit = {},
+    onSelectAllFolders: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val progress = if (totalPhotos > 0) (aiState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
+    val aiTotalPhotos = if (countsReady) aiState.scopedTotalPhotos else totalPhotos
+    val progress = if (aiTotalPhotos > 0) (aiState.processed.toFloat() / aiTotalPhotos).coerceIn(0f, 1f) else 0f
     val animatedProgress by animateFloatAsState(targetValue = progress, label = "ai_progress")
     val percent = (progress * 100f).roundToInt()
     val skeletonAlpha by rememberInfiniteTransition(label = "ai_model_skeleton")
@@ -106,7 +110,7 @@ fun AiIndexingCard(
 
     val isRunning = aiState.isRunning && !aiState.isPaused
     val isPaused = aiState.isRunning && aiState.isPaused
-    val isCompleted = aiState.hasApiKey && totalPhotos > 0 && aiState.processed >= totalPhotos
+    val isCompleted = aiState.hasApiKey && aiTotalPhotos > 0 && aiState.processed >= aiTotalPhotos
 
     var showActionMenu by remember { mutableStateOf(false) }
 
@@ -171,10 +175,10 @@ fun AiIndexingCard(
                             when {
                                 !aiState.hasApiKey -> onOpenAiSettings?.invoke()
                                 isCompleted -> showActionMenu = true
-                                countsReady && totalPhotos > 0 -> onToggleAi()
+                                countsReady && aiTotalPhotos > 0 -> onToggleAi()
                             }
                         },
-                        enabled = !aiState.hasApiKey || (countsReady && totalPhotos > 0),
+                        enabled = !aiState.hasApiKey || (countsReady && aiTotalPhotos > 0),
                         shape = RoundedCornerShape(14.dp),
                         color = when {
                             isRunning -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -335,6 +339,72 @@ fun AiIndexingCard(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (availableFolders.isNotEmpty()) {
+                    // Folder selector follows the Face Recognition card's selection UI.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Folders",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (aiState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = BorderStroke(
+                                1.dp,
+                                if (aiState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                            ),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .clickable(enabled = !aiState.isRunning, onClick = onSelectAllFolders)
+                                .testTag("ai_folders_all_pill")
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 14.dp)
+                            ) {
+                                Text(
+                                    text = "All folders",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 13.sp,
+                                        fontWeight = if (aiState.isAllFolders) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (aiState.isAllFolders) Color.White else MaterialTheme.colorScheme.onSurface
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .testTag("ai_folders_horizontal_row"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availableFolders.forEach { folder ->
+                            val selected = !aiState.isAllFolders && folder.path in aiState.selectedFolders
+                            AiFolderChip(
+                                label = folder.name,
+                                isSelected = selected,
+                                enabled = !aiState.isRunning,
+                                onClick = { onToggleFolder(folder.path) },
+                                testTag = "ai_folder_chip_${folder.path.hashCode()}"
+                            )
+                        }
+                    }
+                }
+
                 if (!aiState.providersLoaded || aiState.configuredProviders.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -465,7 +535,7 @@ fun AiIndexingCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}",
+                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(aiTotalPhotos)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
@@ -489,6 +559,45 @@ fun AiIndexingCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AiFolderChip(
+    label: String,
+    isSelected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        ),
+        modifier = Modifier
+            .height(38.dp)
+            .defaultMinSize(minWidth = 72.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 14.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

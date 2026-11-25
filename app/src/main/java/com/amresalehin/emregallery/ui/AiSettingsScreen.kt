@@ -670,15 +670,30 @@ fun AiSettingsScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Text(
+                        text = "Request delay",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Request delay",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
+                        Slider(
+                            value = requestDelayMs.coerceIn(0L, 5000L).toFloat(),
+                            onValueChange = {
+                                requestDelayMs = it.roundToLong()
+                                requestDelayInput = formatDelaySeconds(requestDelayMs)
+                            },
+                            valueRange = 0f..5000f,
+                            steps = 19,
+                            onValueChangeFinished = {
+                                scope.launch { prefs.setAiBatchDelayMs(requestDelayMs) }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("ai_request_delay_slider")
                         )
                         OutlinedTextField(
                             value = requestDelayInput,
@@ -698,7 +713,7 @@ fun AiSettingsScreen(
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
-                                .width(116.dp)
+                                .width(112.dp)
                                 .onFocusChanged { focusState ->
                                     if (!focusState.isFocused &&
                                         requestDelayInput != formatDelaySeconds(requestDelayMs)
@@ -709,19 +724,6 @@ fun AiSettingsScreen(
                                 .testTag("ai_request_delay_input")
                         )
                     }
-                    Slider(
-                        value = requestDelayMs.coerceIn(0L, 5000L).toFloat(),
-                        onValueChange = {
-                            requestDelayMs = it.roundToLong()
-                            requestDelayInput = formatDelaySeconds(requestDelayMs)
-                        },
-                        valueRange = 0f..5000f,
-                        steps = 19,
-                        onValueChangeFinished = {
-                            scope.launch { prefs.setAiBatchDelayMs(requestDelayMs) }
-                        },
-                        modifier = Modifier.testTag("ai_request_delay_slider")
-                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween

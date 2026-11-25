@@ -60,6 +60,7 @@ fun AiSettingsScreen(
     var isModelMenuExpanded by remember { mutableStateOf(false) }
     var modelFetchError by remember { mutableStateOf<String?>(null) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
+    var requestDelayMs by remember(config.batchDelayMs) { mutableFloatStateOf(config.batchDelayMs.toFloat()) }
 
     var isTestingCapabilities by remember { mutableStateOf(false) }
     var capabilityReport by remember { mutableStateOf<EndpointCapabilityReport?>(null) }
@@ -590,6 +591,64 @@ fun AiSettingsScreen(
     
                     }
                 }
+
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ai_request_delay_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Request delay",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        val selectedDelayMs = requestDelayMs.toLong()
+                        Text(
+                            text = if (selectedDelayMs == 0L) "Off" else "${selectedDelayMs / 1000.0} s",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("ai_request_delay_value")
+                        )
+                    }
+                    Text(
+                        text = "Pause between photo requests during batch indexing",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = requestDelayMs,
+                        onValueChange = { requestDelayMs = it },
+                        valueRange = 0f..5000f,
+                        steps = 19,
+                        onValueChangeFinished = {
+                            val savedDelay = (requestDelayMs / 250f).toLong() * 250L
+                            requestDelayMs = savedDelay.toFloat()
+                            scope.launch { prefs.setAiBatchDelayMs(savedDelay) }
+                        },
+                        modifier = Modifier.testTag("ai_request_delay_slider")
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("No delay", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("5 s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
 
             Card(
                 shape = RoundedCornerShape(22.dp),

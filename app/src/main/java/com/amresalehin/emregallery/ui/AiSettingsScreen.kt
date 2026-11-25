@@ -263,12 +263,6 @@ fun AiSettingsScreen(
                             .testTag("ai_setup_expand_bar"),
                         shape = RoundedCornerShape(18.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
                         Text("Configure Another Provider")
                     }
                 }

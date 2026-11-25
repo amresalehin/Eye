@@ -3,6 +3,8 @@ package com.amresalehin.emregallery.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +42,7 @@ fun AiIndexingCard(
     onReindexAi: () -> Unit,
     onRetryFailedAi: () -> Unit,
     onClearCache: () -> Unit,
+    onSelectProvider: (String) -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -283,6 +286,57 @@ fun AiIndexingCard(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (aiState.configuredProviders.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(
+                            text = "Vision model",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            aiState.configuredProviders.forEach { provider ->
+                                val selected = provider.id == aiState.selectedProviderId
+                                Surface(
+                                    onClick = { if (!aiState.isRunning) onSelectProvider(provider.id) },
+                                    enabled = !aiState.isRunning,
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                    ),
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .testTag("ai_vision_provider_" + provider.id)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 14.dp)
+                                    ) {
+                                        Text(
+                                            text = provider.name,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

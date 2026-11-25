@@ -764,10 +764,10 @@ class CustomAiClient(
         val ocrText = ocrContext.orEmpty().take(1500)
         val editablePrompt = template.ifBlank { AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE }
             .replace(
-                Regex("""(?m)^[ \\t]*"key_details"\\s*:\\s*[^\\r\\n]*,?[ \\t]*\\r?\\n?"""),
+                Regex("""(?m)^[ \t]*"key_details"\s*:\s*[^\r\n]*,?[ \t]*\r?\n?"""),
                 ""
             )
-            .replace(Regex(""",([ \\t]*\\r?\\n[ \\t]*})""")) { it.groupValues[1] }
+            .replace(Regex(""",([ \t]*\r?\n[ \t]*})""")) { it.groupValues[1] }
             .replace("{{existing_collections}}", "")
             .replace(Regex("(?im)^Existing collections:\\s*$"), "")
             .replace(

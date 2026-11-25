@@ -303,70 +303,93 @@ fun AiIndexingCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (!aiState.providersLoaded || aiState.configuredProviders.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = "Vision model",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         )
-                        if (!aiState.providersLoaded) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_vision_model_selector_skeleton"),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(76.dp, 94.dp, 68.dp).forEachIndexed { index, width ->
-                                    Box(
-                                        modifier = Modifier
-                                            .width(width)
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(
-                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = skeletonAlpha)
-                                            )
-                                            .testTag("ai_vision_model_skeleton_$index")
-                                    )
-                                }
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                aiState.configuredProviders.forEach { provider ->
-                                    val selected = provider.id == aiState.selectedProviderId
-                                    Surface(
-                                        onClick = { if (!aiState.isRunning) onSelectProvider(provider.id) },
-                                        enabled = !aiState.isRunning,
-                                        shape = RoundedCornerShape(18.dp),
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (selected) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                        ),
-                                        modifier = Modifier
-                                            .height(36.dp)
-                                            .testTag("ai_vision_provider_" + provider.id)
-                                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                        ) {
+                            if (!aiState.providersLoaded) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(3.dp)
+                                        .testTag("ai_vision_model_selector_skeleton"),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf(76.dp, 94.dp, 68.dp).forEachIndexed { index, width ->
                                         Box(
-                                            contentAlignment = Alignment.Center,
-                                            modifier = Modifier.padding(horizontal = 14.dp)
-                                        ) {
-                                            Text(
-                                                text = provider.name,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                                color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                                else MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                            modifier = Modifier
+                                                .width(width)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(
+                                                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = skeletonAlpha)
+                                                )
+                                                .testTag("ai_vision_model_skeleton_$index")
+                                        )
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(3.dp)
+                                        .horizontalScroll(rememberScrollState()),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    aiState.configuredProviders.forEachIndexed { index, provider ->
+                                        if (index > 0) {
+                                            VerticalDivider(
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                                modifier = Modifier
+                                                    .fillMaxHeight(0.6f)
+                                                    .width(1.dp)
                                             )
+                                        }
+                                        val selected = provider.id == aiState.selectedProviderId
+                                        Surface(
+                                            onClick = { onSelectProvider(provider.id) },
+                                            enabled = !aiState.isRunning,
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = if (selected) Color(0xFF161A20) else Color.Transparent,
+                                            modifier = Modifier
+                                                .height(38.dp)
+                                                .widthIn(min = 72.dp, max = 160.dp)
+                                                .testTag("ai_vision_provider_" + provider.id)
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 14.dp)
+                                            ) {
+                                                Text(
+                                                    text = provider.name,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontSize = 13.sp,
+                                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                     }
                                 }

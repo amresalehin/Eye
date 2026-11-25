@@ -352,17 +352,21 @@ fun AiSettingsScreen(
                                                     baseUrl = baseUrlInput.trim().trimEnd('/'),
                                                     apiKey = apiKeyInput.trim()
                                                 )
-                                                aiClient.fetchAvailableModels(fetchConfig)
-                                                    .onSuccess { models ->
-                                                        availableModels = models
-                                                        if (modelInput !in models) modelInput = ""
-                                                        modelFetchError = null
-                                                        if (models.isNotEmpty()) isModelMenuExpanded = true
-                                                    }
-                                                    .onFailure { error ->
-                                                        modelFetchError = error.message ?: "Could not fetch models"
-                                                    }
-                                                isFetchingModels = false
+                                                try {
+                                                    aiClient.fetchAvailableModels(fetchConfig)
+                                                        .onSuccess { models ->
+                                                            availableModels = models
+                                                            if (modelInput !in models) modelInput = ""
+                                                            modelFetchError = null
+                                                            isFetchingModels = false
+                                                            isModelMenuExpanded = models.isNotEmpty()
+                                                        }
+                                                        .onFailure { error ->
+                                                            modelFetchError = error.message ?: "Could not fetch models"
+                                                        }
+                                                } finally {
+                                                    isFetchingModels = false
+                                                }
                                             }
                                         } else {
                                             isModelMenuExpanded = true
@@ -408,9 +412,9 @@ fun AiSettingsScreen(
                                                 else MaterialTheme.colorScheme.onSurface
                                             )
                                             Icon(
-                                                imageVector = if (availableModels.isEmpty()) Icons.Default.Refresh
+                                                imageVector = if (availableModels.isEmpty()) Icons.Default.Search
                                                 else Icons.Default.ArrowDropDown,
-                                                contentDescription = if (availableModels.isEmpty()) "Fetch models" else "Select model"
+                                                contentDescription = if (availableModels.isEmpty()) "Search models" else "Select model"
                                             )
                                         }
                                     }

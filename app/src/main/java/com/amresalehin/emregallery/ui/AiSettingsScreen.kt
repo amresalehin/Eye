@@ -757,11 +757,6 @@ fun AiSettingsScreen(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Text(
-                        text = "This is the full image-analysis prompt sent to your configured API model. Changes save automatically.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     OutlinedTextField(
                         value = promptInput,
                         onValueChange = { promptInput = it },
@@ -772,11 +767,6 @@ fun AiSettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("ai_custom_prompt_input")
-                    )
-                    Text(
-                        text = "Dynamic placeholders: {{existing_collections}} inserts existing collection names; {{ocr_context}} inserts OCR text for each image.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

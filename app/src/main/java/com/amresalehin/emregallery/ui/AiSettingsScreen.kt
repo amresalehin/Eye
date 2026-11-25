@@ -68,6 +68,8 @@ fun AiSettingsScreen(
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val hasConfiguredProviders = providers.any { it.isConfigured }
+    var isCreatingProvider by remember(hasConfiguredProviders) { mutableStateOf(!hasConfiguredProviders) }
     var isAiSetupExpanded by remember(providers.isEmpty()) { mutableStateOf(providers.none { it.isConfigured }) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -80,7 +82,7 @@ fun AiSettingsScreen(
     val activePillBg = if (lightAppearance) Color(0xFF161A20) else MaterialTheme.colorScheme.primary
     val activePillText = if (lightAppearance) Color.White else MaterialTheme.colorScheme.onPrimary
 
-    val endpointSignature = "${config.providerId}|${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
+    val endpointSignature = "${if (isCreatingProvider) "__new_provider__" else config.providerId}|${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
     val endpointTestPassed = testedEndpointSignature == endpointSignature
     val canTest = !isTestingCapabilities && !isSavingConfig &&
         providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
@@ -155,6 +157,7 @@ fun AiSettingsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
+                                        isCreatingProvider = false
                                         scope.launch {
                                             prefs.selectAiProvider(provider.id)
                                             capabilityReport = null
@@ -198,6 +201,8 @@ fun AiSettingsScreen(
                                     }
                                     IconButton(
                                         onClick = {
+                                            isCreatingProvider = false
+                                            isAiSetupExpanded = true
                                             scope.launch {
                                                 prefs.selectAiProvider(provider.id)
                                                 capabilityReport = null
@@ -241,7 +246,20 @@ fun AiSettingsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         IconButton(
-                            onClick = { isAiSetupExpanded = true },
+                            onClick = {
+                                isCreatingProvider = true
+                                providerNameInput = ""
+                                baseUrlInput = ""
+                                apiKeyInput = ""
+                                modelInput = ""
+                                availableModels = emptyList()
+                                modelFetchError = null
+                                capabilityReport = null
+                                testError = null
+                                actionFeedback = null
+                                testedEndpointSignature = null
+                                isAiSetupExpanded = true
+                            },
                             modifier = Modifier
                                 .size(40.dp)
                                 .testTag("ai_setup_expand_bar")
@@ -438,7 +456,7 @@ fun AiSettingsScreen(
                                         scope.launch {
                                             runCatching {
                                                 prefs.saveAiProviderConfig(
-                                                    providerId = config.providerId,
+                                                    providerId = if (isCreatingProvider) "__new_provider__" else config.providerId,
                                                     name = providerNameInput,
                                                     baseUrl = cleanUrl,
                                                     apiKey = cleanKey,
@@ -446,6 +464,7 @@ fun AiSettingsScreen(
                                                 )
                                                 prefs.setAiCustomPromptInstructions(cleanPrompt)
                                             }.onSuccess {
+                                                isCreatingProvider = false
                                                 actionFeedback = "Saved"
                                                 testError = null
                                             }.onFailure { error ->

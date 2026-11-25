@@ -124,6 +124,13 @@ class PreferencesRepository(context: Context) {
     suspend fun setAiModelId(modelId: String) = aiPrefs.setModelId(modelId)
     suspend fun saveAiEndpointConfig(baseUrl: String, apiKey: String, modelId: String) =
         aiPrefs.saveEndpointConfig(baseUrl, apiKey, modelId)
+    suspend fun saveAiProviderConfig(
+        providerId: String,
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        modelId: String
+    ): String = aiPrefs.saveProviderConfig(providerId, name, baseUrl, apiKey, modelId)
     suspend fun setAiAutoApplyTags(enabled: Boolean) = aiPrefs.setAutoApplyTags(enabled)
     suspend fun setAiAutoOrganizeCollections(enabled: Boolean) = aiPrefs.setAutoOrganizeCollections(enabled)
     suspend fun setAiIncludeOcrContext(enabled: Boolean) = aiPrefs.setIncludeOcrContext(enabled)

@@ -317,7 +317,6 @@ fun AiSettingsScreen(
                                     saveError = null
                                 },
                                 label = { Text("Base URL") },
-                                placeholder = { Text("https://api.openai.com/v1") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
@@ -361,9 +360,6 @@ fun AiSettingsScreen(
                                     readOnly = true,
                                     singleLine = true,
                                     label = { Text("Model") },
-                                    placeholder = {
-                                        Text(if (availableModels.isNotEmpty()) "Select model" else "Fetch models")
-                                    },
                                     trailingIcon = {
                                         when {
                                             isFetchingModels -> CircularProgressIndicator(

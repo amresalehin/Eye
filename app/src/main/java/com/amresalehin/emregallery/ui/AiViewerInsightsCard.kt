@@ -48,10 +48,13 @@ fun AiViewerInsightsCard(
     val aiStore = remember(context) { AiMetadataStore(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
     val aiConfig by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
+    val aiProviders by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
+    val configuredProviders = aiProviders.filter { it.isConfigured }
 
     var analysis by remember(item.uri) { mutableStateOf<AiMediaAnalysis?>(null) }
     var isAnalyzing by remember(item.uri) { mutableStateOf(false) }
     var analysisError by remember(item.uri) { mutableStateOf<String?>(null) }
+    var providerMenuExpanded by remember { mutableStateOf(false) }
 
 
     LaunchedEffect(item.uri) {
@@ -160,7 +163,101 @@ fun AiViewerInsightsCard(
                     }
                 }
 
-                if (onOpenAiSettings != null) {
+                if (configuredProviders.isNotEmpty()) {
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .clickable(enabled = !isAnalyzing) { providerMenuExpanded = true }
+                                .testTag("viewer_ai_provider_selector")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = aiConfig.providerName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 132.dp)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Switch AI provider",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = providerMenuExpanded,
+                            onDismissRequest = { providerMenuExpanded = false }
+                        ) {
+                            configuredProviders.forEach { provider ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = provider.name,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = provider.modelId,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    },
+                                    trailingIcon = if (provider.id == aiConfig.providerId) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = "Active provider",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    } else null,
+                                    enabled = !isAnalyzing,
+                                    onClick = {
+                                        providerMenuExpanded = false
+                                        if (provider.id != aiConfig.providerId) {
+                                            scope.launch {
+                                                prefs.selectAiProvider(provider.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                            if (onOpenAiSettings != null) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("AI Setup") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Outlined.Tune,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        providerMenuExpanded = false
+                                        onOpenAiSettings()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else if (onOpenAiSettings != null) {
                     IconButton(
                         onClick = onOpenAiSettings,
                         modifier = Modifier
@@ -169,7 +266,7 @@ fun AiViewerInsightsCard(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Tune,
-                            contentDescription = "AI Settings",
+                            contentDescription = "AI Setup",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )

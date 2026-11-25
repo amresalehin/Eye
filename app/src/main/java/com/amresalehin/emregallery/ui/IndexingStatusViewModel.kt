@@ -98,9 +98,17 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         ai = state.ai.copy(
                             hasApiKey = cfg.isConfigured,
                             modelId = cfg.modelId,
-                            endpointLabel = cfg.endpointHost
+                            endpointLabel = cfg.endpointHost,
+                            selectedProviderId = cfg.providerId
                         )
                     )
+                }
+            }
+        }
+        viewModelScope.launch {
+            aiPrefs.providers.collect { providers ->
+                _uiState.update { state ->
+                    state.copy(ai = state.ai.copy(configuredProviders = providers.filter { it.isConfigured }))
                 }
             }
         }
@@ -1048,6 +1056,14 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             engineId = currentOcrEngine,
             mlKitLanguages = currentMlKitLanguages.toList()
         )
+    }
+
+    // Select which configured provider/model the AI Vision indexer will use.
+    fun selectAiProvider(providerId: String) {
+        if (_uiState.value.ai.isRunning) return
+        viewModelScope.launch {
+            runCatching { aiPrefs.selectProvider(providerId) }
+        }
     }
 
     // --- AI Vision Actions ---

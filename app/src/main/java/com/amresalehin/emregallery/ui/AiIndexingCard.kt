@@ -267,12 +267,12 @@ fun AiIndexingCard(
                     thickness = 1.dp,
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (progress > 0f) {
+                if (aiState.isRunning || progress > 0f) {
                     LinearProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(2.dp),
+                            .height(3.dp),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = Color.Transparent
                     )
@@ -365,14 +365,25 @@ fun AiIndexingCard(
                     }
                 }
 
-                if (aiState.isRunning && aiState.currentItemName.isNotBlank()) {
-                    Text(
-                        text = aiState.currentItemName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                if (aiState.isRunning || aiState.processed > 0) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "$percent%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 } else {
                     aiState.error?.takeIf { it.isNotBlank() && it != "Cancelled" }?.let { err ->
                         Text(

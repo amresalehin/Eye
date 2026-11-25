@@ -61,6 +61,89 @@ class CustomAiClient(
     private val httpClient: OkHttpClient = defaultHttpClient()
 ) {
 
+    suspend fun fetchAvailableModels(config: AiConfig): Result<List<String>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                require(config.normalizedBaseUrl.isNotBlank()) { "Base URL is required." }
+                require(config.apiKey.isNotBlank()) { "API key is required." }
+                val base = config.normalizedBaseUrl
+                val uri = URI(base)
+                val host = uri.host.orEmpty().lowercase()
+                val path = uri.path.orEmpty().trimEnd('/')
+                val isGemini = host.contains("generativelanguage.googleapis.com") &&
+                    !path.contains("/openai", ignoreCase = true)
+                val isAnthropic = host.contains("api.anthropic.com") ||
+                    path.endsWith("/messages") && !path.contains("/chat")
+                val url = when {
+                    isGemini -> when {
+                        path.endsWith("/models") -> base
+                        path.endsWith("/v1beta") || path.endsWith("/v1") -> "$base/models"
+                        else -> "$base/v1beta/models"
+                    }
+                    isAnthropic -> when {
+                        path.endsWith("/v1") -> "$base/models"
+                        path.endsWith("/v1/models") -> base
+                        else -> "$base/v1/models"
+                    }
+                    else -> when {
+                        path.endsWith("/models") -> base
+                        else -> "$base/models"
+                    }
+                }
+                val requestBuilder = Request.Builder().url(url).get()
+                    .header("Accept", "application/json")
+                when {
+                    isGemini -> requestBuilder.header("x-goog-api-key", config.apiKey)
+                    isAnthropic -> requestBuilder
+                        .header("x-api-key", config.apiKey)
+                        .header("anthropic-version", "2023-06-01")
+                    else -> requestBuilder.header("Authorization", "Bearer ${config.apiKey}")
+                }
+                httpClient.newCall(requestBuilder.build()).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        error(extractErrorMessage(body) ?: "Model list request failed (${response.code})")
+                    }
+                    val root = JSONObject(body)
+                    val models = when {
+                        isGemini -> {
+                            val items = root.optJSONArray("models") ?: JSONArray()
+                            buildList {
+                                for (i in 0 until items.length()) {
+                                    val item = items.optJSONObject(i) ?: continue
+                                    val methods = item.optJSONArray("supportedGenerationMethods")
+                                    val supportsVisionGeneration = methods == null ||
+                                        (0 until methods.length()).any { methods.optString(it) == "generateContent" }
+                                    val name = item.optString("name").removePrefix("models/").trim()
+                                    if (name.isNotBlank() && supportsVisionGeneration) add(name)
+                                }
+                            }
+                        }
+                        isAnthropic -> {
+                            val items = root.optJSONArray("data") ?: JSONArray()
+                            buildList {
+                                for (i in 0 until items.length()) {
+                                    val id = items.optJSONObject(i)?.optString("id").orEmpty().trim()
+                                    if (id.isNotBlank()) add(id)
+                                }
+                            }
+                        }
+                        else -> {
+                            val items = root.optJSONArray("data") ?: JSONArray()
+                            buildList {
+                                for (i in 0 until items.length()) {
+                                    val id = items.optJSONObject(i)?.optString("id").orEmpty().trim()
+                                    if (id.isNotBlank()) add(id)
+                                }
+                            }
+                        }
+                    }.distinct().sorted()
+                    if (models.isEmpty()) error("No models were returned by this endpoint.")
+                    models
+                }
+            }
+        }
+
     suspend fun testEndpointCapabilities(config: AiConfig): Result<EndpointCapabilityReport> =
         withContext(Dispatchers.IO) {
             runCatching {

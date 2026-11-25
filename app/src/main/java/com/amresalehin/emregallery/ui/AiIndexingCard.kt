@@ -44,6 +44,8 @@ fun AiIndexingCard(
     val isRunning = aiState.isRunning && !aiState.isPaused
     val isPaused = aiState.isRunning && aiState.isPaused
     val isCompleted = totalPhotos > 0 && aiState.processed >= totalPhotos
+    val showProgressDetails = aiState.hasApiKey &&
+        (aiState.isRunning || aiState.isPaused || aiState.processed > 0 || aiState.failedCount > 0)
 
     var showActionMenu by remember { mutableStateOf(false) }
 
@@ -79,33 +81,23 @@ fun AiIndexingCard(
 
                 Spacer(Modifier.width(16.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "AI Vision",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    )
-                    Text(
-                        text = if (aiState.hasApiKey) {
-                            "${aiState.providerName} · ${aiState.modelId}"
-                        } else {
-                            "Custom API key required"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = "AI Vision",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
                 if (aiState.isRunning) {
                     IconButton(
                         onClick = onStopAi,
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(34.dp)
                             .testTag("ai_stop_button")
                     ) {
                         Icon(
@@ -115,7 +107,7 @@ fun AiIndexingCard(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(6.dp))
                 }
 
                 Box {
@@ -129,7 +121,8 @@ fun AiIndexingCard(
                                 onToggleAi()
                             }
                         },
-                        enabled = !aiState.hasApiKey || (countsReady && totalPhotos > 0),
+                        enabled = (!aiState.hasApiKey && onOpenAiSettings != null) ||
+                            (aiState.hasApiKey && countsReady && totalPhotos > 0),
                         shape = RoundedCornerShape(14.dp),
                         color = when {
                             isRunning -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -145,7 +138,8 @@ fun AiIndexingCard(
                             }
                         ),
                         modifier = Modifier
-                            .defaultMinSize(minWidth = 88.dp, minHeight = 48.dp)
+                            .height(36.dp)
+                            .defaultMinSize(minWidth = 84.dp)
                             .testTag("ai_corner_box_action")
                     ) {
                         Row(
@@ -156,14 +150,14 @@ fun AiIndexingCard(
                             when {
                                 !aiState.hasApiKey -> {
                                     Icon(
-                                        Icons.Default.Key,
+                                        Icons.Default.Tune,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(15.dp)
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "Set Key",
+                                        text = "Setup",
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface
@@ -269,7 +263,7 @@ fun AiIndexingCard(
                     thickness = 1.dp,
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (progress > 0f) {
+                if (showProgressDetails && progress > 0f) {
                     LinearProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier
@@ -287,66 +281,49 @@ fun AiIndexingCard(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)} analyzed",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (aiState.itemsPerMinute > 0) {
+                if (showProgressDetails) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "${aiState.itemsPerMinute}/min",
+                            text = "${numberFormat.format(aiState.processed)} / ${numberFormat.format(totalPhotos)} analyzed",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (aiState.itemsPerMinute > 0) {
+                            Text(
+                                text = "${aiState.itemsPerMinute}/min",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (aiState.currentItemName.isNotBlank() && aiState.isRunning) {
+                        Text(
+                            text = "Analyzing: ${aiState.currentItemName}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-
-                if (aiState.currentItemName.isNotBlank() && aiState.isRunning) {
+                } else if (aiState.hasApiKey) {
                     Text(
-                        text = "Analyzing: ${aiState.currentItemName}",
+                        text = "Ready to analyze photos",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
                 if (!aiState.hasApiKey) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Add your Gemini or OpenAI-compatible API key to generate smart tags, descriptions, and collections.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f).padding(end = 8.dp)
-                            )
-                            if (onOpenAiSettings != null) {
-                                FilledTonalButton(
-                                    onClick = onOpenAiSettings,
-                                    modifier = Modifier
-                                        .defaultMinSize(minHeight = 48.dp)
-                                        .testTag("ai_card_setup_key_button")
-                                ) {
-                                    Text("API Key")
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        text = "Configure an API endpoint, key and model in AI Setup to enable vision indexing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -374,7 +351,7 @@ fun AiIndexingCard(
                             ) {
                                 Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("AI Settings")
+                                Text("AI Setup")
                             }
                         }
                     }

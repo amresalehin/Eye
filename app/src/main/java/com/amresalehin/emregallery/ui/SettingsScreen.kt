@@ -43,7 +43,7 @@ fun SettingsScreen(
 
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
-        "AI & API Key" to Icons.Outlined.AutoAwesome,
+        "AI Setup" to Icons.Outlined.AutoAwesome,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -260,10 +260,10 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "AI & API Key" -> when {
-                                            aiConfig.isConfigured -> "Custom API · ${aiConfig.modelId}"
+                                        "AI Setup" -> when {
                                             aiConfig.hasApiKey && !aiConfig.enabled -> "Paused · ${aiConfig.modelId}"
-                                            else -> "Configure any compatible API endpoint, key and model"
+                                            aiConfig.isConfigured -> "Configured · ${aiConfig.modelId}"
+                                            else -> "Configure Cloud or Local Models"
                                         }
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"

@@ -13,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,8 +36,6 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun AiSettingsScreen(
-    totalPhotos: Int,
-    onOpenBatchIndexing: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -48,12 +45,6 @@ fun AiSettingsScreen(
     val aiClient = remember { CustomAiClient() }
 
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
-    var analyzedCount by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) {
-        analyzedCount = withContext(Dispatchers.IO) { aiStore.getTotalCompletedCount() }
-    }
-
     var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
     var modelInput by remember(config.modelId) { mutableStateOf(config.modelId) }
@@ -87,94 +78,7 @@ fun AiSettingsScreen(
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(60.dp))
 
-            // 1. Overview & Status Card
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = cardBackground),
-                border = cardBorder,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.size(46.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Custom API Key AI",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = when {
-                                    !config.enabled -> "AI features paused"
-                                    config.isConfigured -> "Configured · ${config.modelId} · test text and vision separately"
-                                    else -> "Enter your own API key to analyze & search"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = config.enabled,
-                            onCheckedChange = { enabled -> scope.launch { prefs.setAiEnabled(enabled) } },
-                            modifier = Modifier.testTag("ai_settings_enabled_switch")
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "$analyzedCount photos analyzed",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = if (totalPhotos > 0) "of $totalPhotos gallery photos" else "Ready for single or batch analysis",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        FilledTonalButton(
-                            onClick = onOpenBatchIndexing,
-                            modifier = Modifier
-                                .defaultMinSize(minHeight = 48.dp)
-                                .testTag("ai_settings_open_indexing_button")
-                        ) {
-                            Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Batch Index")
-                        }
-                    }
-                }
-            }
-
-            // 2. Provider & Custom API Key Card
+            // API Configuration Card
             Card(
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = cardBackground),
@@ -185,12 +89,38 @@ fun AiSettingsScreen(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Text(
-                        text = "API Configuration",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "API Configuration",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = when {
+                                    !config.enabled -> "AI features paused"
+                                    config.isConfigured -> "Configured · ${config.modelId}"
+                                    else -> "Add an API key and model to enable AI"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                        Switch(
+                            checked = config.enabled,
+                            onCheckedChange = { enabled -> scope.launch { prefs.setAiEnabled(enabled) } },
+                            modifier = Modifier.testTag("ai_settings_enabled_switch")
+                        )
+                    }
 
                     OutlinedTextField(
                         value = apiKeyInput,
@@ -587,7 +517,7 @@ fun AiSettingsScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
             ) {
                 Text(
-                    text = "AI & Custom API Key",
+                    text = "AI Setup",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,

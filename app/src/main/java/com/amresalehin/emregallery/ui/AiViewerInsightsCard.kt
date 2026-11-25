@@ -177,7 +177,7 @@ fun AiViewerInsightsCard(
                         .testTag("viewer_ai_settings_button")
                 ) {
                     Text(
-                        text = if (aiConfig.hasApiKey) aiConfig.modelId else "Set up API Key",
+                        text = "AI Setup",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -205,9 +205,9 @@ fun AiViewerInsightsCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    !aiConfig.hasApiKey -> {
+                    !aiConfig.isConfigured -> {
                         Text(
-                            text = "Configure a compatible API base URL, key and model to generate titles, descriptions, smart tags, collections, and visual Q&A.",
+                            text = "Configure an API endpoint, key and model to generate titles, descriptions, smart tags, collections, and visual Q&A.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -218,9 +218,9 @@ fun AiViewerInsightsCard(
                                     .defaultMinSize(minHeight = 48.dp)
                                     .testTag("viewer_ai_setup_key_button")
                             ) {
-                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Set up Custom API Key")
+                                Text("Open AI Setup")
                             }
                         }
                     }

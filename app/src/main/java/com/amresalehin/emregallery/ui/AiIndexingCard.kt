@@ -267,12 +267,12 @@ fun AiIndexingCard(
                     thickness = 1.dp,
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (aiState.isRunning || progress > 0f) {
+                if (progress > 0f) {
                     LinearProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(3.dp),
+                            .height(2.dp),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = Color.Transparent
                     )

@@ -1010,14 +1010,7 @@ fun GalleryApp(
                             showCreateAlbumDialog = true
                         },
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
-                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } },
-                        onOpenAiCollection = { colName ->
-                            pendingSearchFilter = SearchFilterState(selectedAiCollection = colName)
-                            searchQuery = colName
-                            submittedQuery = colName
-                            searchStage = SearchStage.RESULTS
-                            navigateTo(Destination.SEARCH)
-                        }
+                        onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
                     }
                     }

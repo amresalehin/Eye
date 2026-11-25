@@ -17,11 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
-import com.amresalehin.emregallery.ai.AiCollectionSummary
-import com.amresalehin.emregallery.ai.AiMetadataStore
-import com.amresalehin.emregallery.ai.AiStoreEvents
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -82,8 +78,7 @@ fun AlbumsScreen(
     onDeleteAlbum: (String) -> Unit,
     onRenameAlbum: (String, String) -> Unit,
     onOpenPerson: ((String) -> Unit)? = null,
-    onOpenBrowser: (() -> Unit)? = null,
-    onOpenAiCollection: ((String) -> Unit)? = null
+    onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
@@ -109,18 +104,6 @@ fun AlbumsScreen(
     }
     val normalMedia = remember(media, hidden, inBin, archive) {
         media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }
-    }
-    val aiStore = remember(context) { AiMetadataStore(context.applicationContext) }
-    var aiCollections by remember { mutableStateOf<List<AiCollectionSummary>>(emptyList()) }
-    LaunchedEffect(normalMedia) {
-        val allowed = normalMedia.map { it.uri }.toSet()
-        suspend fun refreshAiCollections() {
-            aiCollections = withContext(Dispatchers.IO) {
-                aiStore.getCollectionSummaries(allowed)
-            }
-        }
-        refreshAiCollections()
-        AiStoreEvents.updates.collect { refreshAiCollections() }
     }
     var folders by remember(normalMedia) {
         mutableStateOf(
@@ -636,108 +619,6 @@ fun AlbumsScreen(
                                     },
                                     onDelete = { onDeleteAlbum(album.id) }
                                 )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2b. AI Smart Collections Strip
-        if (aiCollections.isNotEmpty()) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 4.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("albums_ai_collections_card")
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Text(
-                                text = "AI Smart Collections",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = aiCollections.size.toString(),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        LazyRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(aiCollections, key = { it.name }) { col ->
-                                val sampleUri = col.mediaUris.firstOrNull()
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                                    modifier = Modifier
-                                        .width(138.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable { onOpenAiCollection?.invoke(col.name) }
-                                        .testTag("albums_ai_collection_${col.name}")
-                                ) {
-                                    Column {
-                                        if (sampleUri != null) {
-                                            AsyncImage(
-                                                model = ThumbnailUtils.buildThumbnailRequest(context, sampleUri),
-                                                contentDescription = col.name,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(92.dp)
-                                            )
-                                        }
-                                        Column(
-                                            modifier = Modifier.padding(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            Text(
-                                                text = col.name,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "${col.count} items",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
                             }
                         }
                     }

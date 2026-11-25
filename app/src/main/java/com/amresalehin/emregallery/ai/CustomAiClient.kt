@@ -306,18 +306,7 @@ class CustomAiClient(
                 )
             }
 
-            // Search every completed analysis locally; only the most relevant candidates
-            // are included in the LLM request to keep latency and token usage bounded.
-            val indexedItems = AiSemanticCandidateRetriever.retrieve(
-                query = trimmedQuery,
-                analyses = analyses
-            )
-            if (indexedItems.isEmpty()) {
-                return@runCatching AiSearchMatchResult(
-                    matchingUris = emptyList(),
-                    summary = "No relevant AI-analyzed photos found."
-                )
-            }
+            val indexedItems = analyses.take(120)
 
             val catalogJson = JSONArray()
             indexedItems.forEachIndexed { idx, item ->
@@ -338,7 +327,7 @@ class CustomAiClient(
             }
 
             val prompt = """
-                You are a smart gallery search engine. Given the user's natural language search query and a locally retrieved shortlist from the full analyzed photo library (indexed by "i"), return only genuinely matching item indices ranked from best match to weakest match. The shortlist was selected for relevance, but you must still judge each candidate against the query and exclude weak or unrelated matches.
+                You are a smart gallery search engine. Given the user's natural language search query and a catalog of analyzed photos/screenshots (indexed by "i"), return the matching item indices ranked from best match to weakest match.
                 Return ONLY valid JSON with this exact schema:
                 {
                   "matched_indices": [0, 3],

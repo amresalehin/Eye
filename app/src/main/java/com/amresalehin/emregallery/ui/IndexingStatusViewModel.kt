@@ -22,6 +22,7 @@ import com.amresalehin.emregallery.face.StageState
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.AiIndexingSettings
 import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
@@ -184,6 +185,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             val facePhotos = FaceRecognitionSettings.filterMediaForFaceIndexing(context, photos) { it.relativePath }
             val facePhotoUris = facePhotos.map { it.uri }
 
+            val aiIsAllFolders = AiIndexingSettings.isIndexAllFolders(context)
+            val aiSelectedFolders = AiIndexingSettings.getSelectedFolders(context)
+            val aiPhotos = AiIndexingSettings.filterMediaForAiIndexing(context, photos) { it.relativePath }
+            val aiPhotoUris = aiPhotos.map { it.uri }
+
             val result = withContext(Dispatchers.IO) {
                 val oCount = photos.count { item ->
                     TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
@@ -211,9 +217,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val lProcessed = photos.count { locMap.containsKey(it.uri) }
                 val lLocated = locMap.values.count { it.point != null }
 
-                val photoUris = photos.map { it.uri }
-                val aiProcessed = aiStore.getCompletedCount(photoUris)
-                val aiFailedItems = aiStore.getFailedItems(photoUris)
+                val aiProcessed = aiStore.getCompletedCount(aiPhotoUris)
+                val aiFailedItems = aiStore.getFailedItems(aiPhotoUris)
                 val aiConfig = aiPrefs.currentConfig()
 
                 FullCountsResult(
@@ -237,12 +242,15 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         cachedCount = result.ocrCached
                     ),
                     ai = state.ai.copy(
-                        processed = result.aiProcessed.coerceIn(0, totalPhotos),
+                        processed = result.aiProcessed.coerceIn(0, aiPhotos.size),
                         failedCount = result.aiFailedCount,
                         failedItems = result.aiFailedItems,
                         hasApiKey = result.aiConfigured,
                         modelId = result.aiModelId,
-                        endpointLabel = result.aiEndpointLabel
+                        endpointLabel = result.aiEndpointLabel,
+                        isAllFolders = aiIsAllFolders,
+                        selectedFolders = aiSelectedFolders,
+                        scopedTotalPhotos = aiPhotos.size
                     ),
                     faceFinding = state.faceFinding.copy(
                         processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, scopedFaceTotal),
@@ -587,6 +595,13 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false)) }
         }
         IndexingForegroundService.startFace(context, rescanAll = false, engineId = engineId)
+    }
+
+    fun setAiIndexingFolders(allFolders: Boolean, folders: Set<String>) {
+        if (_uiState.value.ai.isRunning) return
+        AiIndexingSettings.setIndexAllFolders(context, allFolders)
+        AiIndexingSettings.setSelectedFolders(context, folders)
+        refreshCounts()
     }
 
     fun setFaceIndexingFolders(allFolders: Boolean, folders: Set<String>) {
@@ -1075,7 +1090,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     fun toggleAiIndexing() {
         val state = _uiState.value
-        if (!state.countsReady || currentPhotos.isEmpty() || !state.ai.hasApiKey) return
+        if (!state.countsReady || state.ai.scopedTotalPhotos <= 0 || !state.ai.hasApiKey) return
         if (state.ai.isRunning) {
             val paused = !state.ai.isPaused
             _uiState.update { it.copy(ai = it.ai.copy(isPaused = paused)) }
@@ -1085,7 +1100,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         if (state.ocr.isRunning || state.location.isRunning || state.faceFinding.isRunning ||
             state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
         ) return
-        if (state.ai.processed >= currentPhotos.size) return
+        if (state.ai.processed >= state.ai.scopedTotalPhotos) return
 
         aiStartTimeMillis = System.currentTimeMillis()
         aiStartProcessed = state.ai.processed
@@ -1100,7 +1115,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     fun clearAndReindexAi() {
         val state = _uiState.value
-        if (!state.ai.hasApiKey) return
+        if (!state.ai.hasApiKey || state.ai.scopedTotalPhotos <= 0) return
         if (state.ocr.isRunning || state.location.isRunning || state.faceFinding.isRunning ||
             state.enteFaceFinding.isRunning || state.modelDownload.isDownloading || state.enteModelDownload.isDownloading
         ) return

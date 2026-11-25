@@ -344,7 +344,7 @@ class CustomAiClient(
         config: AiConfig,
         expectJson: Boolean
     ): String {
-        val rawBase = config.customBaseUrl.ifBlank { AiConfig.DEFAULT_OPENAI_BASE_URL }.trimEnd('/')
+        val rawBase = config.customBaseUrl.ifBlank { AiConfig.DEFAULT_API_BASE_URL }.trimEnd('/')
         val url = if (rawBase.endsWith("/chat/completions")) rawBase else "$rawBase/chat/completions"
 
         val contentValue: Any = if (jpegBase64 != null) {

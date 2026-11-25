@@ -135,6 +135,30 @@ fun AiViewerInsightsCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (aiConfig.hasCredentials && currentAnalysis != null) {
+                    IconButton(
+                        onClick = ::triggerAnalysis,
+                        enabled = !isAnalyzing,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("viewer_ai_reanalyze_button")
+                    ) {
+                        if (isAnalyzing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Re-analyze photo",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
                 if (configuredProviders.isNotEmpty()) {
                     Box {
                         Surface(
@@ -230,7 +254,7 @@ fun AiViewerInsightsCard(
             }
         }
 
-        if (aiConfig.hasCredentials) {
+        if (aiConfig.hasCredentials && currentAnalysis == null) {
             Button(
                 onClick = ::triggerAnalysis,
                 enabled = !isAnalyzing,
@@ -245,23 +269,13 @@ fun AiViewerInsightsCard(
                     )
                 } else {
                     Icon(
-                        imageVector = if (currentAnalysis != null) {
-                            Icons.Default.Refresh
-                        } else {
-                            Icons.Outlined.AutoAwesome
-                        },
+                        imageVector = Icons.Outlined.AutoAwesome,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    text = when {
-                        isAnalyzing -> "Analyzing..."
-                        currentAnalysis != null -> "Re-analyze Photo"
-                        else -> "Analyze This Photo"
-                    }
-                )
+                Text(if (isAnalyzing) "Analyzing..." else "Analyze This Photo")
             }
         }
 

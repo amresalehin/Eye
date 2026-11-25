@@ -238,23 +238,6 @@ fun AiViewerInsightsCard(
                                     }
                                 )
                             }
-                            if (onOpenAiSettings != null) {
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("AI Setup") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Outlined.Tune,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    },
-                                    onClick = {
-                                        providerMenuExpanded = false
-                                        onOpenAiSettings()
-                                    }
-                                )
-                            }
                         }
                     }
                 } else if (onOpenAiSettings != null) {

@@ -55,6 +55,10 @@ fun AiSettingsScreen(
     var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
     var modelInput by remember(config.providerId, config.modelId) { mutableStateOf(config.modelId) }
+    var availableModels by remember(config.providerId, config.baseUrl, config.apiKey) { mutableStateOf(emptyList<String>()) }
+    var isFetchingModels by remember { mutableStateOf(false) }
+    var isModelMenuExpanded by remember { mutableStateOf(false) }
+    var modelFetchError by remember { mutableStateOf<String?>(null) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
 
     var isTestingCapabilities by remember { mutableStateOf(false) }
@@ -318,21 +322,94 @@ fun AiSettingsScreen(
                                     .testTag("ai_api_key_input")
                             )
     
-                            OutlinedTextField(
-                                value = modelInput,
-                                onValueChange = {
-                                    modelInput = it
-                                    capabilityReport = null
-                                    testError = null
-                                    actionFeedback = null
-                                },
-                                label = { Text("Model") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_model_id_input")
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { isModelMenuExpanded = true },
+                                        enabled = availableModels.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
+                                            .testTag("ai_model_id_input")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = modelInput.ifBlank { "Select a model" },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = if (modelInput.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                                                else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose model")
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = isModelMenuExpanded,
+                                        onDismissRequest = { isModelMenuExpanded = false },
+                                        modifier = Modifier.heightIn(max = 320.dp)
+                                    ) {
+                                        availableModels.forEach { model ->
+                                            DropdownMenuItem(
+                                                text = { Text(model, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                                onClick = {
+                                                    modelInput = model
+                                                    isModelMenuExpanded = false
+                                                    capabilityReport = null
+                                                    testError = null
+                                                    actionFeedback = null
+                                                    testedEndpointSignature = null
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        isFetchingModels = true
+                                        modelFetchError = null
+                                        scope.launch {
+                                            val fetchConfig = config.copy(
+                                                baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                apiKey = apiKeyInput.trim()
+                                            )
+                                            aiClient.fetchAvailableModels(fetchConfig)
+                                                .onSuccess { models ->
+                                                    availableModels = models
+                                                    if (modelInput !in models) modelInput = ""
+                                                    modelFetchError = null
+                                                }
+                                                .onFailure { error ->
+                                                    modelFetchError = error.message ?: "Could not fetch models"
+                                                }
+                                            isFetchingModels = false
+                                        }
+                                    },
+                                    enabled = !isFetchingModels && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (isFetchingModels) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(if (isFetchingModels) "Fetching models…" else "Fetch models")
+                                }
+                                modelFetchError?.let { message ->
+                                    Text(
+                                        text = message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
     
                             // One full-width action advances from Test to Save after a successful test.
                             Button(

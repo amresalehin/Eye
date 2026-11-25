@@ -519,6 +519,30 @@ fun AiSettingsScreen(
             Spacer(Modifier.height(16.dp))
         }
 
+        // Back navigation only; the page title/header is intentionally removed.
+        Surface(
+            onClick = onBack,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp, top = 8.dp)
+                .size(48.dp)
+                .testTag("ai_settings_back_button")
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
     }
 
     if (showClearCacheConfirm) {

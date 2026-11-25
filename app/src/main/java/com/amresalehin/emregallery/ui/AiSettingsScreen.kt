@@ -239,20 +239,21 @@ fun AiSettingsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(76.dp),
-                    contentAlignment = Alignment.Center
+                        .height(96.dp),
+                    contentAlignment = if (isAiSetupExpanded) Alignment.CenterStart else Alignment.Center
                 ) {
                     IconButton(
                         onClick = { isAiSetupExpanded = !isAiSetupExpanded },
                         modifier = Modifier
-                            .size(48.dp)
+                            .padding(start = if (isAiSetupExpanded) 16.dp else 0.dp)
+                            .size(40.dp)
                             .testTag("ai_setup_expand_bar")
                     ) {
                         Icon(
                             imageVector = if (isAiSetupExpanded) Icons.Default.Close else Icons.Default.Add,
                             contentDescription = if (isAiSetupExpanded) "Close provider form" else "Add provider",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }

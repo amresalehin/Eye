@@ -346,49 +346,56 @@ fun AiIndexingCard(
                                     }
                                 }
                             } else {
-                                Row(
+                                BoxWithConstraints(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(3.dp)
-                                        .horizontalScroll(rememberScrollState()),
-                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    aiState.configuredProviders.forEachIndexed { index, provider ->
-                                        if (index > 0) {
-                                            VerticalDivider(
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                                modifier = Modifier
-                                                    .fillMaxHeight(0.6f)
-                                                    .width(1.dp)
-                                            )
-                                        }
-                                        val selected = provider.id == aiState.selectedProviderId
-                                        Surface(
-                                            onClick = { onSelectProvider(provider.id) },
-                                            enabled = !aiState.isRunning,
-                                            shape = RoundedCornerShape(20.dp),
-                                            color = if (selected) Color(0xFF161A20) else Color.Transparent,
-                                            modifier = Modifier
-                                                .height(38.dp)
-                                                .widthIn(min = 72.dp, max = 160.dp)
-                                                .testTag("ai_vision_provider_" + provider.id)
-                                        ) {
-                                            Box(
-                                                contentAlignment = Alignment.Center,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .padding(horizontal = 14.dp)
-                                            ) {
-                                                Text(
-                                                    text = provider.name,
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        fontSize = 13.sp,
-                                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
-                                                    ),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .horizontalScroll(rememberScrollState())
+                                            .widthIn(min = maxWidth),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        aiState.configuredProviders.forEachIndexed { index, provider ->
+                                            if (index > 0) {
+                                                VerticalDivider(
+                                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                                    modifier = Modifier
+                                                        .fillMaxHeight(0.6f)
+                                                        .width(1.dp)
                                                 )
+                                            }
+                                            val selected = provider.id == aiState.selectedProviderId
+                                            Surface(
+                                                onClick = { onSelectProvider(provider.id) },
+                                                enabled = !aiState.isRunning,
+                                                shape = RoundedCornerShape(20.dp),
+                                                color = if (selected) Color(0xFF161A20) else Color.Transparent,
+                                                modifier = Modifier
+                                                    .height(38.dp)
+                                                    .widthIn(min = 72.dp, max = 160.dp)
+                                                    .testTag("ai_vision_provider_" + provider.id)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(horizontal = 14.dp)
+                                                ) {
+                                                    Text(
+                                                        text = provider.name,
+                                                        style = MaterialTheme.typography.bodySmall.copy(
+                                                            fontSize = 13.sp,
+                                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
+                                                        ),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         }
                                     }

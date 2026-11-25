@@ -241,39 +241,35 @@ fun AiSettingsScreen(
                     .testTag("ai_unified_config_card")
             ) {
                 if (!isAiSetupExpanded) {
-                    Box(
+                    TextButton(
+                        onClick = {
+                            isCreatingProvider = true
+                            providerNameInput = ""
+                            baseUrlInput = ""
+                            apiKeyInput = ""
+                            modelInput = ""
+                            availableModels = emptyList()
+                            modelFetchError = null
+                            capabilityReport = null
+                            testError = null
+                            actionFeedback = null
+                            saveError = null
+                            testedEndpointSignature = null
+                            isAiSetupExpanded = true
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(96.dp),
-                        contentAlignment = Alignment.Center
+                            .height(56.dp)
+                            .testTag("ai_setup_expand_bar"),
+                        shape = RoundedCornerShape(18.dp)
                     ) {
-                        IconButton(
-                            onClick = {
-                                isCreatingProvider = true
-                                providerNameInput = ""
-                                baseUrlInput = ""
-                                apiKeyInput = ""
-                                modelInput = ""
-                                availableModels = emptyList()
-                                modelFetchError = null
-                                capabilityReport = null
-                                testError = null
-                                actionFeedback = null
-                                saveError = null
-                                testedEndpointSignature = null
-                                isAiSetupExpanded = true
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("ai_setup_expand_bar")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add provider",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Configure Another Provider")
                     }
                 }
                     if (isAiSetupExpanded) {

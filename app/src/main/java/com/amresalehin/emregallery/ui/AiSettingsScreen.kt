@@ -109,6 +109,140 @@ fun AiSettingsScreen(
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(56.dp))
 
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ai_configured_models_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Configured models",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    prefs.addAiProvider("New provider")
+                                    capabilityReport = null
+                                    testError = null
+                                    actionFeedback = null
+                                    testedEndpointSignature = null
+                                }
+                            },
+                            modifier = Modifier.testTag("ai_add_provider_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add")
+                        }
+                    }
+
+                    val configuredProviders = providers.filter { it.isConfigured }
+                    if (configuredProviders.isEmpty()) {
+                        Text(
+                            text = "No configured models yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        configuredProviders.forEach { provider ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (provider.id == config.providerId)
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch {
+                                            prefs.selectAiProvider(provider.id)
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            testedEndpointSignature = null
+                                        }
+                                    }
+                                    .testTag("ai_configured_model_${provider.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = provider.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${provider.modelId} · ${provider.baseUrl}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (provider.id == config.providerId) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = "Active model",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch {
+                                                prefs.selectAiProvider(provider.id)
+                                                capabilityReport = null
+                                                testError = null
+                                                actionFeedback = null
+                                                testedEndpointSignature = null
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("ai_edit_provider_${provider.id}")
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit ${provider.name}")
+                                    }
+                                    IconButton(
+                                        onClick = { providerToDelete = provider.id to provider.name },
+                                        enabled = providers.size > 1,
+                                        modifier = Modifier.testTag("ai_delete_provider_${provider.id}")
+                                    ) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${provider.name}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+
             // Unified Custom API Configuration Card
             Card(
                 shape = RoundedCornerShape(26.dp),
@@ -441,139 +575,6 @@ fun AiSettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
-                        }
-                    }
-                }
-            }
-
-            Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = cardBackground),
-                border = cardBorder,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("ai_configured_models_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Configured models",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    prefs.addAiProvider("New provider")
-                                    capabilityReport = null
-                                    testError = null
-                                    actionFeedback = null
-                                    testedEndpointSignature = null
-                                }
-                            },
-                            modifier = Modifier.testTag("ai_add_provider_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add")
-                        }
-                    }
-
-                    val configuredProviders = providers.filter { it.isConfigured }
-                    if (configuredProviders.isEmpty()) {
-                        Text(
-                            text = "No configured models yet",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    } else {
-                        configuredProviders.forEach { provider ->
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (provider.id == config.providerId)
-                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        scope.launch {
-                                            prefs.selectAiProvider(provider.id)
-                                            capabilityReport = null
-                                            testError = null
-                                            actionFeedback = null
-                                            testedEndpointSignature = null
-                                        }
-                                    }
-                                    .testTag("ai_configured_model_${provider.id}")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = provider.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${provider.modelId} · ${provider.baseUrl}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    if (provider.id == config.providerId) {
-                                        Icon(
-                                            Icons.Default.CheckCircle,
-                                            contentDescription = "Active model",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            scope.launch {
-                                                prefs.selectAiProvider(provider.id)
-                                                capabilityReport = null
-                                                testError = null
-                                                actionFeedback = null
-                                                testedEndpointSignature = null
-                                            }
-                                        },
-                                        modifier = Modifier.testTag("ai_edit_provider_${provider.id}")
-                                    ) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit ${provider.name}")
-                                    }
-                                    IconButton(
-                                        onClick = { providerToDelete = provider.id to provider.name },
-                                        enabled = providers.size > 1,
-                                        modifier = Modifier.testTag("ai_delete_provider_${provider.id}")
-                                    ) {
-                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${provider.name}")
-                                    }
-                                }
-                            }
                         }
                     }
                 }

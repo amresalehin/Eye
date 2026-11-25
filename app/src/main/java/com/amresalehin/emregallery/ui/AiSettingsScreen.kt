@@ -565,7 +565,6 @@ fun AiSettingsScreen(
     
                     }
                 }
-            }
 
             Card(
                 shape = RoundedCornerShape(22.dp),

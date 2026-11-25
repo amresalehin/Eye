@@ -492,7 +492,11 @@ fun AiSettingsScreen(
                                             isTestingCapabilities = false
                                             result.onSuccess { report ->
                                                 capabilityReport = report
-                                                testedEndpointSignature = endpointSignature
+                                                testedEndpointSignature = if (report.fullyReady) {
+                                                    endpointSignature
+                                                } else {
+                                                    null
+                                                }
                                             }.onFailure { err ->
                                                 testError = err.message ?: "Endpoint test failed"
                                             }
@@ -507,15 +511,32 @@ fun AiSettingsScreen(
                                     .height(56.dp)
                                     .testTag("ai_primary_config_action_button")
                             ) {
-                                Text(
-                                    text = actionLabel,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    if (
+                                        (endpointTestPassed && capabilityReport?.fullyReady == true) ||
+                                        actionFeedback == "Saved"
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        text = actionLabel,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
     
-                            // Live Text & Vision Capability Test Report
-                            capabilityReport?.let { report ->
+                            // Capability details remain visible only when a capability check fails.
+                            capabilityReport?.takeUnless { it.fullyReady }?.let { report ->
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh,

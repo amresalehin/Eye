@@ -1,6 +1,11 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -49,6 +54,16 @@ fun AiIndexingCard(
     val progress = if (totalPhotos > 0) (aiState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
     val animatedProgress by animateFloatAsState(targetValue = progress, label = "ai_progress")
     val percent = (progress * 100f).roundToInt()
+    val skeletonAlpha by rememberInfiniteTransition(label = "ai_model_skeleton")
+        .animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.75f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "ai_model_skeleton_alpha"
+        )
 
     val isRunning = aiState.isRunning && !aiState.isPaused
     val isPaused = aiState.isRunning && aiState.isPaused
@@ -286,7 +301,7 @@ fun AiIndexingCard(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (aiState.configuredProviders.isNotEmpty()) {
+                if (!aiState.providersLoaded || aiState.configuredProviders.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(
                             text = "Vision model",
@@ -294,42 +309,64 @@ fun AiIndexingCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
                         )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            aiState.configuredProviders.forEach { provider ->
-                                val selected = provider.id == aiState.selectedProviderId
-                                Surface(
-                                    onClick = { if (!aiState.isRunning) onSelectProvider(provider.id) },
-                                    enabled = !aiState.isRunning,
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                    ),
-                                    modifier = Modifier
-                                        .height(36.dp)
-                                        .testTag("ai_vision_provider_" + provider.id)
-                                ) {
+                        if (!aiState.providersLoaded) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_vision_model_selector_skeleton"),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(76.dp, 94.dp, 68.dp).forEachIndexed { index, width ->
                                     Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier.padding(horizontal = 14.dp)
+                                        modifier = Modifier
+                                            .width(width)
+                                            .height(36.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = skeletonAlpha)
+                                            )
+                                            .testTag("ai_vision_model_skeleton_$index")
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                aiState.configuredProviders.forEach { provider ->
+                                    val selected = provider.id == aiState.selectedProviderId
+                                    Surface(
+                                        onClick = { if (!aiState.isRunning) onSelectProvider(provider.id) },
+                                        enabled = !aiState.isRunning,
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                        ),
+                                        modifier = Modifier
+                                            .height(36.dp)
+                                            .testTag("ai_vision_provider_" + provider.id)
                                     ) {
-                                        Text(
-                                            text = provider.name,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                            else MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(horizontal = 14.dp)
+                                        ) {
+                                            Text(
+                                                text = provider.name,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }

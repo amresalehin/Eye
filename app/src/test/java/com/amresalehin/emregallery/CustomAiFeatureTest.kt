@@ -285,7 +285,9 @@ class CustomAiFeatureTest {
                 baseUrl = server.url("/v1").toString().trimEnd('/'),
                 apiKey = "key-123",
                 modelId = "any-vision-model",
-                analysisPromptTemplate = AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE + "\n\nHighlight totals on receipts"
+                analysisPromptTemplate = AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE
+                    .replace("\\"collections\\": []", "\\"collections\\": [],\\n  \\"key_details\\": \\"Legacy details\\"") +
+                    "\n\nHighlight totals on receipts"
             )
 
             val analysisResult = client.analyzeImage(

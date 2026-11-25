@@ -9,6 +9,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
 import com.amresalehin.emregallery.data.preferences.AiConfig
+import com.amresalehin.emregallery.data.preferences.isOllamaEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -65,44 +66,88 @@ class CustomAiClient(
         withContext(Dispatchers.IO) {
             runCatching {
                 require(config.normalizedBaseUrl.isNotBlank()) { "Base URL is required." }
-                require(config.apiKey.isNotBlank()) { "API key is required." }
                 val base = config.normalizedBaseUrl
                 val uri = URI(base)
+                require(uri.scheme == "http" || uri.scheme == "https") {
+                    "Base URL must start with http:// or https://."
+                }
+                require(!uri.host.isNullOrBlank()) { "Base URL must include a valid host." }
+
                 val host = uri.host.orEmpty().lowercase()
                 val path = uri.path.orEmpty().trimEnd('/')
                 val isGemini = host.contains("generativelanguage.googleapis.com") &&
                     !path.contains("/openai", ignoreCase = true)
                 val isAnthropic = host.contains("api.anthropic.com") ||
+                    path.endsWith("/v1/messages") ||
                     path.endsWith("/messages") && !path.contains("/chat")
-                val url = when {
+
+                // Accept either a provider root or a pasted operation URL, but query
+                // the model-list endpoint rather than appending /models to the operation.
+                val requestPath = when {
                     isGemini -> when {
-                        path.endsWith("/models") -> base
-                        path.endsWith("/v1beta") || path.endsWith("/v1") -> "$base/models"
-                        else -> "$base/v1beta/models"
+                        path.endsWith("/models") -> path
+                        path.contains("/v1beta/models/") ->
+                            path.substring(0, path.indexOf("/v1beta")) + "/v1beta/models"
+                        path.contains("/v1/models/") ->
+                            path.substring(0, path.indexOf("/v1")) + "/v1/models"
+                        path.endsWith("/v1beta") || path.endsWith("/v1") -> "$path/models"
+                        else -> "$path/v1beta/models"
                     }
                     isAnthropic -> when {
-                        path.endsWith("/v1") -> "$base/models"
-                        path.endsWith("/v1/models") -> base
-                        else -> "$base/v1/models"
+                        path.endsWith("/v1/models") -> path
+                        path.endsWith("/v1/messages") -> path.removeSuffix("/messages") + "models"
+                        path.endsWith("/v1") -> "$path/models"
+                        path.endsWith("/messages") -> path.removeSuffix("/messages") + "/models"
+                        else -> "$path/v1/models"
                     }
-                    else -> when {
-                        path.endsWith("/models") -> base
-                        else -> "$base/models"
+                    else -> {
+                        if (path.endsWith("/models")) {
+                            path
+                        } else {
+                            val apiRoot = listOf(
+                                "/chat/completions",
+                                "/responses",
+                                "/embeddings"
+                            ).firstOrNull { path.endsWith(it) }
+                                ?.let { path.removeSuffix(it) }
+                                ?: path
+                            "$apiRoot/models"
+                        }
                     }
+                }.replace("//", "/").let { resolvedPath ->
+                    if (resolvedPath.startsWith("/")) resolvedPath else "/$resolvedPath"
                 }
+                val url = URI(
+                    uri.scheme,
+                    uri.userInfo,
+                    uri.host,
+                    uri.port,
+                    requestPath,
+                    null,
+                    null
+                ).toASCIIString()
+
                 val requestBuilder = Request.Builder().url(url).get()
                     .header("Accept", "application/json")
                 when {
-                    isGemini -> requestBuilder.header("x-goog-api-key", config.apiKey)
-                    isAnthropic -> requestBuilder
-                        .header("x-api-key", config.apiKey)
-                        .header("anthropic-version", "2023-06-01")
-                    else -> requestBuilder.header("Authorization", "Bearer ${config.apiKey}")
+                    isGemini && config.apiKey.isNotBlank() ->
+                        requestBuilder.header("x-goog-api-key", config.apiKey.trim())
+                    isAnthropic -> {
+                        if (config.apiKey.isNotBlank()) {
+                            requestBuilder.header("x-api-key", config.apiKey.trim())
+                        }
+                        requestBuilder.header("anthropic-version", "2023-06-01")
+                    }
+                    config.apiKey.isNotBlank() ->
+                        requestBuilder.header("Authorization", "Bearer ${config.apiKey.trim()}")
                 }
                 httpClient.newCall(requestBuilder.build()).execute().use { response ->
                     val body = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
-                        error(extractErrorMessage(body) ?: "Model list request failed (${response.code})")
+                        error(
+                            extractErrorMessage(body)
+                                ?: "Model list request failed with HTTP ${response.code}."
+                        )
                     }
                     val root = JSONObject(body)
                     val models = when {
@@ -119,26 +164,25 @@ class CustomAiClient(
                                 }
                             }
                         }
-                        isAnthropic -> {
-                            val items = root.optJSONArray("data") ?: JSONArray()
-                            buildList {
-                                for (i in 0 until items.length()) {
-                                    val id = items.optJSONObject(i)?.optString("id").orEmpty().trim()
-                                    if (id.isNotBlank()) add(id)
-                                }
-                            }
-                        }
                         else -> {
-                            val items = root.optJSONArray("data") ?: JSONArray()
+                            val items = root.optJSONArray("data")
+                                ?: root.optJSONArray("models")
+                                ?: root.optJSONArray("items")
+                                ?: JSONArray()
                             buildList {
                                 for (i in 0 until items.length()) {
-                                    val id = items.optJSONObject(i)?.optString("id").orEmpty().trim()
+                                    val item = items.optJSONObject(i) ?: continue
+                                    val id = item.optString("id").ifBlank {
+                                        item.optString("name").ifBlank { item.optString("model") }
+                                    }.trim()
                                     if (id.isNotBlank()) add(id)
                                 }
                             }
                         }
                     }.distinct().sorted()
-                    if (models.isEmpty()) error("No models were returned by this endpoint.")
+                    if (models.isEmpty()) {
+                        error("The endpoint responded, but returned no models. Check that the Base URL points to the provider API root.")
+                    }
                     models
                 }
             }
@@ -364,7 +408,9 @@ class CustomAiClient(
 
     private fun validateCredentials(config: AiConfig) {
         require(config.normalizedBaseUrl.isNotBlank()) { "Base URL is required." }
-        require(config.apiKey.isNotBlank()) { "API key is required." }
+        require(config.apiKey.isNotBlank() || isOllamaEndpoint(config.baseUrl)) {
+            "API key is required unless this is an Ollama endpoint."
+        }
         require(config.modelId.isNotBlank()) { "Model ID is required." }
     }
 
@@ -468,10 +514,13 @@ class CustomAiClient(
                     }
                 }
 
-                val request = Request.Builder()
+                val requestBuilder = Request.Builder()
                     .url(url)
-                    .header("Authorization", "Bearer ${config.apiKey}")
                     .header("Content-Type", "application/json")
+                if (config.apiKey.isNotBlank()) {
+                    requestBuilder.header("Authorization", "Bearer ${config.apiKey.trim()}")
+                }
+                val request = requestBuilder
                     .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
                     .build()
 

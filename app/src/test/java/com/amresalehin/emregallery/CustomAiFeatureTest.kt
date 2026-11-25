@@ -62,6 +62,60 @@ class CustomAiFeatureTest {
     }
 
     @Test
+    fun fetchAvailableModels_resolvesChatCompletionsBaseUrlAndParsesOpenAiModelList() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"object":"list","data":[{"id":"vision-model-b"},{"id":"vision-model-a"}]}"""
+            )
+        )
+        val config = AiConfig(
+            baseUrl = server.url("/v1/chat/completions").toString(),
+            apiKey = "test-key"
+        )
+
+        val models = client.fetchAvailableModels(config).getOrThrow()
+        assertEquals(listOf("vision-model-a", "vision-model-b"), models)
+
+        val request = server.takeRequest()
+        assertEquals("/v1/models", request.path)
+        assertEquals("Bearer test-key", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun fetchAvailableModels_allowsKeylessLocalOpenAiCompatibleEndpoint() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"data":[{"id":"local-vision-model"}]}"""
+            )
+        )
+        val config = AiConfig(baseUrl = server.url("/v1").toString())
+
+        val models = client.fetchAvailableModels(config).getOrThrow()
+        assertEquals(listOf("local-vision-model"), models)
+
+        val request = server.takeRequest()
+        assertEquals("/v1/models", request.path)
+        assertNull(request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun ollamaRootUrlNormalizesToOpenAiCompatibleApiAndAllowsMissingKey() {
+        val config = AiConfig(
+            baseUrl = "http://ollama:11434",
+            modelId = "qwen2.5vl:3b"
+        )
+        assertEquals("http://ollama:11434/v1", config.normalizedBaseUrl)
+        assertTrue(config.hasCredentials)
+        assertTrue(
+            com.amresalehin.emregallery.data.preferences.AiProviderProfile(
+                name = "Ollama",
+                baseUrl = "http://ollama:11434",
+                modelId = "qwen2.5vl:3b"
+            ).isConfigured
+        )
+    }
+
+    @Test
     fun testEndpointCapabilities_openaiCompatible_andGeminiCompat_testBothTextAndVision() = runBlocking {
         // 1. Gemini OpenAI-compatibility endpoint must route through the common OpenAI-compatible client
         server.enqueue(

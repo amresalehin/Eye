@@ -15,6 +15,13 @@ import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
 
+internal fun isOllamaEndpoint(rawBaseUrl: String): Boolean =
+    runCatching {
+        val uri = URI(rawBaseUrl.trim())
+        val host = uri.host.orEmpty().lowercase()
+        uri.port == 11434 || host == "ollama" || host.endsWith(".ollama")
+    }.getOrDefault(false)
+
 data class AiProviderProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -23,7 +30,9 @@ data class AiProviderProfile(
     val modelId: String = ""
 ) {
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && modelId.isNotBlank()
+        get() = baseUrl.isNotBlank() &&
+            (apiKey.isNotBlank() || isOllamaEndpoint(baseUrl)) &&
+            modelId.isNotBlank()
 }
 
 data class AiConfig(
@@ -84,10 +93,20 @@ On-device OCR text detected in this image:
     }
 
     val normalizedBaseUrl: String
-        get() = baseUrl.trim().trimEnd('/')
+        get() {
+            val base = baseUrl.trim().trimEnd('/')
+            val uri = runCatching { URI(base) }.getOrNull()
+            return if (base.isNotBlank() && isOllamaEndpoint(base) && uri?.path.isNullOrBlank()) {
+                "$base/v1"
+            } else {
+                base
+            }
+        }
 
     val hasCredentials: Boolean
-        get() = normalizedBaseUrl.isNotBlank() && apiKey.isNotBlank() && modelId.isNotBlank()
+        get() = normalizedBaseUrl.isNotBlank() &&
+            (apiKey.isNotBlank() || isOllamaEndpoint(baseUrl)) &&
+            modelId.isNotBlank()
 
     val isConfigured: Boolean
         get() = enabled && hasCredentials
@@ -314,8 +333,8 @@ class AiPreferencesManager(private val context: Context) {
     ): String {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "Enter a provider name." }
-        require(baseUrl.isNotBlank() && apiKey.isNotBlank() && modelId.isNotBlank()) {
-            "Complete the endpoint, API key, and model before saving."
+        require(baseUrl.isNotBlank() && (apiKey.isNotBlank() || isOllamaEndpoint(baseUrl)) && modelId.isNotBlank()) {
+            "Complete the endpoint and model; enter an API key unless this is an Ollama endpoint."
         }
         var savedId = providerId
         context.galleryDataStore.edit { prefs ->

@@ -33,6 +33,7 @@ import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
+import com.amresalehin.emregallery.data.preferences.isOllamaEndpoint
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToLong
@@ -114,7 +115,8 @@ fun AiSettingsScreen(
     val endpointSignature = "${if (isCreatingProvider) "__new_provider__" else config.providerId}|${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
     val endpointTestPassed = testedEndpointSignature == endpointSignature
     val canTest = !isTestingCapabilities && !isSavingConfig &&
-        providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
+        providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() &&
+        (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)) && modelInput.isNotBlank()
     val testActionLabel = when {
         isTestingCapabilities -> "Testing…"
         testError != null || capabilityReport?.fullyReady == false -> "Retry test"
@@ -400,7 +402,8 @@ fun AiSettingsScreen(
                                         .clickable(
                                             enabled = !isFetchingModels && (
                                                 availableModels.isNotEmpty() ||
-                                                    (baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank())
+                                                    (baseUrlInput.isNotBlank() &&
+                                                        (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)))
                                                 )
                                         ) {
                                             if (availableModels.isEmpty()) {

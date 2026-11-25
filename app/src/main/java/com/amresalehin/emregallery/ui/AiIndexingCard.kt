@@ -292,7 +292,7 @@ fun AiIndexingCard(
                         onDismissRequest = { showActionMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Re-analyze All Photos") },
+                            text = { Text(if (aiState.isAllFolders) "Re-analyze All Photos" else "Re-analyze Selected Folders") },
                             onClick = {
                                 showActionMenu = false
                                 onReindexAi()

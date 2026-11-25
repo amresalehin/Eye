@@ -224,9 +224,9 @@ class CustomAiClient(
                 ?: error("Could not decode image for AI analysis.")
 
             val prompt = buildAnalysisPrompt(
+                template = config.analysisPromptTemplate,
                 existingCollections = existingCollections,
-                ocrContext = ocrContext,
-                customInstructions = config.customPromptInstructions
+                ocrContext = ocrContext
             )
 
             val adapter = selectAdapter(config.normalizedBaseUrl)
@@ -713,38 +713,18 @@ class CustomAiClient(
     }
 
     private fun buildAnalysisPrompt(
+        template: String,
         existingCollections: List<String>,
-        ocrContext: String?,
-        customInstructions: String
-    ): String = buildString {
-        append(
-            """
-            Analyze this image or screenshot for a smart photo & screenshot organizer.
-            Return ONLY a valid JSON object with this exact schema:
-            {
-              "title": "Short 2-5 word descriptive title",
-              "description": "Clear 1-2 sentence summary of the visual content, scene, app/UI, or subject.",
-              "tags": ["tag1", "tag2", "tag3"],
-              "collection": "Single concise collection name",
-              "key_details": "Important extracted details like dates, prices, names, code language, or place (or empty string)"
-            }
-            Rules:
-            - Provide 3 to 7 concise, lowercase, searchable tags (1-2 words each, no # prefix).
-            - Choose a clean collection name such as Receipts, Documents, Code, Chats, Notes, Travel, Food, Shopping, Design, Memes, Nature, People, or Devices.
-            """.trimIndent()
-        )
-        if (existingCollections.isNotEmpty()) {
-            append("\n- Prefer reusing one of these existing collections if it fits well: ")
-            append(existingCollections.distinct().take(20).joinToString(", "))
-        }
-        if (!ocrContext.isNullOrBlank()) {
-            append("\n\nOn-device OCR text detected in this image:\n")
-            append(ocrContext.take(1500))
-        }
-        if (customInstructions.isNotBlank()) {
-            append("\n\nAdditional user instructions:\n")
-            append(customInstructions.take(500))
-        }
+        ocrContext: String?
+    ): String {
+        val collectionContext = existingCollections
+            .distinct()
+            .take(20)
+            .joinToString(", ")
+        val ocrText = ocrContext.orEmpty().take(1500)
+        return template.ifBlank { AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE }
+            .replace("{{existing_collections}}", collectionContext)
+            .replace("{{ocr_context}}", ocrText)
     }
 
     internal fun parseAnalysisJson(

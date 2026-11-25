@@ -135,6 +135,7 @@ class PreferencesRepository(context: Context) {
     suspend fun setAiAutoOrganizeCollections(enabled: Boolean) = aiPrefs.setAutoOrganizeCollections(enabled)
     suspend fun setAiIncludeOcrContext(enabled: Boolean) = aiPrefs.setIncludeOcrContext(enabled)
     suspend fun setAiCustomPromptInstructions(instructions: String) = aiPrefs.setCustomPromptInstructions(instructions)
+    suspend fun setAiAnalysisPromptTemplate(template: String) = aiPrefs.setAnalysisPromptTemplate(template)
     suspend fun setAiBatchDelayMs(delayMs: Long) = aiPrefs.setBatchDelayMs(delayMs)
 
     // --- Media Downloader Customizability ---

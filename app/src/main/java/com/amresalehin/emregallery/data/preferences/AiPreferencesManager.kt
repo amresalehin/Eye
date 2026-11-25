@@ -35,10 +35,33 @@ data class AiConfig(
     val autoOrganizeCollections: Boolean = true,
     val includeOcrContext: Boolean = true,
     val customPromptInstructions: String = "",
+    val analysisPromptTemplate: String = DEFAULT_ANALYSIS_PROMPT_TEMPLATE,
     val batchDelayMs: Long = 500L,
     val providerId: String = "legacy",
     val providerName: String = "Default provider"
 ) {
+    companion object {
+        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo & screenshot organizer.
+Return ONLY a valid JSON object with this exact schema:
+{
+  "title": "Short 2-5 word descriptive title",
+  "description": "Clear 1-2 sentence summary of the visual content, scene, app/UI, or subject.",
+  "tags": ["tag1", "tag2", "tag3"],
+  "collection": "Single concise collection name",
+  "key_details": "Important extracted details like dates, prices, names, code language, or place (or empty string)"
+}
+Rules:
+- Provide 3 to 7 concise, lowercase, searchable tags (1-2 words each, no # prefix).
+- Choose a clean collection name such as Receipts, Documents, Code, Chats, Notes, Travel, Food, Shopping, Design, Memes, Nature, People, or Devices.
+- Prefer reusing one of the existing collections below when it fits well.
+
+Existing collections:
+{{existing_collections}}
+
+On-device OCR text detected in this image:
+{{ocr_context}}"""
+    }
+
     val normalizedBaseUrl: String
         get() = baseUrl.trim().trimEnd('/')
 
@@ -73,6 +96,7 @@ class AiPreferencesManager(private val context: Context) {
     private val aiAutoOrganizeCollectionsKey = booleanPreferencesKey("ai_auto_organize_collections")
     private val aiIncludeOcrContextKey = booleanPreferencesKey("ai_include_ocr_context")
     private val aiCustomPromptKey = stringPreferencesKey("ai_custom_prompt_instructions")
+    private val aiAnalysisPromptTemplateKey = stringPreferencesKey("ai_analysis_prompt_template")
     private val aiBatchDelayMsKey = longPreferencesKey("ai_batch_delay_ms")
 
     private fun decodeProfiles(raw: String?): List<AiProviderProfile> {
@@ -154,6 +178,14 @@ class AiPreferencesManager(private val context: Context) {
             autoOrganizeCollections = prefs[aiAutoOrganizeCollectionsKey] ?: true,
             includeOcrContext = prefs[aiIncludeOcrContextKey] ?: true,
             customPromptInstructions = prefs[aiCustomPromptKey] ?: "",
+            analysisPromptTemplate = prefs[aiAnalysisPromptTemplateKey] ?: buildString {
+                append(AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE)
+                val legacyInstructions = prefs[aiCustomPromptKey].orEmpty().trim()
+                if (legacyInstructions.isNotBlank()) {
+                    append("\n\nAdditional user instructions:\n")
+                    append(legacyInstructions.take(500))
+                }
+            },
             batchDelayMs = (prefs[aiBatchDelayMsKey] ?: 500L).coerceAtLeast(0L),
             providerId = selected?.id ?: "legacy",
             providerName = selected?.name ?: "No provider selected"
@@ -292,6 +324,10 @@ class AiPreferencesManager(private val context: Context) {
 
     suspend fun setCustomPromptInstructions(instructions: String) {
         context.galleryDataStore.edit { it[aiCustomPromptKey] = instructions.trim() }
+    }
+
+    suspend fun setAnalysisPromptTemplate(template: String) {
+        context.galleryDataStore.edit { it[aiAnalysisPromptTemplateKey] = template }
     }
 
     suspend fun setBatchDelayMs(delayMs: Long) {

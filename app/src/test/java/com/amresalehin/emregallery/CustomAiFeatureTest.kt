@@ -230,7 +230,7 @@ class CustomAiFeatureTest {
                 baseUrl = server.url("/v1").toString().trimEnd('/'),
                 apiKey = "key-123",
                 modelId = "any-vision-model",
-                customPromptInstructions = "Highlight totals on receipts"
+                analysisPromptTemplate = AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE + "\n\nHighlight totals on receipts"
             )
 
             val analysisResult = client.analyzeImage(
@@ -254,6 +254,9 @@ class CustomAiFeatureTest {
             assertFalse(retryReqBody.contains("response_format"))
             assertTrue(retryReqBody.contains("image_url"))
             assertTrue(retryReqBody.contains("TOTAL $9.50"))
+            assertTrue(retryReqBody.contains("Receipts, Travel"))
+            assertFalse(retryReqBody.contains("{{existing_collections}}"))
+            assertFalse(retryReqBody.contains("{{ocr_context}}"))
             assertTrue(retryReqBody.contains("Highlight totals on receipts"))
 
             server.enqueue(

@@ -34,6 +34,7 @@ import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlin.math.roundToLong
 
 @Composable
@@ -58,7 +59,13 @@ fun AiSettingsScreen(
     var isFetchingModels by remember { mutableStateOf(false) }
     var isModelMenuExpanded by remember { mutableStateOf(false) }
     var modelFetchError by remember { mutableStateOf<String?>(null) }
-    var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
+    var promptInput by remember(config.analysisPromptTemplate) { mutableStateOf(config.analysisPromptTemplate) }
+    LaunchedEffect(promptInput, config.analysisPromptTemplate) {
+        if (promptInput != config.analysisPromptTemplate) {
+            delay(600)
+            prefs.setAiAnalysisPromptTemplate(promptInput)
+        }
+    }
     fun formatDelaySeconds(delayMs: Long): String {
         val wholeSeconds = delayMs / 1000L
         val remainderMs = delayMs % 1000L
@@ -532,7 +539,6 @@ fun AiSettingsScreen(
                                                         apiKey = apiKeyInput.trim(),
                                                         modelId = modelInput.trim()
                                                     )
-                                                    prefs.setAiCustomPromptInstructions(promptInput.trim())
                                                 }.onSuccess {
                                                     isCreatingProvider = false
                                                     actionFeedback = "Saved"
@@ -742,22 +748,37 @@ fun AiSettingsScreen(
                     .fillMaxWidth()
                     .testTag("ai_custom_prompt_card")
             ) {
-                OutlinedTextField(
-                    value = promptInput,
-                    onValueChange = {
-                        promptInput = it
-                        actionFeedback = null
-                        saveError = null
-                    },
-                    label = { Text("Custom prompt") },
-                    minLines = 2,
-                    maxLines = 4,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .testTag("ai_custom_prompt_input")
-                )
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Custom prompt",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "This is the full image-analysis prompt sent to your configured API model. Changes save automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = promptInput,
+                        onValueChange = { promptInput = it },
+                        label = { Text("Prompt sent to API") },
+                        minLines = 12,
+                        maxLines = 20,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ai_custom_prompt_input")
+                    )
+                    Text(
+                        text = "Dynamic placeholders: {{existing_collections}} inserts existing collection names; {{ocr_context}} inserts OCR text for each image.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(Modifier.navigationBarsPadding())

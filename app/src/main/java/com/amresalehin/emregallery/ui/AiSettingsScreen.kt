@@ -20,8 +20,6 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,7 +47,6 @@ fun AiSettingsScreen(
     }
     var baseUrlInput by remember(config.providerId, config.baseUrl) { mutableStateOf(config.baseUrl) }
     var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
-    var showApiKey by remember { mutableStateOf(false) }
     var modelInput by remember(config.providerId, config.modelId) { mutableStateOf(config.modelId) }
     var availableModels by remember(config.providerId, config.baseUrl, config.apiKey) { mutableStateOf(emptyList<String>()) }
     var isFetchingModels by remember { mutableStateOf(false) }
@@ -336,18 +333,6 @@ fun AiSettingsScreen(
                                 label = { Text("API Key") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(14.dp),
-                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { showApiKey = !showApiKey },
-                                        modifier = Modifier.testTag("ai_api_key_visibility_toggle")
-                                    ) {
-                                        Icon(
-                                            imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = if (showApiKey) "Hide key" else "Show key"
-                                        )
-                                    }
-                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("ai_api_key_input")

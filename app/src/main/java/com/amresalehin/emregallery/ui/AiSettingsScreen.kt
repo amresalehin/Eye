@@ -50,7 +50,9 @@ fun AiSettingsScreen(
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
     val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
-    var providerNameInput by remember(config.providerId, config.providerName) { mutableStateOf(config.providerName) }
+    var providerNameInput by remember(config.providerId, config.providerName) {
+        mutableStateOf(config.providerName.takeUnless { it == "No provider selected" }.orEmpty())
+    }
     var baseUrlInput by remember(config.providerId, config.baseUrl) { mutableStateOf(config.baseUrl) }
     var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }

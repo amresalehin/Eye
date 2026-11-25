@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.ai
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Matrix
 import android.net.Uri
 import android.util.Base64
@@ -48,7 +49,42 @@ class CustomAiClient(
             )
             val latencyMs = (System.currentTimeMillis() - started).coerceAtLeast(1L)
             val preview = text.trim().take(48).ifBlank { "OK" }
-            "Connected (${latencyMs}ms) · $preview"
+            "Text API connected (${latencyMs}ms) · $preview"
+        }
+    }
+
+    /**
+     * Sends a tiny generated JPEG to verify that the configured model accepts image input.
+     * A text-only connection test must not be treated as proof of vision capability.
+     */
+    suspend fun testVisionConnection(config: AiConfig): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(config.apiKey.isNotBlank()) { "Please enter an API key first." }
+            require(config.modelId.isNotBlank()) { "Please specify a model ID." }
+            config.visionSupportWarning?.let { error(it) }
+
+            val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+            val jpegBase64 = try {
+                bitmap.eraseColor(Color.rgb(48, 112, 196))
+                ByteArrayOutputStream().use { output ->
+                    check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) {
+                        "Could not prepare the vision test image."
+                    }
+                    Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+
+            val started = System.currentTimeMillis()
+            val response = executeVisionPrompt(
+                prompt = "This is a vision capability test. If you can see the attached image, respond with exactly: VISION OK",
+                jpegBase64 = jpegBase64,
+                config = config,
+                expectJson = false
+            )
+            val latencyMs = (System.currentTimeMillis() - started).coerceAtLeast(1L)
+            "Vision API connected (${latencyMs}ms) · ${response.trim().take(48)}"
         }
     }
 
@@ -62,6 +98,7 @@ class CustomAiClient(
         runCatching {
             require(config.enabled) { "AI features are currently disabled in settings." }
             require(config.apiKey.isNotBlank()) { "API key is missing. Add your custom API key in AI Settings." }
+            config.visionSupportWarning?.let { error(it) }
 
             val jpegBase64 = encodeImageToJpegBase64(context, mediaUri)
                 ?: error("Could not decode image for AI analysis.")
@@ -97,6 +134,7 @@ class CustomAiClient(
         runCatching {
             require(config.enabled) { "AI features are disabled in settings." }
             require(config.apiKey.isNotBlank()) { "API key is missing. Add your custom API key in AI Settings." }
+            config.visionSupportWarning?.let { error(it) }
             val trimmedQuestion = question.trim()
             require(trimmedQuestion.isNotEmpty()) { "Enter a question first." }
 
@@ -373,10 +411,7 @@ class CustomAiClient(
         httpClient.newCall(request).execute().use { response ->
             val bodyStr = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val apiMsg = runCatching {
-                    JSONObject(bodyStr).optJSONObject("error")?.optString("message")
-                }.getOrNull()?.takeIf { it.isNotBlank() }
-                error(apiMsg ?: "Gemini API error (${response.code})")
+                error(formatHttpError("Gemini", response.code, bodyStr))
             }
             val root = JSONObject(bodyStr)
             val candidates = root.optJSONArray("candidates")
@@ -439,6 +474,9 @@ class CustomAiClient(
                     }
                 )
             )
+            // NVIDIA's hosted endpoint defaults to streaming. Eye parses a single JSON
+            // response, so explicitly disable SSE for all OpenAI-compatible providers.
+            put("stream", false)
             put("temperature", 0.2)
             if (expectJson) {
                 put("response_format", JSONObject().put("type", "json_object"))
@@ -455,21 +493,55 @@ class CustomAiClient(
         httpClient.newCall(request).execute().use { response ->
             val bodyStr = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val apiMsg = runCatching {
-                    JSONObject(bodyStr).optJSONObject("error")?.optString("message")
-                }.getOrNull()?.takeIf { it.isNotBlank() }
-                error(apiMsg ?: "API error (${response.code})")
+                error(formatHttpError("OpenAI-compatible", response.code, bodyStr))
             }
-            val root = JSONObject(bodyStr)
-            val content = root.optJSONArray("choices")
+            if (bodyStr.trimStart().startsWith("data:")) {
+                error("The endpoint returned a streamed response despite stream=false. This provider must return a non-streaming chat completion.")
+            }
+            val root = runCatching { JSONObject(bodyStr) }.getOrElse {
+                error("The endpoint returned a non-JSON response (HTTP ${response.code}): ${bodyStr.take(800)}")
+            }
+            val message = root.optJSONArray("choices")
                 ?.optJSONObject(0)
                 ?.optJSONObject("message")
-                ?.optString("content")
-                ?.trim()
-                .orEmpty()
-            if (content.isEmpty()) error("Empty response from AI endpoint")
+            val contentValue = message?.opt("content")
+            val content = when (contentValue) {
+                is String -> contentValue.trim()
+                is JSONArray -> buildString {
+                    for (index in 0 until contentValue.length()) {
+                        val text = contentValue.optJSONObject(index)?.optString("text").orEmpty()
+                        if (text.isNotBlank()) {
+                            if (isNotEmpty()) append("\n")
+                            append(text)
+                        }
+                    }
+                }.trim()
+                else -> ""
+            }
+            if (content.isEmpty()) error("Empty response from AI endpoint. The provider returned no assistant message content.")
             return content
         }
+    }
+
+    internal fun formatHttpError(providerName: String, statusCode: Int, body: String): String {
+        val parsedDetail = runCatching {
+            val root = JSONObject(body)
+            val errorValue = root.opt("error")
+            val errorObject = errorValue as? JSONObject
+            val message = errorObject?.optString("message")?.takeIf { it.isNotBlank() }
+                ?: errorObject?.optString("detail")?.takeIf { it.isNotBlank() }
+                ?: (errorValue as? String)?.takeIf { it.isNotBlank() }
+                ?: root.optString("detail").takeIf { it.isNotBlank() }
+                ?: root.optString("message").takeIf { it.isNotBlank() }
+            val code = errorObject?.optString("code")?.takeIf { it.isNotBlank() }
+            when {
+                message == null -> null
+                code != null && !message.contains(code, ignoreCase = true) -> "$message (code: $code)"
+                else -> message
+            }
+        }.getOrNull()
+        val detail = parsedDetail ?: body.trim().take(1200).ifBlank { "No response body returned." }
+        return "$providerName API error (HTTP $statusCode): $detail"
     }
 
     private fun encodeImageToJpegBase64(context: Context, uriString: String, maxDimension: Int = 1024): String? {

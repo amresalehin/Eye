@@ -28,6 +28,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.json.JSONObject
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -76,7 +77,7 @@ class CustomAiFeatureTest {
         )
         val geminiResult = client.testConnection(geminiConfig)
         assertTrue("Gemini connection should succeed", geminiResult.isSuccess)
-        assertTrue(geminiResult.getOrThrow().contains("Connected"))
+        assertTrue(geminiResult.getOrThrow().contains("Text API connected"))
 
         val geminiReq = server.takeRequest()
         assertEquals("/v1beta/models/gemini-2.5-flash:generateContent", geminiReq.path)
@@ -100,6 +101,100 @@ class CustomAiFeatureTest {
         val openAiReq = server.takeRequest()
         assertEquals("/v1/chat/completions", openAiReq.path)
         assertEquals("Bearer sk-test-openai", openAiReq.getHeader("Authorization"))
+    }
+
+    @Test
+    fun openAiCompatibleVisionTestSendsImageAndDisablesStreaming() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"choices":[{"message":{"content":"VISION OK"}}]}""")
+        )
+        val config = AiConfig(
+            enabled = true,
+            provider = AiProvider.OPENAI_COMPATIBLE,
+            apiKey = "nvidia-test-key",
+            modelId = "vendor/example-vision-model",
+            customBaseUrl = server.url("/v1").toString().trimEnd('/')
+        )
+
+        val result = client.testVisionConnection(config)
+
+        assertTrue("Vision test should succeed for a vision-capable endpoint", result.isSuccess)
+        assertTrue(result.getOrThrow().contains("Vision API connected"))
+
+        val request = server.takeRequest()
+        assertEquals("/v1/chat/completions", request.path)
+        assertEquals("Bearer nvidia-test-key", request.getHeader("Authorization"))
+        val payload = JSONObject(request.body.readUtf8())
+        assertFalse("The response parser expects a single JSON response", payload.optBoolean("stream", true))
+        val content = payload.getJSONArray("messages")
+            .getJSONObject(0)
+            .getJSONArray("content")
+        assertEquals("image_url", content.getJSONObject(1).getString("type"))
+        assertTrue(
+            content.getJSONObject(1).getJSONObject("image_url")
+                .getString("url").startsWith("data:image/jpeg;base64,")
+        )
+    }
+
+    @Test
+    fun knownTextOnlyNemotronRejectsVisionOperationsBeforeNetworkCall() = runBlocking {
+        val config = AiConfig(
+            enabled = true,
+            provider = AiProvider.OPENAI_COMPATIBLE,
+            apiKey = "nvidia-test-key",
+            modelId = "nvidia/nemotron-3.5-lightning-30b-a3b",
+            customBaseUrl = server.url("/v1").toString().trimEnd('/')
+        )
+
+        val visionTest = client.testVisionConnection(config)
+        val analysis = client.analyzeImage(
+            context = context,
+            mediaUri = "file:///not-opened.jpg",
+            config = config
+        )
+        val question = client.askAboutImage(
+            context = context,
+            mediaUri = "file:///not-opened.jpg",
+            question = "What is in this photo?",
+            config = config
+        )
+
+        assertFalse(visionTest.isSuccess)
+        assertFalse(analysis.isSuccess)
+        assertFalse(question.isSuccess)
+        listOf(visionTest, analysis, question).forEach { result ->
+            assertTrue(
+                result.exceptionOrNull()?.message.orEmpty()
+                    .contains("text-only model", ignoreCase = true)
+            )
+        }
+        assertEquals("Known text-only models must be rejected locally", 0, server.requestCount)
+    }
+
+    @Test
+    fun openAiCompatibleErrorsIncludeHttpStatusAndProviderMessage() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("""{"error":{"message":"This model does not accept image input","code":"unsupported_modality"}}""")
+        )
+        val config = AiConfig(
+            enabled = true,
+            provider = AiProvider.OPENAI_COMPATIBLE,
+            apiKey = "test-key",
+            modelId = "vendor/custom-model",
+            customBaseUrl = server.url("/v1").toString().trimEnd('/')
+        )
+
+        val result = client.testConnection(config)
+
+        assertFalse(result.isSuccess)
+        val message = result.exceptionOrNull()?.message.orEmpty()
+        assertTrue(message.contains("HTTP 400"))
+        assertTrue(message.contains("This model does not accept image input"))
+        assertTrue(message.contains("unsupported_modality"))
     }
 
     @Test

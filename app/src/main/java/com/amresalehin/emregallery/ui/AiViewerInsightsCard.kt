@@ -80,6 +80,10 @@ fun AiViewerInsightsCard(
             onOpenAiSettings?.invoke()
             return
         }
+        aiConfig.visionSupportWarning?.let {
+            analysisError = it
+            return
+        }
         isAnalyzing = true
         analysisError = null
         scope.launch {
@@ -117,6 +121,10 @@ fun AiViewerInsightsCard(
         if (q.isEmpty() || item.isVideo || isAsking) return
         if (!aiConfig.isConfigured) {
             onOpenAiSettings?.invoke()
+            return
+        }
+        aiConfig.visionSupportWarning?.let {
+            askError = it
             return
         }
         isAsking = true
@@ -226,6 +234,21 @@ fun AiViewerInsightsCard(
                     }
                     else -> {
                         val currentAnalysis = analysis?.takeIf { it.isCompleted }
+                        aiConfig.visionSupportWarning?.let { warning ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "$warning Text-based AI search remains available.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
                         if (currentAnalysis != null) {
                             Text(
                                 text = currentAnalysis.title,
@@ -353,7 +376,7 @@ fun AiViewerInsightsCard(
                         ) {
                             FilledTonalButton(
                                 onClick = ::triggerAnalysis,
-                                enabled = !isAnalyzing,
+                                enabled = !isAnalyzing && aiConfig.visionSupportWarning == null,
                                 modifier = Modifier
                                     .defaultMinSize(minHeight = 48.dp)
                                     .testTag("viewer_ai_analyze_button")
@@ -394,6 +417,7 @@ fun AiViewerInsightsCard(
                                 value = questionInput,
                                 onValueChange = { questionInput = it },
                                 label = { Text("Ask AI about this photo") },
+                                enabled = aiConfig.visionSupportWarning == null,
                                 singleLine = true,
                                 modifier = Modifier
                                     .weight(1f)
@@ -401,7 +425,7 @@ fun AiViewerInsightsCard(
                             )
                             IconButton(
                                 onClick = ::submitQuestion,
-                                enabled = questionInput.isNotBlank() && !isAsking,
+                                enabled = questionInput.isNotBlank() && !isAsking && aiConfig.visionSupportWarning == null,
                                 modifier = Modifier
                                     .size(48.dp)
                                     .testTag("viewer_ai_ask_button")

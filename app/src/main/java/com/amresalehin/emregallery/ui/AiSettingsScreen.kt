@@ -62,8 +62,12 @@ fun AiSettingsScreen(
     var modelInput by remember(config.modelId) { mutableStateOf(config.modelId) }
     var baseUrlInput by remember(config.customBaseUrl) { mutableStateOf(config.customBaseUrl) }
     var promptInput by remember(config.customPromptInstructions) { mutableStateOf(config.customPromptInstructions) }
+    val selectedVisionWarning = config.copy(
+        modelId = modelInput.trim().ifBlank { config.modelId }
+    ).visionSupportWarning
 
     var isTestingConnection by remember { mutableStateOf(false) }
+    var isTestingVision by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     var showClearCacheConfirm by remember { mutableStateOf(false) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
@@ -129,7 +133,8 @@ fun AiSettingsScreen(
                             Text(
                                 text = when {
                                     !config.enabled -> "AI features paused"
-                                    config.isConfigured -> "Ready · ${config.provider.displayName}"
+                                    config.isConfigured && selectedVisionWarning != null -> "Text-only model · photo analysis unavailable"
+                                    config.isConfigured -> "Configured · ${config.provider.displayName} · test text and vision separately"
                                     else -> "Enter your own API key to analyze & search"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -334,54 +339,94 @@ fun AiSettingsScreen(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilledTonalButton(
-                            onClick = {
-                                if (isTestingConnection) return@FilledTonalButton
-                                isTestingConnection = true
-                                connectionStatus = null
-                                val testConfig = config.copy(
-                                    apiKey = apiKeyInput.trim(),
-                                    modelId = modelInput.trim().ifBlank { config.modelId },
-                                    customBaseUrl = baseUrlInput.trim().trimEnd('/')
-                                )
-                                scope.launch {
-                                    prefs.setAiApiKey(testConfig.apiKey)
-                                    prefs.setAiModelId(testConfig.modelId)
-                                    prefs.setAiCustomBaseUrl(testConfig.customBaseUrl)
-                                    val result = aiClient.testConnection(testConfig)
-                                    isTestingConnection = false
-                                    connectionStatus = result.fold(
-                                        onSuccess = { true to it },
-                                        onFailure = { false to (it.message ?: "Connection failed") }
-                                    )
-                                }
-                            },
-                            enabled = !isTestingConnection && apiKeyInput.isNotBlank(),
-                            modifier = Modifier
-                                .defaultMinSize(minHeight = 48.dp)
-                                .testTag("ai_test_connection_button")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (isTestingConnection) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Testing…")
-                            } else {
-                                Icon(Icons.Default.WifiTethering, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Test Key")
+                            FilledTonalButton(
+                                onClick = {
+                                    if (isTestingConnection || isTestingVision) return@FilledTonalButton
+                                    isTestingConnection = true
+                                    connectionStatus = null
+                                    val testConfig = config.copy(
+                                        apiKey = apiKeyInput.trim(),
+                                        modelId = modelInput.trim().ifBlank { config.modelId },
+                                        customBaseUrl = baseUrlInput.trim().trimEnd('/')
+                                    )
+                                    scope.launch {
+                                        prefs.setAiApiKey(testConfig.apiKey)
+                                        prefs.setAiModelId(testConfig.modelId)
+                                        prefs.setAiCustomBaseUrl(testConfig.customBaseUrl)
+                                        val result = aiClient.testConnection(testConfig)
+                                        isTestingConnection = false
+                                        connectionStatus = result.fold(
+                                            onSuccess = { true to it },
+                                            onFailure = { false to (it.message ?: "Text API test failed") }
+                                        )
+                                    }
+                                },
+                                enabled = !isTestingConnection && !isTestingVision && apiKeyInput.isNotBlank(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("ai_test_connection_button")
+                            ) {
+                                if (isTestingConnection) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Testing…")
+                                } else {
+                                    Icon(Icons.Default.WifiTethering, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Test Text")
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (isTestingConnection || isTestingVision) return@OutlinedButton
+                                    isTestingVision = true
+                                    connectionStatus = null
+                                    val testConfig = config.copy(
+                                        apiKey = apiKeyInput.trim(),
+                                        modelId = modelInput.trim().ifBlank { config.modelId },
+                                        customBaseUrl = baseUrlInput.trim().trimEnd('/')
+                                    )
+                                    scope.launch {
+                                        prefs.setAiApiKey(testConfig.apiKey)
+                                        prefs.setAiModelId(testConfig.modelId)
+                                        prefs.setAiCustomBaseUrl(testConfig.customBaseUrl)
+                                        val result = aiClient.testVisionConnection(testConfig)
+                                        isTestingVision = false
+                                        connectionStatus = result.fold(
+                                            onSuccess = { true to it },
+                                            onFailure = { false to (it.message ?: "Vision API test failed") }
+                                        )
+                                    }
+                                },
+                                enabled = !isTestingConnection && !isTestingVision && apiKeyInput.isNotBlank(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("ai_test_vision_button")
+                            ) {
+                                if (isTestingVision) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Testing…")
+                                } else {
+                                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Test Vision")
+                                }
                             }
                         }
 
                         Text(
-                            text = "Stored locally on your device only.",
+                            text = "Test Text checks API access. Test Vision sends a small sample image to verify image input. Your key is stored locally on this device.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -465,7 +510,10 @@ fun AiSettingsScreen(
 
                     OutlinedTextField(
                         value = modelInput,
-                        onValueChange = { modelInput = it },
+                        onValueChange = {
+                            modelInput = it
+                            connectionStatus = null
+                        },
                         label = { Text("Model ID") },
                         singleLine = true,
                         modifier = Modifier
@@ -473,9 +521,28 @@ fun AiSettingsScreen(
                             .testTag("ai_model_id_input")
                     )
 
+                    selectedVisionWarning?.let { warning ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = warning,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+
                     OutlinedTextField(
                         value = baseUrlInput,
-                        onValueChange = { baseUrlInput = it },
+                        onValueChange = {
+                            baseUrlInput = it
+                            connectionStatus = null
+                        },
                         label = { Text("Custom Base URL (optional)") },
                         placeholder = {
                             Text(

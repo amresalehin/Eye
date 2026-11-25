@@ -108,7 +108,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             aiPrefs.providers.collect { providers ->
                 _uiState.update { state ->
-                    state.copy(ai = state.ai.copy(configuredProviders = providers.filter { it.isConfigured }))
+                    state.copy(
+                        ai = state.ai.copy(
+                            configuredProviders = providers.filter { it.isConfigured },
+                            providersLoaded = true
+                        )
+                    )
                 }
             }
         }

@@ -480,7 +480,7 @@ fun AiSettingsScreen(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp)
+                                    .height(56.dp)
                                     .testTag("ai_primary_config_action_button")
                             ) {
                                 Text(

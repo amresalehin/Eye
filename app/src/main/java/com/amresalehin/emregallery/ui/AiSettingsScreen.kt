@@ -231,36 +231,28 @@ fun AiSettingsScreen(
             }
 
 
-            Surface(
-                onClick = { isAiSetupExpanded = !isAiSetupExpanded },
-                shape = RoundedCornerShape(16.dp),
-                color = cardBackground,
-                border = cardBorder,
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
-                    .testTag("ai_setup_expand_bar")
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { isAiSetupExpanded = !isAiSetupExpanded }
+                    .padding(horizontal = 12.dp)
+                    .testTag("ai_setup_expand_bar"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "AI Setup",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Icon(
-                        imageVector = if (isAiSetupExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (isAiSetupExpanded) "Collapse AI setup" else "Expand AI setup",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "AI Setup",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Icon(
+                    imageVector = if (isAiSetupExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (isAiSetupExpanded) "Collapse AI setup" else "Expand AI setup",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             if (isAiSetupExpanded) {

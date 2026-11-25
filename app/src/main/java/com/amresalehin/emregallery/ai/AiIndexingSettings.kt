@@ -22,7 +22,7 @@ object AiIndexingSettings {
 
     fun getSelectedFolders(context: Context): Set<String> {
         val selected = preferences(context).getStringSet(KEY_SELECTED_FOLDERS, null)
-        return selected?.let(::HashSet) ?: emptySet()
+        return selected?.let { HashSet(it) } ?: emptySet()
     }
 
     fun setSelectedFolders(context: Context, folders: Set<String>) {

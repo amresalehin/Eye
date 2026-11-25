@@ -299,7 +299,7 @@ fun AiSettingsScreen(
                                     actionFeedback = null
                                     saveError = null
                                 },
-                                placeholder = { Text("Name") },
+                                label = { Text("Name") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier

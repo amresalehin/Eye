@@ -407,6 +407,7 @@ fun AiSettingsScreen(
                                         shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier
                                             .weight(1f)
+                                            .height(56.dp)
                                             .testTag("ai_model_id_input")
                                     )
                                     OutlinedButton(
@@ -440,17 +441,18 @@ fun AiSettingsScreen(
                                             baseUrlInput.isNotBlank() &&
                                             (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
                                         contentPadding = PaddingValues(0.dp),
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(14.dp),
                                         border = BorderStroke(
                                             1.dp,
-                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                                            MaterialTheme.colorScheme.outline
                                         ),
                                         colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            containerColor = Color.Transparent,
                                             contentColor = MaterialTheme.colorScheme.onSurface
                                         ),
                                         modifier = Modifier
                                             .size(56.dp)
+                                            .align(Alignment.CenterVertically)
                                             .testTag("ai_fetch_models_button")
                                     ) {
                                         if (isFetchingModels) {

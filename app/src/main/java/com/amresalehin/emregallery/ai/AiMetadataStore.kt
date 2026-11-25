@@ -16,7 +16,6 @@ data class AiMediaAnalysis(
     val description: String,
     val tags: List<String>,
     val suggestedCollection: String,
-    val keyDetails: String = "",
     val modelUsed: String = "",
     val analyzedAtMillis: Long = System.currentTimeMillis(),
     val status: String = STATUS_COMPLETED,
@@ -53,7 +52,7 @@ object AiStoreEvents {
 
 /**
  * Persistent SQLite store for Shots Studio-inspired AI analysis metadata
- * (titles, descriptions, tags, suggested collections, and extracted key details).
+ * (titles, descriptions, tags, and suggested collections).
  */
 class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     context.applicationContext,
@@ -72,7 +71,6 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
                 tags_json TEXT NOT NULL DEFAULT '[]',
                 suggested_collection TEXT NOT NULL DEFAULT '',
                 suggested_collections_json TEXT NOT NULL DEFAULT '[]',
-                key_details TEXT NOT NULL DEFAULT '',
                 model_used TEXT NOT NULL DEFAULT '',
                 analyzed_at_millis INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'completed',
@@ -133,7 +131,6 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
             put("tags_json", tagsArr.toString())
             put("suggested_collection", collections.firstOrNull().orEmpty())
             put("suggested_collections_json", collectionsArr.toString())
-            put("key_details", analysis.keyDetails.trim())
             put("model_used", analysis.modelUsed.trim())
             put("analyzed_at_millis", analysis.analyzedAtMillis)
             put("status", analysis.status)
@@ -156,7 +153,6 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
             put("tags_json", "[]")
             put("suggested_collection", "")
             put("suggested_collections_json", "[]")
-            put("key_details", "")
             put("model_used", modelUsed)
             put("analyzed_at_millis", System.currentTimeMillis())
             put("status", AiMediaAnalysis.STATUS_FAILED)
@@ -169,7 +165,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     @Synchronized
     fun getAnalysis(uri: String): AiMediaAnalysis? {
         readableDatabase.rawQuery(
-            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE media_uri=?",
+            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE media_uri=?",
             arrayOf(uri)
         ).use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -181,7 +177,7 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     fun getAllCompleted(): Map<String, AiMediaAnalysis> {
         val map = LinkedHashMap<String, AiMediaAnalysis>()
         readableDatabase.rawQuery(
-            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, key_details, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE status=?",
+            "SELECT media_uri, title, description, tags_json, suggested_collection, suggested_collections_json, model_used, analyzed_at_millis, status, error_message FROM $TABLE_ANALYSIS WHERE status=?",
             arrayOf(AiMediaAnalysis.STATUS_COMPLETED)
         ).use { cursor ->
             while (cursor.moveToNext()) {
@@ -356,11 +352,10 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
             tags = tags,
             suggestedCollection = collections.firstOrNull().orEmpty(),
             suggestedCollections = collections,
-            keyDetails = cursor.getString(6) ?: "",
-            modelUsed = cursor.getString(7) ?: "",
-            analyzedAtMillis = cursor.getLong(8),
-            status = cursor.getString(9) ?: AiMediaAnalysis.STATUS_COMPLETED,
-            errorMessage = cursor.getString(10)
+            modelUsed = cursor.getString(6) ?: "",
+            analyzedAtMillis = cursor.getLong(7),
+            status = cursor.getString(8) ?: AiMediaAnalysis.STATUS_COMPLETED,
+            errorMessage = cursor.getString(9)
         )
     }
 

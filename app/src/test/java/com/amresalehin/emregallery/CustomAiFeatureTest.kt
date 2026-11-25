@@ -259,7 +259,6 @@ class CustomAiFeatureTest {
                   "description": "Paper receipt showing two espresso drinks and total amount.",
                   "tags": ["#Receipt", "Coffee", "Espresso", "receipt"],
                   "collections": ["Coffee Shop Receipt Details", "Espresso Beverage Purchases"],
-                  "key_details": "Total $9.50"
                 }
                 ```
             """.trimIndent()
@@ -304,7 +303,6 @@ class CustomAiFeatureTest {
                 listOf("Coffee Shop Receipt Details", "Espresso Beverage Purchases"),
                 analysis.suggestedCollections
             )
-            assertEquals("Total $9.50", analysis.keyDetails)
             assertEquals(listOf("Receipt", "Coffee", "Espresso"), analysis.tags)
 
             val firstReqBody = server.takeRequest().body.readUtf8()
@@ -315,6 +313,7 @@ class CustomAiFeatureTest {
             assertTrue(retryReqBody.contains("TOTAL $9.50"))
             assertFalse(retryReqBody.contains("Receipts, Travel"))
             assertTrue(retryReqBody.contains("collections"))
+            assertFalse(retryReqBody.contains("key_details"))
             assertTrue(retryReqBody.contains("no fixed maximum"))
             assertTrue(retryReqBody.contains("granular"))
             assertTrue(retryReqBody.contains("Title Case"))
@@ -354,7 +353,6 @@ class CustomAiFeatureTest {
                 "description": "A single image with several distinct topics.",
                 "tags": ["topic"],
                 "collections": ["Specific Topic A", "Specific Topic B", "Specific Topic C", "Specific Topic D"],
-                "key_details": ""
             }""",
             modelUsed = "test-model"
         )
@@ -466,7 +464,6 @@ class CustomAiFeatureTest {
                 tags = listOf("travel", "flight"),
                 suggestedCollection = "Travel",
                 suggestedCollections = listOf("Rail Boarding Pass Details", "Eurostar Train Journeys"),
-                keyDetails = "Gate B12",
                 modelUsed = "custom-model"
             )
         )
@@ -599,7 +596,6 @@ class CustomAiFeatureTest {
                 tags = listOf("kotlin", "coroutines", "snippet"),
                 suggestedCollection = "Code",
                 suggestedCollections = listOf("Code", "Kotlin Coroutine Snippets"),
-                keyDetails = "Dispatchers.IO",
                 modelUsed = "custom-model"
             )
         )

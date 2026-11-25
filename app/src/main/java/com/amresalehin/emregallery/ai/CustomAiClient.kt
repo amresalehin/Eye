@@ -362,9 +362,6 @@ class CustomAiClient(
                         if (item.suggestedCollections.isNotEmpty()) {
                             put("collections", JSONArray(item.suggestedCollections))
                         }
-                        if (item.keyDetails.isNotBlank()) {
-                            put("details", item.keyDetails.take(120))
-                        }
                     }
                 )
             }
@@ -788,7 +785,9 @@ class CustomAiClient(
             append("Generate names independently; no existing collection list or preset examples are provided. ")
             append("Format every tag in Title Case, preserving standard acronyms and established brand casing. ")
             append("Format each collection name in Title Case, preserving standard acronyms and established brand casing. ")
-            append("Keep tags precise and grounded in visible content and OCR.")
+            append("Keep tags precise and grounded in visible content and OCR. ")
+            append("Use the description for the complete concise visual summary, including important legible facts when relevant. ")
+            append("Do not return a separate key_details or details field.")
         }
     }
 
@@ -801,7 +800,6 @@ class CustomAiClient(
         val title = obj.optString("title", "").trim().ifBlank { "Analyzed Image" }
         val description = obj.optString("description", "").trim()
         val collections = parseCollectionNames(obj)
-        val keyDetails = obj.optString("key_details", "").trim()
         val tagsArr = obj.optJSONArray("tags") ?: JSONArray()
         val tags = MetadataNameNormalizer.normalizeTags(
             (0 until tagsArr.length()).map { tagsArr.optString(it, "") }
@@ -813,7 +811,6 @@ class CustomAiClient(
             tags = tags,
             suggestedCollection = collections.firstOrNull().orEmpty(),
             suggestedCollections = collections,
-            keyDetails = keyDetails,
             modelUsed = modelUsed,
             analyzedAtMillis = System.currentTimeMillis(),
             status = AiMediaAnalysis.STATUS_COMPLETED

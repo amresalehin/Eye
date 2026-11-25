@@ -56,11 +56,11 @@ Return ONLY a valid JSON object with this exact schema:
   "title": "",
   "description": "",
   "tags": [],
-  "collections": [],
-  "key_details": ""
+  "collections": []
 }
 Rules:
 - Generate 3 to 7 concise, searchable tags in Title Case that describe concrete subjects, topics, entities, actions, and details visible in this specific image. Avoid vague filler tags.
+- Write a concise 1–2 sentence description that summarizes the image and naturally includes important legible facts when useful.
 - Format every tag in Title Case, preserving standard acronyms and established brand casing.
 - Format every collection name in Title Case; keep short connecting words lowercase and preserve standard acronyms and established brand casing.
 - Generate every distinct collection that genuinely and meaningfully applies to this image. There is no fixed maximum number of collections; do not stop after one or a small preset number.
@@ -79,11 +79,11 @@ Return ONLY a valid JSON object with this exact schema:
   "title": "Short 2-5 word descriptive title",
   "description": "Clear 1-2 sentence summary of the visual content, scene, app/UI, or subject.",
   "tags": ["tag1", "tag2", "tag3"],
-  "collection": "Single concise collection name",
-  "key_details": "Important extracted details like dates, prices, names, code language, or place (or empty string)"
+  "collection": "Single concise collection name"
 }
 Rules:
 - Provide 3 to 7 concise, lowercase, searchable tags (1-2 words each, no # prefix).
+- Include important legible facts naturally in the description instead of returning a separate details field.
 - Choose a clean collection name such as Receipts, Documents, Code, Chats, Notes, Travel, Food, Shopping, Design, Memes, Nature, People, or Devices.
 - Prefer reusing one of the existing collections below when it fits well.
 

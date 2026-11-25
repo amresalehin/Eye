@@ -839,7 +839,7 @@ class SearchEngine(private val context: Context) {
             AiFilter.NOT_ANALYZED -> candidateList.filter { it.uri !in aiAnalyses }
         }
 
-        // Match query against fields (including AI titles, descriptions, tags, collections, key details)
+        // Match query against fields (including AI titles, descriptions, tags, and collections)
         val matchedList = if (q.isBlank()) {
             candidateList
         } else {
@@ -917,14 +917,13 @@ class SearchEngine(private val context: Context) {
         val ocr = TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
         if (!ocr.isNullOrBlank() && ocr.contains(q, ignoreCase = true)) score += 40
 
-        // AI-generated metadata (title, description, tags, suggested collection, key details)
+        // AI-generated metadata (title, description, tags, and suggested collections)
         if (aiAnalysis != null && aiAnalysis.isCompleted) {
             if (aiAnalysis.title.contains(q, ignoreCase = true)) score += 85
             if (aiAnalysis.suggestedCollections.any { it.contains(q, ignoreCase = true) }) score += 70
             if (aiAnalysis.tags.any { it.equals(q, ignoreCase = true) }) score += 80
             else if (aiAnalysis.tags.any { it.contains(q, ignoreCase = true) }) score += 60
             if (aiAnalysis.description.contains(q, ignoreCase = true)) score += 50
-            if (aiAnalysis.keyDetails.contains(q, ignoreCase = true)) score += 45
 
             // Multi-word natural query token match across AI fields
             val tokens = q.split(Regex("\\s+")).filter { it.length >= 3 }
@@ -933,8 +932,7 @@ class SearchEngine(private val context: Context) {
                     append(aiAnalysis.title).append(' ')
                     append(aiAnalysis.description).append(' ')
                     append(aiAnalysis.tags.joinToString(" ")).append(' ')
-                    append(aiAnalysis.suggestedCollections.joinToString(" ")).append(' ')
-                    append(aiAnalysis.keyDetails)
+                    append(aiAnalysis.suggestedCollections.joinToString(" "))
                 }.lowercase(Locale.ROOT)
                 val matchedTokens = tokens.count { combinedAiText.contains(it) }
                 if (matchedTokens > 0) {

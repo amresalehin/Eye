@@ -106,7 +106,7 @@ fun AiIndexingCard(
                 Spacer(Modifier.width(16.dp))
 
                 Text(
-                    text = "AI Vision",
+                    text = "Vision",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,

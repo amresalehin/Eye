@@ -1,7 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,6 +60,8 @@ fun AiSettingsScreen(
     var testError by remember { mutableStateOf<String?>(null) }
     var showClearCacheConfirm by remember { mutableStateOf(false) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
+    var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
+    var isSavingConfig by remember { mutableStateOf(false) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -73,10 +73,23 @@ fun AiSettingsScreen(
     val activePillBg = if (lightAppearance) Color(0xFF161A20) else MaterialTheme.colorScheme.primary
     val activePillText = if (lightAppearance) Color.White else MaterialTheme.colorScheme.onPrimary
 
-    val canTest = !isTestingCapabilities &&
-        baseUrlInput.isNotBlank() &&
-        apiKeyInput.isNotBlank() &&
-        modelInput.isNotBlank()
+    val endpointSignature = "${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
+    val endpointTestPassed = testedEndpointSignature == endpointSignature
+    val canTest = !isTestingCapabilities && !isSavingConfig &&
+        baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
+    val actionLabel = when {
+        isTestingCapabilities -> "Testing…"
+        isSavingConfig -> "Saving…"
+        actionFeedback == "Saved" -> "Saved"
+        endpointTestPassed -> "Save"
+        else -> "Test"
+    }
+    val actionEnabled = when {
+        isTestingCapabilities || isSavingConfig -> false
+        actionFeedback == "Saved" -> false
+        endpointTestPassed -> true
+        else -> canTest
+    }
 
     Box(
         modifier = Modifier
@@ -173,104 +186,55 @@ fun AiSettingsScreen(
                                 .testTag("ai_model_id_input")
                         )
 
-                        // Endpoint Action Row: Paste, Clear, Test, Save
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AiActionChip(
-                                label = "Paste",
-                                onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    val pasted = cm?.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
-                                    if (pasted.isNotEmpty()) {
-                                        apiKeyInput = pasted
-                                        capabilityReport = null
-                                        testError = null
-                                        scope.launch { prefs.setAiApiKey(pasted) }
+                        // One full-width action advances from Test to Save after a successful test.
+                        Button(
+                            onClick = {
+                                val cleanUrl = baseUrlInput.trim().trimEnd('/')
+                                val cleanKey = apiKeyInput.trim()
+                                val cleanModel = modelInput.trim()
+                                val cleanPrompt = promptInput.trim()
+                                if (endpointTestPassed) {
+                                    isSavingConfig = true
+                                    scope.launch {
+                                        prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
+                                        prefs.setAiCustomPromptInstructions(cleanPrompt)
+                                        isSavingConfig = false
                                         actionFeedback = "Saved"
                                     }
-                                },
-                                testTag = "ai_api_key_paste_button"
-                            )
-
-                            if (apiKeyInput.isNotBlank()) {
-                                AiActionChip(
-                                    label = "Clear",
-                                    onClick = {
-                                        apiKeyInput = ""
-                                        capabilityReport = null
-                                        testError = null
-                                        scope.launch { prefs.setAiApiKey("") }
-                                    },
-                                    testTag = "ai_api_key_clear_button"
-                                )
-                            }
-
-                            AiActionChip(
-                                label = if (isTestingCapabilities) "Testing…" else "Test",
-                                enabled = canTest,
-                                onClick = {
-                                    if (!canTest) return@AiActionChip
+                                } else {
                                     isTestingCapabilities = true
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
-                                    val cleanUrl = baseUrlInput.trim().trimEnd('/')
-                                    val cleanKey = apiKeyInput.trim()
-                                    val cleanModel = modelInput.trim()
                                     val testConfig = config.copy(
                                         baseUrl = cleanUrl,
                                         apiKey = cleanKey,
                                         modelId = cleanModel
                                     )
                                     scope.launch {
-                                        prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
                                         val result = aiClient.testEndpointCapabilities(testConfig)
                                         isTestingCapabilities = false
                                         result.onSuccess { report ->
                                             capabilityReport = report
+                                            testedEndpointSignature = endpointSignature
                                         }.onFailure { err ->
                                             testError = err.message ?: "Endpoint test failed"
                                         }
                                     }
-                                },
-                                testTag = "ai_test_connection_button"
-                            )
-
-                            Spacer(Modifier.weight(1f))
-
-                            Surface(
-                                onClick = {
-                                    val cleanUrl = baseUrlInput.trim().trimEnd('/')
-                                    val cleanKey = apiKeyInput.trim()
-                                    val cleanModel = modelInput.trim()
-                                    val cleanPrompt = promptInput.trim()
-                                    scope.launch {
-                                        prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
-                                        prefs.setAiCustomPromptInstructions(cleanPrompt)
-                                        actionFeedback = "Saved"
-                                    }
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                color = activePillBg,
-                                modifier = Modifier
-                                    .height(38.dp)
-                                    .testTag("ai_save_config_button")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                ) {
-                                    Text(
-                                        text = "Save",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = activePillText
-                                    )
                                 }
-                            }
+                            },
+                            enabled = actionEnabled,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("ai_primary_config_action_button")
+                        ) {
+                            Text(
+                                text = actionLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
 
                         // Live Text & Vision Capability Test Report
@@ -496,7 +460,6 @@ fun AiSettingsScreen(
                         showClearCacheConfirm = false
                         scope.launch {
                             withContext(Dispatchers.IO) { aiStore.clearAll() }
-                            analyzedCount = 0
                             actionFeedback = "Cache cleared"
                         }
                     }

@@ -486,23 +486,6 @@ fun AiSettingsScreen(
                                 .padding(horizontal = 18.dp, vertical = 14.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Spacer(Modifier.height(4.dp))
-    
-                            OutlinedTextField(
-                                value = promptInput,
-                                onValueChange = {
-                                    promptInput = it
-                                    actionFeedback = null
-                                },
-                                label = { Text("Custom prompt") },
-                                minLines = 2,
-                                maxLines = 4,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_custom_prompt_input")
-                            )
-    
                             Spacer(Modifier.height(6.dp))
     
                             Row(
@@ -559,6 +542,31 @@ fun AiSettingsScreen(
                 }
                         }
                     }
+
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ai_custom_prompt_card")
+            ) {
+                OutlinedTextField(
+                    value = promptInput,
+                    onValueChange = {
+                        promptInput = it
+                        actionFeedback = null
+                    },
+                    label = { Text("Custom prompt") },
+                    minLines = 2,
+                    maxLines = 4,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .testTag("ai_custom_prompt_input")
+                )
+            }
 
             Spacer(Modifier.navigationBarsPadding())
             Spacer(Modifier.height(16.dp))

@@ -280,7 +280,11 @@ fun AiSettingsScreen(
                     }
                 }
                     if (isAiSetupExpanded) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp)
+                        ) {
                         // Provider name is a normal editable field, matching the endpoint fields.
                         Column(
                             modifier = Modifier

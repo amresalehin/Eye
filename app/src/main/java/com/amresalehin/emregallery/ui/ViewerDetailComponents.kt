@@ -935,7 +935,6 @@ fun OverviewTabContent(
         item(key = "overview_ai_insights") {
             AiViewerInsightsCard(
                 item = item,
-                customAlbums = customAlbums,
                 onAddTags = onAddTags,
                 onAddToNamedAlbum = onAddToNamedAlbum,
                 onOpenAiSettings = onOpenAiSettings

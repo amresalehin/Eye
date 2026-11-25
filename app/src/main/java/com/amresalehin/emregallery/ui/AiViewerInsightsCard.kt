@@ -3,8 +3,6 @@ package com.amresalehin.emregallery.ui
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +23,6 @@ import com.amresalehin.emregallery.ai.AiMediaAnalysis
 import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.AiStoreEvents
 import com.amresalehin.emregallery.ai.CustomAiClient
-import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
@@ -38,7 +34,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AiViewerInsightsCard(
     item: MediaItem,
-    customAlbums: List<CustomAlbum>,
     onAddTags: (Collection<String>) -> Unit,
     onAddToNamedAlbum: (Collection<String>) -> Unit,
     onOpenAiSettings: (() -> Unit)? = null,
@@ -335,66 +330,6 @@ fun AiViewerInsightsCard(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                        }
-
-                        val suggestedCollections = currentAnalysis.suggestedCollections
-                            .ifEmpty { listOf(currentAnalysis.suggestedCollection).filter { it.isNotBlank() } }
-                        if (suggestedCollections.isNotEmpty()) {
-                            HorizontalDivider(
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                suggestedCollections.forEachIndexed { index, collection ->
-                                    val alreadyInAlbum = customAlbums.any {
-                                        it.name.equals(collection, ignoreCase = true) &&
-                                            item.uri in it.mediaUris
-                                    }
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                        ),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable(enabled = !alreadyInAlbum) {
-                                                onAddToNamedAlbum(listOf(collection))
-                                            }
-                                            .testTag(
-                                                if (index == 0) "viewer_ai_collection_chip"
-                                                else "viewer_ai_collection_chip_$index"
-                                            )
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = if (alreadyInAlbum) Icons.Default.Check else Icons.Default.PhotoAlbum,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(14.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                text = collection,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                     }

@@ -381,25 +381,32 @@ fun AiSettingsScreen(
                                 ) {
                                     OutlinedTextField(
                                         value = modelInput,
-                                        onValueChange = {},
-                                        readOnly = true,
+                                        onValueChange = { value ->
+                                            modelInput = value
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            saveError = null
+                                            testedEndpointSignature = null
+                                        },
                                         singleLine = true,
                                         label = { Text("Model") },
-                                        placeholder = { Text("Select model") },
+                                        placeholder = { Text("Enter or select model") },
                                         trailingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.ArrowDropDown,
-                                                contentDescription = "Select model"
-                                            )
+                                            IconButton(
+                                                onClick = { isModelMenuExpanded = !isModelMenuExpanded },
+                                                enabled = !isFetchingModels && availableModels.isNotEmpty(),
+                                                modifier = Modifier.testTag("ai_model_dropdown_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = "Show available models"
+                                                )
+                                            }
                                         },
                                         shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clickable(
-                                                enabled = !isFetchingModels && availableModels.isNotEmpty()
-                                            ) {
-                                                isModelMenuExpanded = true
-                                            }
                                             .testTag("ai_model_id_input")
                                     )
                                     OutlinedButton(
@@ -407,7 +414,6 @@ fun AiSettingsScreen(
                                             isFetchingModels = true
                                             isModelMenuExpanded = false
                                             availableModels = emptyList()
-                                            modelInput = ""
                                             modelFetchError = null
                                             scope.launch {
                                                 val fetchConfig = config.copy(
@@ -419,7 +425,7 @@ fun AiSettingsScreen(
                                                         .onSuccess { models ->
                                                             availableModels = models
                                                             modelFetchError = null
-                                                            isModelMenuExpanded = models.isNotEmpty()
+                                                            isModelMenuExpanded = false
                                                         }
                                                         .onFailure { error ->
                                                             modelFetchError = error.message ?: "Could not fetch models"

@@ -231,6 +231,15 @@ fun AiSettingsScreen(
             }
 
 
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ai_unified_config_card")
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -254,344 +263,335 @@ fun AiSettingsScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            if (isAiSetupExpanded) {
-            // Unified Custom API Configuration Card
-            Card(
-                shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = cardBackground),
-                border = cardBorder,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("ai_unified_config_card")
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Provider name is a normal editable field, matching the endpoint fields.
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = providerNameInput,
-                            onValueChange = {
-                                providerNameInput = it
-                                actionFeedback = null
-                            },
-                            label = { Text("Name") },
-                            placeholder = { Text("e.g. My OpenAI") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
+                    if (isAiSetupExpanded) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                        // Provider name is a normal editable field, matching the endpoint fields.
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("ai_provider_name_input")
-                        )
-
-                        OutlinedTextField(
-                            value = baseUrlInput,
-                            onValueChange = {
-                                baseUrlInput = it
-                                capabilityReport = null
-                                testError = null
-                                actionFeedback = null
-                            },
-                            label = { Text("Base URL") },
-                            placeholder = { Text("https://api.openai.com/v1") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ai_base_url_input")
-                        )
-                    }
-
-                    // Endpoint Fields
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = apiKeyInput,
-                            onValueChange = {
-                                apiKeyInput = it
-                                capabilityReport = null
-                                testError = null
-                                actionFeedback = null
-                            },
-                            label = { Text("API Key") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = { showApiKey = !showApiKey },
-                                    modifier = Modifier.testTag("ai_api_key_visibility_toggle")
-                                ) {
-                                    Icon(
-                                        imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (showApiKey) "Hide key" else "Show key"
-                                    )
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ai_api_key_input")
-                        )
-
-                        OutlinedTextField(
-                            value = modelInput,
-                            onValueChange = {
-                                modelInput = it
-                                capabilityReport = null
-                                testError = null
-                                actionFeedback = null
-                            },
-                            label = { Text("Model") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ai_model_id_input")
-                        )
-
-                        // One full-width action advances from Test to Save after a successful test.
-                        Button(
-                            onClick = {
-                                val cleanUrl = baseUrlInput.trim().trimEnd('/')
-                                val cleanKey = apiKeyInput.trim()
-                                val cleanModel = modelInput.trim()
-                                val cleanPrompt = promptInput.trim()
-                                if (endpointTestPassed) {
-                                    isSavingConfig = true
-                                    scope.launch {
-                                        prefs.renameAiProvider(config.providerId, providerNameInput.trim())
-                                        prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
-                                        prefs.setAiCustomPromptInstructions(cleanPrompt)
-                                        isSavingConfig = false
-                                        actionFeedback = "Saved"
-                                    }
-                                } else {
-                                    isTestingCapabilities = true
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = providerNameInput,
+                                onValueChange = {
+                                    providerNameInput = it
+                                    actionFeedback = null
+                                },
+                                label = { Text("Name") },
+                                placeholder = { Text("e.g. My OpenAI") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_provider_name_input")
+                            )
+    
+                            OutlinedTextField(
+                                value = baseUrlInput,
+                                onValueChange = {
+                                    baseUrlInput = it
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
-                                    val testConfig = config.copy(
-                                        baseUrl = cleanUrl,
-                                        apiKey = cleanKey,
-                                        modelId = cleanModel
-                                    )
-                                    scope.launch {
-                                        val result = aiClient.testEndpointCapabilities(testConfig)
-                                        isTestingCapabilities = false
-                                        result.onSuccess { report ->
-                                            capabilityReport = report
-                                            testedEndpointSignature = endpointSignature
-                                        }.onFailure { err ->
-                                            testError = err.message ?: "Endpoint test failed"
+                                },
+                                label = { Text("Base URL") },
+                                placeholder = { Text("https://api.openai.com/v1") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_base_url_input")
+                            )
+                        }
+    
+                        // Endpoint Fields
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = apiKeyInput,
+                                onValueChange = {
+                                    apiKeyInput = it
+                                    capabilityReport = null
+                                    testError = null
+                                    actionFeedback = null
+                                },
+                                label = { Text("API Key") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = { showApiKey = !showApiKey },
+                                        modifier = Modifier.testTag("ai_api_key_visibility_toggle")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (showApiKey) "Hide key" else "Show key"
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_api_key_input")
+                            )
+    
+                            OutlinedTextField(
+                                value = modelInput,
+                                onValueChange = {
+                                    modelInput = it
+                                    capabilityReport = null
+                                    testError = null
+                                    actionFeedback = null
+                                },
+                                label = { Text("Model") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ai_model_id_input")
+                            )
+    
+                            // One full-width action advances from Test to Save after a successful test.
+                            Button(
+                                onClick = {
+                                    val cleanUrl = baseUrlInput.trim().trimEnd('/')
+                                    val cleanKey = apiKeyInput.trim()
+                                    val cleanModel = modelInput.trim()
+                                    val cleanPrompt = promptInput.trim()
+                                    if (endpointTestPassed) {
+                                        isSavingConfig = true
+                                        scope.launch {
+                                            prefs.renameAiProvider(config.providerId, providerNameInput.trim())
+                                            prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
+                                            prefs.setAiCustomPromptInstructions(cleanPrompt)
+                                            isSavingConfig = false
+                                            actionFeedback = "Saved"
+                                        }
+                                    } else {
+                                        isTestingCapabilities = true
+                                        capabilityReport = null
+                                        testError = null
+                                        actionFeedback = null
+                                        val testConfig = config.copy(
+                                            baseUrl = cleanUrl,
+                                            apiKey = cleanKey,
+                                            modelId = cleanModel
+                                        )
+                                        scope.launch {
+                                            val result = aiClient.testEndpointCapabilities(testConfig)
+                                            isTestingCapabilities = false
+                                            result.onSuccess { report ->
+                                                capabilityReport = report
+                                                testedEndpointSignature = endpointSignature
+                                            }.onFailure { err ->
+                                                testError = err.message ?: "Endpoint test failed"
+                                            }
                                         }
                                     }
-                                }
-                            },
-                            enabled = actionEnabled,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("ai_primary_config_action_button")
-                        ) {
-                            Text(
-                                text = actionLabel,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        // Live Text & Vision Capability Test Report
-                        capabilityReport?.let { report ->
-                            Surface(
+                                },
+                                enabled = actionEnabled,
                                 shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (report.fullyReady) {
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                    } else {
-                                        MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("ai_primary_config_action_button")
+                            ) {
+                                Text(
+                                    text = actionLabel,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+    
+                            // Live Text & Vision Capability Test Report
+                            capabilityReport?.let { report ->
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (report.fullyReady) {
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                        } else {
+                                            MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("ai_connection_status_banner")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = report.protocolLabel,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        CapabilityResultRow(
+                                            label = "Text",
+                                            result = report.text,
+                                            testTag = "ai_test_text_status"
+                                        )
+                                        CapabilityResultRow(
+                                            label = "Vision",
+                                            result = report.vision,
+                                            testTag = "ai_test_vision_status"
+                                        )
                                     }
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_connection_status_banner")
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                }
+                            }
+    
+                            testError?.let { errMsg ->
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("ai_connection_status_banner")
                                 ) {
-                                    Text(
-                                        text = report.protocolLabel,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    CapabilityResultRow(
-                                        label = "Text",
-                                        result = report.text,
-                                        testTag = "ai_test_text_status"
-                                    )
-                                    CapabilityResultRow(
-                                        label = "Vision",
-                                        result = report.vision,
-                                        testTag = "ai_test_vision_status"
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ErrorOutline,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = errMsg,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
-
-                        testError?.let { errMsg ->
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_connection_status_banner")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ErrorOutline,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = errMsg,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                        modifier = Modifier.padding(horizontal = 18.dp)
-                    )
-
-                    // Minimal Behavior Toggles & Utilities inside the same unified card
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        AiMinimalToggleRow(
-                            title = "Auto-tag",
-                            checked = config.autoApplyTags,
-                            onCheckedChange = { scope.launch { prefs.setAiAutoApplyTags(it) } },
-                            testTag = "ai_auto_apply_tags_switch"
+    
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                            modifier = Modifier.padding(horizontal = 18.dp)
                         )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-
-                        AiMinimalToggleRow(
-                            title = "Auto-albums",
-                            checked = config.autoOrganizeCollections,
-                            onCheckedChange = { scope.launch { prefs.setAiAutoOrganizeCollections(it) } },
-                            testTag = "ai_auto_organize_collections_switch"
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-
-                        AiMinimalToggleRow(
-                            title = "OCR context",
-                            checked = config.includeOcrContext,
-                            onCheckedChange = { scope.launch { prefs.setAiIncludeOcrContext(it) } },
-                            testTag = "ai_include_ocr_switch"
-                        )
-
-                        Spacer(Modifier.height(4.dp))
-
-                        OutlinedTextField(
-                            value = promptInput,
-                            onValueChange = {
-                                promptInput = it
-                                actionFeedback = null
-                            },
-                            label = { Text("Custom prompt") },
-                            minLines = 2,
-                            maxLines = 4,
-                            shape = RoundedCornerShape(14.dp),
+    
+                        // Minimal Behavior Toggles & Utilities inside the same unified card
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("ai_custom_prompt_input")
-                        )
-
-                        Spacer(Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            AiActionChip(
-                                label = "Clear cache",
-                                onClick = { showClearCacheConfirm = true },
-                                testTag = "ai_clear_cache_button"
+                            AiMinimalToggleRow(
+                                title = "Auto-tag",
+                                checked = config.autoApplyTags,
+                                onCheckedChange = { scope.launch { prefs.setAiAutoApplyTags(it) } },
+                                testTag = "ai_auto_apply_tags_switch"
                             )
-
-                            Surface(
-                                onClick = onOpenBatchIndexing,
+    
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    
+                            AiMinimalToggleRow(
+                                title = "Auto-albums",
+                                checked = config.autoOrganizeCollections,
+                                onCheckedChange = { scope.launch { prefs.setAiAutoOrganizeCollections(it) } },
+                                testTag = "ai_auto_organize_collections_switch"
+                            )
+    
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    
+                            AiMinimalToggleRow(
+                                title = "OCR context",
+                                checked = config.includeOcrContext,
+                                onCheckedChange = { scope.launch { prefs.setAiIncludeOcrContext(it) } },
+                                testTag = "ai_include_ocr_switch"
+                            )
+    
+                            Spacer(Modifier.height(4.dp))
+    
+                            OutlinedTextField(
+                                value = promptInput,
+                                onValueChange = {
+                                    promptInput = it
+                                    actionFeedback = null
+                                },
+                                label = { Text("Custom prompt") },
+                                minLines = 2,
+                                maxLines = 4,
                                 shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                                 modifier = Modifier
-                                    .height(38.dp)
-                                    .testTag("ai_settings_open_indexing_button")
+                                    .fillMaxWidth()
+                                    .testTag("ai_custom_prompt_input")
+                            )
+    
+                            Spacer(Modifier.height(6.dp))
+    
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                AiActionChip(
+                                    label = "Clear cache",
+                                    onClick = { showClearCacheConfirm = true },
+                                    testTag = "ai_clear_cache_button"
+                                )
+    
+                                Surface(
+                                    onClick = onOpenBatchIndexing,
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                    modifier = Modifier
+                                        .height(38.dp)
+                                        .testTag("ai_settings_open_indexing_button")
                                 ) {
-                                    Icon(
-                                        Icons.Default.Bolt,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = "Batch Index",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Bolt,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = "Batch Index",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
-                        }
-
-                        actionFeedback?.let { feedback ->
-                            Text(
-                                text = feedback,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp)
-                            )
+    
+                            actionFeedback?.let { feedback ->
+                                Text(
+                                    text = feedback,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
-            }
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.navigationBarsPadding())

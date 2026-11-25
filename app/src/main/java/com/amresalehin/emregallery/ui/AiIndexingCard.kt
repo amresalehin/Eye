@@ -305,7 +305,7 @@ fun AiIndexingCard(
                 if (!aiState.providersLoaded || aiState.configuredProviders.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            text = "Vision model",
+                            text = "Model",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold,

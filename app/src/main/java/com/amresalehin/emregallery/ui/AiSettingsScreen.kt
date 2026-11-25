@@ -436,11 +436,23 @@ fun AiSettingsScreen(
                                     if (endpointTestPassed) {
                                         isSavingConfig = true
                                         scope.launch {
-                                            prefs.renameAiProvider(config.providerId, providerNameInput.trim())
-                                            prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
-                                            prefs.setAiCustomPromptInstructions(cleanPrompt)
+                                            runCatching {
+                                                prefs.saveAiProviderConfig(
+                                                    providerId = config.providerId,
+                                                    name = providerNameInput,
+                                                    baseUrl = cleanUrl,
+                                                    apiKey = cleanKey,
+                                                    modelId = cleanModel
+                                                )
+                                                prefs.setAiCustomPromptInstructions(cleanPrompt)
+                                            }.onSuccess {
+                                                actionFeedback = "Saved"
+                                                testError = null
+                                            }.onFailure { error ->
+                                                actionFeedback = null
+                                                testError = error.message ?: "Could not save AI provider"
+                                            }
                                             isSavingConfig = false
-                                            actionFeedback = "Saved"
                                         }
                                     } else {
                                         isTestingCapabilities = true

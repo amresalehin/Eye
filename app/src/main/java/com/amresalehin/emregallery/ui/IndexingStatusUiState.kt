@@ -93,7 +93,10 @@ data class AiIndexingState(
     val endpointLabel: String = "",
     val selectedProviderId: String = "",
     val configuredProviders: List<AiProviderProfile> = emptyList(),
-    val providersLoaded: Boolean = false
+    val providersLoaded: Boolean = false,
+    val isAllFolders: Boolean = true,
+    val selectedFolders: Set<String> = emptySet(),
+    val scopedTotalPhotos: Int = 0
 )
 
 data class IndexingStatusUiState(

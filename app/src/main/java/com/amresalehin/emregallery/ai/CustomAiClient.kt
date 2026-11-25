@@ -525,7 +525,7 @@ class CustomAiClient(
         return listOf(
             "not supported", "does not support", "unsupported", "unknown parameter",
             "unknown field", "unrecognized", "not allowed", "invalid parameter", "extra fields"
-        ).any(message::contains)
+        ).any { token -> message.contains(token) }
     }
 
     internal fun formatHttpError(providerName: String, statusCode: Int, body: String): String {

@@ -175,10 +175,23 @@ class CustomAiFeatureTest {
                 MockResponse().setResponseCode(400)
                     .setBody("""{"error":{"message":"response_format is not supported by this model","code":"unsupported_parameter"}}""")
             )
-            server.enqueue(
-                MockResponse().setResponseCode(200)
-                    .setBody("""{"choices":[{"message":{"content":"{\\"title\\":\\"Blue Mug\\",\\"description\\":\\"A blue mug on a table.\\",\\"tags\\":[\\"mug\\",\\"blue\\",\\"table\\"],\\"collection\\":\\"Objects\\",\\"key_details\\":\\"\\"}"}}]}""")
-            )
+            val analysisJson = JSONObject().apply {
+                put("title", "Blue Mug")
+                put("description", "A blue mug on a table.")
+                put("tags", org.json.JSONArray(listOf("mug", "blue", "table")))
+                put("collection", "Objects")
+                put("key_details", "")
+            }.toString()
+            val successBody = JSONObject().put(
+                "choices",
+                org.json.JSONArray().put(
+                    JSONObject().put(
+                        "message",
+                        JSONObject().put("content", analysisJson)
+                    )
+                )
+            ).toString()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(successBody))
             val config = AiConfig(
                 enabled = true,
                 provider = AiProvider.OPENAI_COMPATIBLE,

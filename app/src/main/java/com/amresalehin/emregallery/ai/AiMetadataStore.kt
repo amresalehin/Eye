@@ -253,6 +253,30 @@ class AiMetadataStore(context: Context) : SQLiteOpenHelper(
     }
 
     @Synchronized
+    fun clearForUris(uris: Collection<String>) {
+        val distinctUris = uris.distinct()
+        if (distinctUris.isEmpty()) return
+
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            // Keep each statement below SQLite's bind-parameter limit.
+            distinctUris.chunked(900).forEach { chunk ->
+                val placeholders = chunk.joinToString(",") { "?" }
+                db.delete(
+                    TABLE_ANALYSIS,
+                    "media_uri IN ($placeholders)",
+                    chunk.toTypedArray()
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        AiStoreEvents.notifyMediaUpdated()
+    }
+
+    @Synchronized
     fun clearAll() {
         writableDatabase.delete(TABLE_ANALYSIS, null, null)
         AiStoreEvents.notifyMediaUpdated()

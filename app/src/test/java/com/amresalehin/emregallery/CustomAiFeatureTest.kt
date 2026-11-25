@@ -52,7 +52,7 @@ class CustomAiFeatureTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        context.galleryDataStore.edit { it.clear() }
+        runBlocking { context.galleryDataStore.edit { it.clear() } }
         server = MockWebServer()
         server.start()
         client = CustomAiClient(OkHttpClient())
@@ -64,7 +64,7 @@ class CustomAiFeatureTest {
     fun tearDown() {
         aiStore.clearAll()
         aiStore.close()
-        context.galleryDataStore.edit { it.clear() }
+        runBlocking { context.galleryDataStore.edit { it.clear() } }
         server.shutdown()
     }
 
@@ -227,7 +227,7 @@ class CustomAiFeatureTest {
             server.enqueue(MockResponse().setResponseCode(200).setBody(successBody))
             val config = AiConfig(
                 enabled = true,
-                    apiKey = "provider-test-key",
+                apiKey = "provider-test-key",
                 modelId = "provider/vision-model",
                 customBaseUrl = server.url("/v1").toString().trimEnd('/')
             )

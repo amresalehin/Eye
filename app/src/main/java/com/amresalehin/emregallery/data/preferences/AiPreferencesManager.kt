@@ -66,8 +66,7 @@ class AiPreferencesManager(private val context: Context) {
         // Earlier versions defaulted to Gemini without always saving ai_provider.
         val isLegacyGemini = legacyProvider == "gemini" ||
             (legacyProvider.isNullOrBlank() && (
-                savedModelId.startsWith("gemini-", ignoreCase = true) ||
-                    (savedModelId.isBlank() && savedApiKey.isNotBlank())
+                savedModelId.startsWith("gemini-", ignoreCase = true) || savedApiKey.isNotBlank()
                 ))
 
         val effectiveBaseUrl = if (isLegacyGemini) {

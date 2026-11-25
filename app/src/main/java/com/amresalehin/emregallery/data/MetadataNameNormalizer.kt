@@ -31,7 +31,7 @@ object MetadataNameNormalizer {
     )
 
     fun normalizeTag(value: String): String =
-        value.trim().removePrefix("#").trim().replace(whitespace, " ").lowercase(Locale.ROOT)
+        value.trim().trimStart('#').trim().replace(whitespace, " ").lowercase(Locale.ROOT)
 
     fun normalizeTags(values: Collection<String>): List<String> {
         val unique = LinkedHashSet<String>()
@@ -46,7 +46,7 @@ object MetadataNameNormalizer {
         return words.replace(cleaned) { match ->
             val lower = match.value.lowercase(Locale.ROOT)
             val formatted = conventionalCasing[lower] ?: when {
-                wordIndex > 0 && lower in minorWords -> lower
+                wordIndex > 0 && lower.length > 1 && lower in minorWords -> lower
                 else -> lower.replaceFirstChar { it.titlecase(Locale.ROOT) }
             }
             wordIndex++
@@ -57,7 +57,8 @@ object MetadataNameNormalizer {
     fun normalizeCollectionNames(values: Collection<String>): List<String> {
         val unique = LinkedHashMap<String, String>()
         values.map(::normalizeCollectionName).filter(String::isNotBlank).forEach { name ->
-            unique.putIfAbsent(name.lowercase(Locale.ROOT), name)
+            val key = name.lowercase(Locale.ROOT)
+            if (!unique.containsKey(key)) unique[key] = name
         }
         return unique.values.toList()
     }

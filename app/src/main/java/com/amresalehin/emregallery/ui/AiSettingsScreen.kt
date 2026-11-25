@@ -304,15 +304,7 @@ fun AiSettingsScreen(
                                     .fillMaxWidth()
                                     .testTag("ai_base_url_input")
                             )
-                        }
     
-                        // Endpoint Fields
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
                             OutlinedTextField(
                                 value = apiKeyInput,
                                 onValueChange = {

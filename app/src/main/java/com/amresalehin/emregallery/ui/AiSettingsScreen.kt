@@ -233,25 +233,26 @@ fun AiSettingsScreen(
                     .fillMaxWidth()
                     .testTag("ai_unified_config_card")
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(96.dp),
-                    contentAlignment = if (isAiSetupExpanded) Alignment.CenterStart else Alignment.Center
-                ) {
-                    IconButton(
-                        onClick = { isAiSetupExpanded = !isAiSetupExpanded },
+                if (!isAiSetupExpanded) {
+                    Box(
                         modifier = Modifier
-                            .padding(start = if (isAiSetupExpanded) 16.dp else 0.dp)
-                            .size(40.dp)
-                            .testTag("ai_setup_expand_bar")
+                            .fillMaxWidth()
+                            .height(96.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (isAiSetupExpanded) Icons.Default.Close else Icons.Default.Add,
-                            contentDescription = if (isAiSetupExpanded) "Close provider form" else "Add provider",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        IconButton(
+                            onClick = { isAiSetupExpanded = true },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("ai_setup_expand_bar")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add provider",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
                     if (isAiSetupExpanded) {

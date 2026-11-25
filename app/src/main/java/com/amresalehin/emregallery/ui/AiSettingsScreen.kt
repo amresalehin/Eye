@@ -248,7 +248,7 @@ fun AiSettingsScreen(
                     )
 
                     Text(
-                        text = "OpenAI-compatible Chat Completions endpoint. Gemini (AI Studio): https://generativelanguage.googleapis.com/v1beta",
+                        text = "OpenAI-compatible Chat Completions endpoint. Gemini (AI Studio): https://generativelanguage.googleapis.com/v1beta/openai",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -35,7 +35,7 @@ data class AiConfig(
         // Legacy constants only support migration from earlier native-Gemini configuration.
         const val LEGACY_GEMINI_MODEL = "gemini-2.5-flash"
         const val LEGACY_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
-        const val GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+        const val GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
         const val UNIFIED_API_PROVIDER_ID = "unified"
     }
 }

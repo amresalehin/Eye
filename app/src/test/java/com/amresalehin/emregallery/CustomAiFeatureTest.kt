@@ -78,12 +78,12 @@ class CustomAiFeatureTest {
             enabled = true,
             apiKey = "test-gemini-key",
             modelId = "gemini-2.5-flash",
-            customBaseUrl = server.url("/v1beta").toString().trimEnd('/')
+            customBaseUrl = server.url("/v1beta/openai").toString().trimEnd('/')
         )
         val geminiResult = client.testConnection(geminiConfig)
         assertTrue("Gemini OpenAI-compatible endpoint should succeed", geminiResult.isSuccess)
         val geminiReq = server.takeRequest()
-        assertEquals("/v1beta/chat/completions", geminiReq.path)
+        assertEquals("/v1beta/openai/chat/completions", geminiReq.path)
         assertEquals("Bearer test-gemini-key", geminiReq.getHeader("Authorization"))
         val geminiPayload = JSONObject(geminiReq.body.readUtf8())
         assertEquals("gemini-2.5-flash", geminiPayload.getString("model"))
@@ -305,7 +305,7 @@ class CustomAiFeatureTest {
                 enabled = true,
                 apiKey = "key-123",
                 modelId = "gemini-2.5-flash",
-                customBaseUrl = server.url("/v1beta").toString().trimEnd('/'),
+                customBaseUrl = server.url("/v1beta/openai").toString().trimEnd('/'),
                 customPromptInstructions = "Highlight totals on receipts"
             )
 

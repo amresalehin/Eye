@@ -13,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,8 +38,6 @@ import com.amresalehin.emregallery.data.preferences.AiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.NumberFormat
-import java.util.Locale
 
 @Composable
 fun AiSettingsScreen(
@@ -53,15 +50,7 @@ fun AiSettingsScreen(
     val prefs = remember { PreferencesRepository(context.applicationContext) }
     val aiStore = remember { AiMetadataStore(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
-    val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.getDefault()) }
-
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
-    var analyzedCount by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) {
-        analyzedCount = withContext(Dispatchers.IO) { aiStore.getTotalCompletedCount() }
-    }
-
     var baseUrlInput by remember(config.baseUrl) { mutableStateOf(config.baseUrl) }
     var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
@@ -116,55 +105,6 @@ fun AiSettingsScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Header row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.size(46.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Custom API",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                            Text(
-                                text = "${numberFormat.format(analyzedCount)} / ${numberFormat.format(totalPhotos)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = config.enabled,
-                            onCheckedChange = { enabled -> scope.launch { prefs.setAiEnabled(enabled) } },
-                            modifier = Modifier.testTag("ai_settings_enabled_switch")
-                        )
-                    }
-
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                        modifier = Modifier.padding(horizontal = 18.dp)
-                    )
-
                     // Endpoint Fields
                     Column(
                         modifier = Modifier

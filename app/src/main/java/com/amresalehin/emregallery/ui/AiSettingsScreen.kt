@@ -33,7 +33,6 @@ import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.ai.EndpointCapabilityReport
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import com.amresalehin.emregallery.data.preferences.AiProviderProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +50,7 @@ fun AiSettingsScreen(
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
     val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
+    var providerNameInput by remember(config.providerId, config.providerName) { mutableStateOf(config.providerName) }
     var baseUrlInput by remember(config.providerId, config.baseUrl) { mutableStateOf(config.baseUrl) }
     var apiKeyInput by remember(config.providerId, config.apiKey) { mutableStateOf(config.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
@@ -64,11 +64,7 @@ fun AiSettingsScreen(
     var actionFeedback by remember { mutableStateOf<String?>(null) }
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
-    var providerMenuExpanded by remember { mutableStateOf(false) }
-    var showAddProviderDialog by remember { mutableStateOf(false) }
-    var showRenameProviderDialog by remember { mutableStateOf(false) }
-    var showDeleteProviderDialog by remember { mutableStateOf(false) }
-    var providerNameInput by remember { mutableStateOf("") }
+    var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -83,7 +79,7 @@ fun AiSettingsScreen(
     val endpointSignature = "${config.providerId}|${baseUrlInput.trim().trimEnd('/')}| ${apiKeyInput.trim()} | ${modelInput.trim()}"
     val endpointTestPassed = testedEndpointSignature == endpointSignature
     val canTest = !isTestingCapabilities && !isSavingConfig &&
-        baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
+        providerNameInput.isNotBlank() && baseUrlInput.isNotBlank() && apiKeyInput.isNotBlank() && modelInput.isNotBlank()
     val actionLabel = when {
         isTestingCapabilities -> "Testing…"
         isSavingConfig -> "Saving…"
@@ -125,89 +121,28 @@ fun AiSettingsScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Named provider profiles: each profile stores its own endpoint, key and model.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 18.dp, end = 12.dp, top = 14.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(
-                                onClick = { providerMenuExpanded = true },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("ai_provider_selector"),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(
-                                    text = config.providerName,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Icon(Icons.Default.ExpandMore, contentDescription = "Choose provider")
-                            }
-                            DropdownMenu(
-                                expanded = providerMenuExpanded,
-                                onDismissRequest = { providerMenuExpanded = false }
-                            ) {
-                                providers.forEach { provider ->
-                                    DropdownMenuItem(
-                                        text = { Text(provider.name) },
-                                        leadingIcon = {
-                                            if (provider.id == config.providerId) {
-                                                Icon(Icons.Default.Check, contentDescription = "Selected")
-                                            }
-                                        },
-                                        onClick = {
-                                            providerMenuExpanded = false
-                                            capabilityReport = null
-                                            testError = null
-                                            actionFeedback = null
-                                            testedEndpointSignature = null
-                                            scope.launch { prefs.selectAiProvider(provider.id) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        IconButton(
-                            onClick = {
-                                providerNameInput = config.providerName
-                                showRenameProviderDialog = true
-                            },
-                            enabled = providers.any { it.id == config.providerId },
-                            modifier = Modifier.testTag("ai_rename_provider_button")
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = "Rename provider")
-                        }
-                        IconButton(
-                            onClick = {
-                                providerNameInput = ""
-                                showAddProviderDialog = true
-                            },
-                            modifier = Modifier.testTag("ai_add_provider_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Add provider")
-                        }
-                        IconButton(
-                            onClick = { showDeleteProviderDialog = true },
-                            enabled = providers.size > 1 && providers.any { it.id == config.providerId },
-                            modifier = Modifier.testTag("ai_delete_provider_button")
-                        ) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "Remove provider")
-                        }
-                    }
-
-                    // Endpoint Fields
+                    // Provider name is a normal editable field, matching the endpoint fields.
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        OutlinedTextField(
+                            value = providerNameInput,
+                            onValueChange = {
+                                providerNameInput = it
+                                actionFeedback = null
+                            },
+                            label = { Text("Name") },
+                            placeholder = { Text("e.g. My OpenAI") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("ai_provider_name_input")
+                        )
+
                         OutlinedTextField(
                             value = baseUrlInput,
                             onValueChange = {
@@ -224,7 +159,15 @@ fun AiSettingsScreen(
                                 .fillMaxWidth()
                                 .testTag("ai_base_url_input")
                         )
+                    }
 
+                    // Endpoint Fields
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         OutlinedTextField(
                             value = apiKeyInput,
                             onValueChange = {
@@ -279,6 +222,7 @@ fun AiSettingsScreen(
                                 if (endpointTestPassed) {
                                     isSavingConfig = true
                                     scope.launch {
+                                        prefs.renameAiProvider(config.providerId, providerNameInput.trim())
                                         prefs.saveAiEndpointConfig(cleanUrl, cleanKey, cleanModel)
                                         prefs.setAiCustomPromptInstructions(cleanPrompt)
                                         isSavingConfig = false
@@ -502,6 +446,139 @@ fun AiSettingsScreen(
                 }
             }
 
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ai_configured_models_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Configured models",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    prefs.addAiProvider("New provider")
+                                    capabilityReport = null
+                                    testError = null
+                                    actionFeedback = null
+                                    testedEndpointSignature = null
+                                }
+                            },
+                            modifier = Modifier.testTag("ai_add_provider_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add")
+                        }
+                    }
+
+                    val configuredProviders = providers.filter { it.isConfigured }
+                    if (configuredProviders.isEmpty()) {
+                        Text(
+                            text = "No configured models yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        configuredProviders.forEach { provider ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (provider.id == config.providerId)
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch {
+                                            prefs.selectAiProvider(provider.id)
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            testedEndpointSignature = null
+                                        }
+                                    }
+                                    .testTag("ai_configured_model_${provider.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = provider.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${provider.modelId} · ${provider.baseUrl}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (provider.id == config.providerId) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = "Active model",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch {
+                                                prefs.selectAiProvider(provider.id)
+                                                capabilityReport = null
+                                                testError = null
+                                                actionFeedback = null
+                                                testedEndpointSignature = null
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("ai_edit_provider_${provider.id}")
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit ${provider.name}")
+                                    }
+                                    IconButton(
+                                        onClick = { providerToDelete = provider.id to provider.name },
+                                        enabled = providers.size > 1,
+                                        modifier = Modifier.testTag("ai_delete_provider_${provider.id}")
+                                    ) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${provider.name}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.navigationBarsPadding())
             Spacer(Modifier.height(16.dp))
         }
@@ -532,90 +609,27 @@ fun AiSettingsScreen(
         }
     }
 
-    if (showAddProviderDialog) {
+    providerToDelete?.let { (providerId, providerName) ->
         AlertDialog(
-            onDismissRequest = { showAddProviderDialog = false },
-            title = { Text("Add provider") },
-            text = {
-                OutlinedTextField(
-                    value = providerNameInput,
-                    onValueChange = { providerNameInput = it },
-                    label = { Text("Provider name") },
-                    singleLine = true
-                )
-            },
+            onDismissRequest = { providerToDelete = null },
+            title = { Text("Delete model?") },
+            text = { Text("Delete $providerName and its saved API key? This cannot be undone.") },
             confirmButton = {
                 TextButton(
-                    enabled = providerNameInput.isNotBlank(),
                     onClick = {
-                        val name = providerNameInput.trim()
-                        showAddProviderDialog = false
-                        providerNameInput = ""
+                        providerToDelete = null
                         scope.launch {
-                            prefs.addAiProvider(name)
+                            prefs.deleteAiProvider(providerId)
                             capabilityReport = null
                             testError = null
                             actionFeedback = null
                             testedEndpointSignature = null
                         }
                     }
-                ) { Text("Add") }
+                ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { showAddProviderDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    if (showRenameProviderDialog) {
-        AlertDialog(
-            onDismissRequest = { showRenameProviderDialog = false },
-            title = { Text("Rename provider") },
-            text = {
-                OutlinedTextField(
-                    value = providerNameInput,
-                    onValueChange = { providerNameInput = it },
-                    label = { Text("Provider name") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = providerNameInput.isNotBlank(),
-                    onClick = {
-                        val name = providerNameInput.trim()
-                        showRenameProviderDialog = false
-                        scope.launch { prefs.renameAiProvider(config.providerId, name) }
-                    }
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRenameProviderDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    if (showDeleteProviderDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteProviderDialog = false },
-            title = { Text("Remove provider?") },
-            text = { Text("Remove ${config.providerName} and its saved API key? This cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteProviderDialog = false
-                        scope.launch {
-                            prefs.deleteAiProvider(config.providerId)
-                            capabilityReport = null
-                            testError = null
-                            actionFeedback = null
-                            testedEndpointSignature = null
-                        }
-                    }
-                ) { Text("Remove") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteProviderDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { providerToDelete = null }) { Text("Cancel") }
             }
         )
     }

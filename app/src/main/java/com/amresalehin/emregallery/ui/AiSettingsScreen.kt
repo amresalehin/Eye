@@ -84,6 +84,8 @@ fun AiSettingsScreen(
         isTestingCapabilities -> "Testing…"
         isSavingConfig -> "Saving…"
         actionFeedback == "Saved" -> "Saved"
+        testError != null && endpointTestPassed -> "Save failed · Retry"
+        testError != null || capabilityReport?.fullyReady == false -> "Test failed · Retry"
         endpointTestPassed -> "Save"
         else -> "Test"
     }
@@ -516,12 +518,17 @@ fun AiSettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ) {
-                                    if (
-                                        (endpointTestPassed && capabilityReport?.fullyReady == true) ||
-                                        actionFeedback == "Saved"
-                                    ) {
+                                    val actionStatusIcon = when {
+                                        actionFeedback == "Saved" ||
+                                            (endpointTestPassed && capabilityReport?.fullyReady == true) ->
+                                            Icons.Default.CheckCircle
+                                        testError != null || capabilityReport?.fullyReady == false ->
+                                            Icons.Default.ErrorOutline
+                                        else -> null
+                                    }
+                                    actionStatusIcon?.let { icon ->
                                         Icon(
-                                            imageVector = Icons.Default.CheckCircle,
+                                            imageVector = icon,
                                             contentDescription = null,
                                             modifier = Modifier.size(18.dp)
                                         )

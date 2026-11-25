@@ -161,9 +161,30 @@ internal object AiSemanticCandidateRetriever {
         val normalized = Normalizer.normalize(value, Normalizer.Form.NFKC)
             .lowercase(Locale.ROOT)
         return tokenRegex.findAll(normalized)
-            .map { it.value }
+            .map { normalizeToken(it.value) }
+            .filter { it.isNotBlank() }
             .toList()
     }
+
+    private fun normalizeToken(raw: String): String {
+        val token = Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+        return when {
+            token.length > 5 && token.endsWith("ies") -> token.dropLast(3) + "y"
+            token.length > 5 && listOf("ches", "shes", "xes", "zes", "sses").any(token::endsWith) ->
+                token.dropLast(2)
+            token.length > 5 && token.endsWith("ing") -> collapseDoubleEnding(token.dropLast(3))
+            token.length > 4 && token.endsWith("ed") -> collapseDoubleEnding(token.dropLast(2))
+            token.length > 4 && token.endsWith("s") && !token.endsWith("ss") -> token.dropLast(1)
+            else -> token
+        }
+    }
+
+    private fun collapseDoubleEnding(value: String): String =
+        if (value.length >= 2 && value.last() == value[value.lastIndex - 1]) {
+            value.dropLast(1)
+        } else {
+            value
+        }
 
     private fun normalizePhrase(value: String): String =
         tokenize(value).joinToString(" ")

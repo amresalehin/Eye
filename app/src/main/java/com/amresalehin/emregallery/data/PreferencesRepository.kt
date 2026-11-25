@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.amresalehin.emregallery.data.preferences.AiConfig
+import com.amresalehin.emregallery.data.preferences.AiProviderProfile
 import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.data.preferences.DownloaderPreferencesManager
 import com.amresalehin.emregallery.data.preferences.DownloaderSubfolderMode
@@ -111,6 +112,12 @@ class PreferencesRepository(context: Context) {
 
     // --- Unified Custom API AI ---
     val aiConfig: Flow<AiConfig> get() = aiPrefs.aiConfig
+    val aiProviders: Flow<List<AiProviderProfile>> get() = aiPrefs.providers
+    val activeAiProviderId: Flow<String> get() = aiPrefs.activeProviderId
+    suspend fun addAiProvider(name: String): String = aiPrefs.addProvider(name)
+    suspend fun selectAiProvider(id: String) = aiPrefs.selectProvider(id)
+    suspend fun renameAiProvider(id: String, name: String) = aiPrefs.renameProvider(id, name)
+    suspend fun deleteAiProvider(id: String) = aiPrefs.deleteProvider(id)
     suspend fun setAiEnabled(enabled: Boolean) = aiPrefs.setEnabled(enabled)
     suspend fun setAiBaseUrl(baseUrl: String) = aiPrefs.setBaseUrl(baseUrl)
     suspend fun setAiApiKey(apiKey: String) = aiPrefs.setApiKey(apiKey)

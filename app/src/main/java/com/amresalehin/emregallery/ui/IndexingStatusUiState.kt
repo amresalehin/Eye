@@ -92,7 +92,8 @@ data class AiIndexingState(
     val modelId: String = "",
     val endpointLabel: String = "",
     val selectedProviderId: String = "",
-    val configuredProviders: List<AiProviderProfile> = emptyList()
+    val configuredProviders: List<AiProviderProfile> = emptyList(),
+    val providersLoaded: Boolean = false
 )
 
 data class IndexingStatusUiState(

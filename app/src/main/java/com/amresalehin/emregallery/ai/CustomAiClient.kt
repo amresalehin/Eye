@@ -468,7 +468,6 @@ class CustomAiClient(
                     put("content", contentValue)
                 }))
                 put("stream", false)
-                put("temperature", 0.2)
                 if (includeJsonMode) put("response_format", JSONObject().put("type", "json_object"))
             }
             return Request.Builder()

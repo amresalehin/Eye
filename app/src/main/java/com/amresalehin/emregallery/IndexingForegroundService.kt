@@ -544,6 +544,15 @@ class IndexingForegroundService : Service() {
                     photos.filterNot { it.uri in completedUris }
                 }
             }
+            if (pending.isNotEmpty()) {
+                val visionCheck = aiClient.testVisionConnection(config)
+                visionCheck.getOrElse { error ->
+                    throw IllegalStateException(
+                        "Vision capability check failed. Batch indexing was stopped before processing the gallery: ${error.message ?: "Unknown provider error"}",
+                        error
+                    )
+                }
+            }
             val alreadyDone = withContext(Dispatchers.IO) {
                 aiStore.getCompletedCount(photos.map { it.uri })
             }

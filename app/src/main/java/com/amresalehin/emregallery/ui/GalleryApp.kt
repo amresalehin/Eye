@@ -1401,10 +1401,6 @@ fun GalleryApp(
                         onBack = { performBackNavigation() }
                     )
                     Destination.AI_SETTINGS -> AiSettingsScreen(
-                        totalPhotos = media.count {
-                            !it.isVideo && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive
-                        },
-                        onOpenBatchIndexing = { navigateTo(Destination.INDEXING_STATUS) },
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(

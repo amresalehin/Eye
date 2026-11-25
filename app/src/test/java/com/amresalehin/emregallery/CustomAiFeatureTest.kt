@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.ai.AiMediaAnalysis
 import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.AiSemanticCandidateRetriever
 import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.AiFilter
 import com.amresalehin.emregallery.data.MediaItem
@@ -276,10 +277,119 @@ class CustomAiFeatureTest {
     }
 
     @Test
+    fun semanticCandidateRetrieval_findsRelevantItemsBeyondFirst120Records() {
+        val distractors = (0 until 150).map { index ->
+            AiMediaAnalysis(
+                mediaUri = "content://media/external/images/media/distractor_$index",
+                title = "Family dinner $index",
+                description = "People sitting around a dining table with food.",
+                tags = listOf("family", "food", "dinner"),
+                suggestedCollection = "People"
+            )
+        }
+        val target = AiMediaAnalysis(
+            mediaUri = "content://media/external/images/media/late_train_ticket",
+            title = "Train Ticket",
+            description = "Railway pass for an intercity journey.",
+            tags = listOf("railway", "ticket", "journey"),
+            suggestedCollection = "Travel"
+        )
+
+        val candidates = AiSemanticCandidateRetriever.retrieve(
+            query = "Find my train pass",
+            analyses = distractors + target
+        )
+
+        assertTrue("The relevant record after position 120 must be retrieved", target in candidates)
+        assertTrue("The LLM shortlist should remain bounded", candidates.size <= AiSemanticCandidateRetriever.DEFAULT_CANDIDATE_LIMIT)
+        assertFalse("Unrelated family photos should not be shortlisted", candidates.any { it.title.startsWith("Family dinner") })
+    }
+
+    @Test
+    fun semanticSearch_sendsFullLibraryCandidatesToLlm_notFirst120Records() = runBlocking {
+        val distractors = (0 until 150).map { index ->
+            AiMediaAnalysis(
+                mediaUri = "content://media/external/images/media/distractor_$index",
+                title = "Family dinner $index",
+                description = "People sitting around a dining table with food.",
+                tags = listOf("family", "food", "dinner"),
+                suggestedCollection = "People"
+            )
+        }
+        val target = AiMediaAnalysis(
+            mediaUri = "content://media/external/images/media/late_train_ticket",
+            title = "Train Ticket",
+            description = "Railway pass for an intercity journey.",
+            tags = listOf("railway", "ticket", "journey"),
+            suggestedCollection = "Travel"
+        )
+        val response = JSONObject().put(
+            "choices",
+            JSONArray().put(
+                JSONObject().put(
+                    "message",
+                    JSONObject().put(
+                        "content",
+                        """{"matched_indices":[0],"summary":"Found a train ticket."}"""
+                    )
+                )
+            )
+        ).toString()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(response))
+
+        val config = AiConfig(
+            enabled = true,
+            baseUrl = server.url("/v1").toString().trimEnd('/'),
+            apiKey = "sk-search",
+            modelId = "custom-search-model"
+        )
+        val result = client.semanticSearch("Find my train pass", distractors + target, config)
+
+        assertTrue(result.isSuccess)
+        assertEquals(
+            listOf("content://media/external/images/media/late_train_ticket"),
+            result.getOrThrow().matchingUris
+        )
+
+        val request = JSONObject(server.takeRequest().body.readUtf8())
+        val prompt = request.getJSONArray("messages")
+            .getJSONObject(0)
+            .getString("content")
+        assertTrue("The late relevant record must be in the LLM catalogue", prompt.contains("Train Ticket"))
+        assertFalse("Unrelated records must not be sent to the LLM", prompt.contains("Family dinner 0"))
+    }
+
+    @Test
+    fun semanticSearch_returnsWithoutApiCall_whenNoLocalCandidatesMatch() = runBlocking {
+        val analyses = listOf(
+            AiMediaAnalysis(
+                mediaUri = "content://media/external/images/media/1",
+                title = "Family dinner",
+                description = "People eating together at a dining table.",
+                tags = listOf("family", "food"),
+                suggestedCollection = "People"
+            )
+        )
+        val config = AiConfig(
+            enabled = true,
+            baseUrl = server.url("/v1").toString().trimEnd('/'),
+            apiKey = "sk-search",
+            modelId = "custom-search-model"
+        )
+
+        val result = client.semanticSearch("Find my railway ticket", analyses, config)
+
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().matchingUris.isEmpty())
+        assertEquals("No relevant AI-analyzed photos found.", result.getOrThrow().summary)
+        assertEquals("No API request should be made without candidates", 0, server.requestCount)
+    }
+
+    @Test
     fun semanticSearch_returnsMatchedUrisAndSummary() = runBlocking {
         val searchPayload = """
             {
-              "matched_indices": [1, 99, 0],
+              "matched_indices": [0, 99, 1],
               "summary": "Found 2 travel and receipt screenshots."
             }
         """.trimIndent()

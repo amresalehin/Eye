@@ -354,14 +354,6 @@ fun AiIndexingCard(
                                 testTag = "ai_retry_failed_button"
                             )
                         }
-                        if (onOpenAiSettings != null) {
-                            AiHeaderPill(
-                                label = "API",
-                                isActive = !aiState.hasApiKey,
-                                onClick = onOpenAiSettings,
-                                testTag = if (aiState.hasApiKey) "ai_card_settings_button" else "ai_card_setup_key_button"
-                            )
-                        }
                     }
                 }
 

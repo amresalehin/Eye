@@ -1,8 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -56,10 +53,6 @@ fun AiViewerInsightsCard(
     var isAnalyzing by remember(item.uri) { mutableStateOf(false) }
     var analysisError by remember(item.uri) { mutableStateOf<String?>(null) }
 
-    var questionInput by remember(item.uri) { mutableStateOf("") }
-    var isAsking by remember(item.uri) { mutableStateOf(false) }
-    var answerText by remember(item.uri) { mutableStateOf<String?>(null) }
-    var askError by remember(item.uri) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(item.uri) {
         suspend fun loadCached() {
@@ -111,36 +104,6 @@ fun AiViewerInsightsCard(
         }
     }
 
-    fun submitQuestion() {
-        val q = questionInput.trim()
-        if (q.isEmpty() || item.isVideo || isAsking) return
-        if (!aiConfig.isConfigured) {
-            onOpenAiSettings?.invoke()
-            return
-        }
-        isAsking = true
-        askError = null
-        scope.launch {
-            val ocrText = if (aiConfig.includeOcrContext) {
-                withContext(Dispatchers.IO) {
-                    TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
-                }
-            } else null
-            val result = aiClient.askAboutImage(
-                context = context,
-                mediaUri = item.uri,
-                question = q,
-                config = aiConfig,
-                ocrContext = ocrText
-            )
-            result.onSuccess { answer ->
-                answerText = answer
-            }.onFailure { err ->
-                askError = err.message ?: "Request failed"
-            }
-            isAsking = false
-        }
-    }
 
     if (item.isVideo) return
 
@@ -343,78 +306,6 @@ fun AiViewerInsightsCard(
                 )
             }
 
-            // Compact Q&A field matching ActionsTabContent's OutlinedTextField styling
-            OutlinedTextField(
-                value = questionInput,
-                onValueChange = { questionInput = it },
-                placeholder = { Text("Ask AI…") },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                ),
-                trailingIcon = {
-                    IconButton(
-                        onClick = ::submitQuestion,
-                        enabled = questionInput.isNotBlank() && !isAsking,
-                        modifier = Modifier.testTag("viewer_ai_ask_button")
-                    ) {
-                        if (isAsking) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "Ask AI"
-                            )
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("viewer_ai_question_input")
-            )
-
-            askError?.let { err ->
-                Text(
-                    text = err,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            answerText?.let { answer ->
-                DetailCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            text = answer,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                cm?.setPrimaryClip(ClipData.newPlainText("AI Answer", answer))
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Copy",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 }

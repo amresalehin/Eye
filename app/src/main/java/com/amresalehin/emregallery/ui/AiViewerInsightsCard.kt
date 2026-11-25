@@ -320,17 +320,7 @@ fun AiViewerInsightsCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (currentAnalysis.keyDetails.isNotBlank()) {
-                            HorizontalDivider(
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                            )
-                            Text(
-                                text = currentAnalysis.keyDetails,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+
 
                     }
                 }

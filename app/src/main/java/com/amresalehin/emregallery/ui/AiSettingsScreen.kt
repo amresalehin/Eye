@@ -335,6 +335,9 @@ fun AiSettingsScreen(
                                 value = baseUrlInput,
                                 onValueChange = {
                                     baseUrlInput = it
+                                    availableModels = emptyList()
+                                    isModelMenuExpanded = false
+                                    modelFetchError = null
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
@@ -352,6 +355,9 @@ fun AiSettingsScreen(
                                 value = apiKeyInput,
                                 onValueChange = {
                                     apiKeyInput = it
+                                    availableModels = emptyList()
+                                    isModelMenuExpanded = false
+                                    modelFetchError = null
                                     capabilityReport = null
                                     testError = null
                                     actionFeedback = null
@@ -367,7 +373,11 @@ fun AiSettingsScreen(
     
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedTextField(
-                                    value = modelInput.takeIf { availableModels.isNotEmpty() }.orEmpty(),
+                                    value = when {
+                                        isFetchingModels -> "Fetching models…"
+                                        availableModels.isNotEmpty() -> modelInput
+                                        else -> ""
+                                    },
                                     onValueChange = {},
                                     readOnly = true,
                                     singleLine = true,
@@ -395,6 +405,8 @@ fun AiSettingsScreen(
                                         ) {
                                             if (availableModels.isEmpty()) {
                                                 isFetchingModels = true
+                                                isModelMenuExpanded = false
+                                                availableModels = emptyList()
                                                 modelFetchError = null
                                                 scope.launch {
                                                     val fetchConfig = config.copy(
@@ -411,6 +423,7 @@ fun AiSettingsScreen(
                                                             }
                                                             .onFailure { error ->
                                                                 modelFetchError = error.message ?: "Could not fetch models"
+                                                                isModelMenuExpanded = false
                                                             }
                                                     } finally {
                                                         isFetchingModels = false
@@ -423,7 +436,7 @@ fun AiSettingsScreen(
                                         .testTag("ai_model_id_input")
                                 )
                                 DropdownMenu(
-                                    expanded = isModelMenuExpanded,
+                                    expanded = isModelMenuExpanded && !isFetchingModels && availableModels.isNotEmpty(),
                                     onDismissRequest = { isModelMenuExpanded = false },
                                     modifier = Modifier.heightIn(max = 320.dp)
                                 ) {

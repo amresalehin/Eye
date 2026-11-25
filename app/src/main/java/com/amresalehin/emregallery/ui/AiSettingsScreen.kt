@@ -623,11 +623,6 @@ fun AiSettingsScreen(
                             modifier = Modifier.testTag("ai_request_delay_value")
                         )
                     }
-                    Text(
-                        text = "Pause between photo requests during batch indexing",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     Slider(
                         value = requestDelayMs,
                         onValueChange = { requestDelayMs = it },

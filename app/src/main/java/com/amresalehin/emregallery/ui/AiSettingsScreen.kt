@@ -435,6 +435,14 @@ fun AiSettingsScreen(
                                             (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
                                         contentPadding = PaddingValues(0.dp),
                                         shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                                        ),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            contentColor = MaterialTheme.colorScheme.onSurface
+                                        ),
                                         modifier = Modifier
                                             .size(48.dp)
                                             .testTag("ai_fetch_models_button")

@@ -538,7 +538,6 @@ fun AiSettingsScreen(
                         showClearCacheConfirm = false
                         scope.launch {
                             withContext(Dispatchers.IO) { aiStore.clearAll() }
-                            analyzedCount = 0
                             actionFeedback = "AI metadata cache cleared"
                         }
                     }

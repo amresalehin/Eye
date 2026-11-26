@@ -581,11 +581,17 @@ fun AiSettingsScreen(
                                 .fillMaxWidth()
                                 .padding(bottom = 16.dp)
                         ) {
+                        Text(
+                            text = "Add Model",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)
+                        )
                         // Provider name is a normal editable field, matching the endpoint fields.
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                                .padding(horizontal = 18.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             OutlinedTextField(

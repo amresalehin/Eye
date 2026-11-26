@@ -314,7 +314,7 @@ class CustomAiFeatureTest {
             val retryReqBody = server.takeRequest().body.readUtf8()
             assertFalse(retryReqBody.contains("response_format"))
             assertTrue(retryReqBody.contains("image_url"))
-            assertTrue(retryReqBody.contains("TOTAL $9.50"))
+            assertFalse(retryReqBody.contains("TOTAL $9.50"))
             assertFalse(retryReqBody.contains("Receipts, Travel"))
             assertTrue(retryReqBody.contains("collections"))
             assertFalse(retryReqBody.contains("key_details"))

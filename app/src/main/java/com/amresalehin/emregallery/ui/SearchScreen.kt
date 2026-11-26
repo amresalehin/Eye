@@ -282,6 +282,11 @@ fun SearchScreen(
                     keyboardController?.hide()
                     onSubmitSearch(submittedQuery)
                 },
+                onClearQuery = {
+                    onQueryChange("")
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                },
                 onBack = {
                     focusManager.clearFocus()
                     keyboardController?.hide()
@@ -416,7 +421,15 @@ fun SearchScreen(
                                 }
                                 val q = suggestion.targetQuery ?: suggestion.title
                                 onQueryChange(q)
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
                                 onSubmitSearch(q)
+                            },
+                            onFillSuggestion = { suggestion ->
+                                val q = suggestion.targetQuery ?: suggestion.title
+                                onQueryChange(q)
+                                focusRequester.requestFocus()
+                                keyboardController?.show()
                             },
                             onSubmitQuery = {
                                 focusManager.clearFocus()
@@ -436,6 +449,8 @@ fun SearchScreen(
                             recentSearches = recentSearches,
                             onSelectRecent = { selectedQuery ->
                                 onQueryChange(selectedQuery)
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
                                 onSubmitSearch(selectedQuery)
                             },
                             onClearRecent = onClearRecent,
@@ -445,6 +460,8 @@ fun SearchScreen(
                                 }
                                 val q = category.queryAction ?: category.title
                                 onQueryChange(q)
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
                                 onSubmitSearch(q)
                             },
                             onSelectEntity = { entity ->
@@ -453,6 +470,8 @@ fun SearchScreen(
                                 }
                                 val q = entity.queryAction ?: entity.title
                                 onQueryChange(q)
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
                                 onSubmitSearch(q)
                             },
                             isDark = isDark
@@ -1058,6 +1077,7 @@ private fun TypingLiveSuggestionsContent(
     query: String,
     suggestions: List<SearchSuggestion>,
     onSelectSuggestion: (SearchSuggestion) -> Unit,
+    onFillSuggestion: (SearchSuggestion) -> Unit,
     onSubmitQuery: () -> Unit,
     hasAiKey: Boolean = false,
     onAskAiQuery: () -> Unit = {},
@@ -1173,6 +1193,7 @@ private fun TypingLiveSuggestionsContent(
             SearchSuggestionRow(
                 suggestion = suggestion,
                 onClick = { onSelectSuggestion(suggestion) },
+                onFillQuery = { onFillSuggestion(suggestion) },
                 isDark = isDark
             )
         }

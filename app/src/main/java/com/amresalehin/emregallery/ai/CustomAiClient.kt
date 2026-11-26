@@ -257,8 +257,7 @@ class CustomAiClient(
     suspend fun analyzeImage(
         context: Context,
         mediaUri: String,
-        config: AiConfig,
-        ocrContext: String? = null
+        config: AiConfig
     ): Result<AiMediaAnalysis> = withContext(Dispatchers.IO) {
         runCatching {
             require(config.enabled) { "AI features are currently paused." }
@@ -267,10 +266,7 @@ class CustomAiClient(
             val jpegBase64 = encodeImageToJpegBase64(context, mediaUri)
                 ?: error("Could not decode image for AI analysis.")
 
-            val prompt = buildAnalysisPrompt(
-                template = config.analysisPromptTemplate,
-                ocrContext = ocrContext
-            )
+            val prompt = buildAnalysisPrompt(template = config.analysisPromptTemplate)
 
             val adapter = selectAdapter(config.normalizedBaseUrl)
             val rawResponse = executePrompt(
@@ -293,8 +289,7 @@ class CustomAiClient(
         context: Context,
         mediaUri: String,
         question: String,
-        config: AiConfig,
-        ocrContext: String? = null
+        config: AiConfig
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             require(config.enabled) { "AI features are currently paused." }
@@ -307,11 +302,6 @@ class CustomAiClient(
 
             val prompt = buildString {
                 append("Answer the user's question about this image accurately and concisely.\n")
-                if (!ocrContext.isNullOrBlank()) {
-                    append("\nExtracted on-device OCR text (may help with small text):\n")
-                    append(ocrContext.take(2000))
-                    append("\n")
-                }
                 if (config.customPromptInstructions.isNotBlank()) {
                     append("\nUser preferences: ")
                     append(config.customPromptInstructions.take(400))
@@ -757,11 +747,7 @@ class CustomAiClient(
         }.getOrNull()
     }
 
-    private fun buildAnalysisPrompt(
-        template: String,
-        ocrContext: String?
-    ): String {
-        val ocrText = ocrContext.orEmpty().take(1500)
+    private fun buildAnalysisPrompt(template: String): String {
         val editablePrompt = template.ifBlank { AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE }
             .replace(
                 Regex("""(?m)^[ \t]*"key_details"\s*:\s*[^\r\n]*,?[ \t]*\r?\n?"""),
@@ -779,7 +765,6 @@ class CustomAiClient(
                 "\"collection\": \"Single concise collection name\",",
                 "\"collections\": [\"granular, specific collection name\"],"
             )
-            .replace("{{ocr_context}}", ocrText)
 
         return buildString {
             append(editablePrompt.trim())

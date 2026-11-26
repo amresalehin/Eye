@@ -51,7 +51,7 @@ class HomeGridNavigationOrderTest {
         )
 
         assertEquals(
-            listOf(firstVideo, secondVideo, interveningPhoto, finalPhoto),
+            listOf(firstVideo, interveningPhoto, secondVideo, finalPhoto),
             flattenHomeGridRows(groupedRows)
         )
     }

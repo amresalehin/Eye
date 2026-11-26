@@ -62,6 +62,9 @@ private data class HomeGroupedData(
 @Immutable
 private data class HomeGridData(
     val sortedMedia: List<MediaItem> = emptyList(),
+    // Exact flattened order of the rows rendered on Home; viewer navigation must use this
+    // rather than the global sort when grouping changes the visible sequence.
+    val viewerOrderedMedia: List<MediaItem> = emptyList(),
     val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>> = emptyList(),
     val predictivePrefetchRows: List<Pair<String, List<MediaItem>>> = emptyList(),
     val predictivePrefetchIndex: Map<String, Int> = emptyMap()
@@ -118,6 +121,7 @@ private fun buildHomeGridData(
     }
     return HomeGridData(
         sortedMedia = grouped.sortedMedia,
+        viewerOrderedMedia = flattenHomeGridRows(groupedRows),
         groupedRows = groupedRows,
         predictivePrefetchRows = predictivePrefetchRows,
         predictivePrefetchIndex = predictivePrefetchIndex
@@ -200,6 +204,7 @@ fun HomeScreen(
         }
     }
     val sortedMedia = gridData.sortedMedia
+    val viewerOrderedMedia = gridData.viewerOrderedMedia
     val groupedRows = gridData.groupedRows
     val predictivePrefetchRows = gridData.predictivePrefetchRows
     val predictivePrefetchIndex = gridData.predictivePrefetchIndex
@@ -497,7 +502,7 @@ fun HomeScreen(
                             selectedUris = selectedUris,
                             onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
                             onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
-                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item, sortedMedia) }
+                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item, viewerOrderedMedia) }
                         )
                     }
                 }

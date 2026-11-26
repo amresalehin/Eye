@@ -187,3 +187,15 @@ fun groupMediaByInitial(media: List<MediaItem>): List<DayGroup> {
         DayGroup(dayKey = syntheticKey++, dayLabel = initial, items = initialItems)
     }
 }
+
+/**
+ * Flattens the row sequence exactly as it is presented by the Home grid.
+ *
+ * Grouping by folder or initial can change the visible order from the global
+ * sort order. The viewer must navigate this displayed sequence so swiping
+ * never jumps over media that appears between items in the gallery.
+ */
+fun flattenHomeGridRows(
+    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
+): List<MediaItem> = groupedRows.flatMap { (_, rows) -> rows.flatMap { it } }
+

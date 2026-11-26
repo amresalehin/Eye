@@ -105,19 +105,12 @@ fun AiViewerInsightsCard(
             .testTag("viewer_ai_insights_card"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Section Header matching Albums / Tags / People / Location / Metadata
+        // Keep the existing provider and settings actions, without an AI Insights heading.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.End
         ) {
-            Text(
-                text = "AI Insights",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -302,20 +295,21 @@ fun AiViewerInsightsCard(
         } else {
             if (currentAnalysis != null) {
                 DetailCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = currentAnalysis.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                if (currentAnalysis.description.isNotBlank()) {
+                    DetailCard {
                         Text(
-                            text = currentAnalysis.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = currentAnalysis.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (currentAnalysis.description.isNotBlank()) {
-                            Text(
-                                text = currentAnalysis.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }

@@ -177,13 +177,14 @@ fun AiSettingsScreen(
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .height(56.dp)
                                 .clickable { isDefaultModelMenuExpanded = true }
                                 .testTag("ai_default_model_selector")
                         ) {
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {

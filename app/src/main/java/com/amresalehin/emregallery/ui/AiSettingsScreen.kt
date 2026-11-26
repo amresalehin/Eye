@@ -166,7 +166,7 @@ fun AiSettingsScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(horizontal = 18.dp, vertical = 16.dp)
                     ) {
                         Surface(
                             shape = RoundedCornerShape(50),

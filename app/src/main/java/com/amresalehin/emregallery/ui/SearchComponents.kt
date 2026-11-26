@@ -92,6 +92,7 @@ fun SearchBarCapsule(
     query: String,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: (String) -> Unit,
+    onClearQuery: () -> Unit,
     onBack: () -> Unit,
     onOpenFilterSheet: () -> Unit,
     hasActiveFilters: Boolean,
@@ -190,7 +191,7 @@ fun SearchBarCapsule(
             // Clear Query Action 'X'
             if (query.isNotEmpty()) {
                 IconButton(
-                    onClick = { onQueryChange("") },
+                    onClick = onClearQuery,
                     modifier = Modifier
                         .size(40.dp)
                         .testTag("search_clear_button")
@@ -862,6 +863,7 @@ fun SearchResultsHeader(
 fun SearchSuggestionRow(
     suggestion: SearchSuggestion,
     onClick: () -> Unit,
+    onFillQuery: () -> Unit,
     modifier: Modifier = Modifier,
     isDark: Boolean = false
 ) {
@@ -942,15 +944,21 @@ fun SearchSuggestionRow(
                 }
             }
 
-            // Trailing northwest arrow affordance
-            Icon(
-                imageVector = Icons.Default.NorthWest,
-                contentDescription = "Fill query",
-                tint = secondaryText.copy(alpha = 0.7f),
+            // Fill the query without submitting it; the parent row remains a submit action.
+            IconButton(
+                onClick = onFillQuery,
                 modifier = Modifier
-                    .padding(start = 8.dp)
-                    .size(18.dp)
-            )
+                    .padding(start = 4.dp)
+                    .size(40.dp)
+                    .testTag("suggestion_fill_${suggestion.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NorthWest,
+                    contentDescription = "Fill search",
+                    tint = secondaryText.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

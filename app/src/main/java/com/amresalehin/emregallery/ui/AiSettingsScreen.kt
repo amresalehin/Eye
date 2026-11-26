@@ -913,6 +913,7 @@ fun AiSettingsScreen(
                 )
             }
         }
+    }
 
     providerToDelete?.let { (providerId, providerName) ->
         AlertDialog(

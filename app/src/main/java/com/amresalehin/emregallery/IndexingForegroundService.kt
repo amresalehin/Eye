@@ -579,16 +579,10 @@ class IndexingForegroundService : Service() {
                     error = null
                 )
                 try {
-                    val ocrContext = if (config.includeOcrContext) {
-                        withContext(Dispatchers.IO) {
-                            TesseractOcr.readCachedResult(applicationContext, Uri.parse(item.uri))
-                        }
-                    } else null
                     val result = aiClient.analyzeImage(
                         context = applicationContext,
                         mediaUri = item.uri,
-                        config = config,
-                        ocrContext = ocrContext
+                        config = config
                     )
                     result.onSuccess { parsed ->
                         withContext(Dispatchers.IO) { aiStore.saveAnalysis(parsed) }

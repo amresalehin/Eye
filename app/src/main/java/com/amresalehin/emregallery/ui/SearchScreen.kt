@@ -19,11 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.amresalehin.emregallery.ai.AiMetadataStore
 import com.amresalehin.emregallery.ai.AiStoreEvents
-import com.amresalehin.emregallery.ai.CustomAiClient
-import com.amresalehin.emregallery.data.preferences.AiConfig
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,11 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amresalehin.emregallery.data.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -68,8 +62,7 @@ fun SearchScreen(
     onOpenMedia: (MediaItem, List<MediaItem>) -> Unit,
     onOpenSuggestion: (SearchSuggestion) -> Unit,
     initialFilter: SearchFilterState? = null,
-    onConsumeInitialFilter: () -> Unit = {},
-    onOpenAiSettings: (() -> Unit)? = null
+    onConsumeInitialFilter: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -84,10 +77,6 @@ fun SearchScreen(
     }
 
     val searchEngine = remember { SearchEngine(context) }
-    val prefsRepo = remember(context) { PreferencesRepository(context.applicationContext) }
-    val aiStore = remember(context) { AiMetadataStore(context.applicationContext) }
-    val aiClient = remember { CustomAiClient() }
-    val aiConfig by prefsRepo.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
 
     // Search & Filter State
     var filterState by remember { mutableStateOf(initialFilter ?: SearchFilterState()) }
@@ -96,23 +85,11 @@ fun SearchScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
 
-    // Semantic AI Search State
-    var isAiSearching by remember { mutableStateOf(false) }
-    var aiMatchedUris by remember { mutableStateOf<List<String>?>(null) }
-    var aiSearchSummary by remember { mutableStateOf<String?>(null) }
-    var aiSearchError by remember { mutableStateOf<String?>(null) }
-
     LaunchedEffect(initialFilter) {
         if (initialFilter != null) {
             filterState = initialFilter
             onConsumeInitialFilter()
         }
-    }
-
-    LaunchedEffect(query) {
-        aiMatchedUris = null
-        aiSearchSummary = null
-        aiSearchError = null
     }
 
     // Collapsed Date Groups State for State C
@@ -193,34 +170,6 @@ fun SearchScreen(
                 favourites = favourites
             )
             searchResultsData = results
-        }
-    }
-
-    fun triggerSemanticAiSearch(searchText: String) {
-        val trimmed = searchText.trim()
-        if (trimmed.isEmpty() || isAiSearching) return
-        if (!aiConfig.isConfigured) {
-            onOpenAiSettings?.invoke()
-            return
-        }
-        focusManager.clearFocus()
-        keyboardController?.hide()
-        onQueryChange(trimmed)
-        onSubmitSearch(trimmed)
-        isAiSearching = true
-        aiSearchError = null
-        scope.launch {
-            val analyses = withContext(Dispatchers.IO) {
-                aiStore.getAllCompleted().values.toList()
-            }
-            val result = aiClient.semanticSearch(trimmed, analyses, aiConfig)
-            result.onSuccess { match ->
-                aiMatchedUris = match.matchingUris
-                aiSearchSummary = match.summary
-            }.onFailure { err ->
-                aiSearchError = err.message ?: "AI semantic search failed"
-            }
-            isAiSearching = false
         }
     }
 
@@ -363,26 +312,9 @@ fun SearchScreen(
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
                 when {
                     stage == SearchStage.RESULTS || (!filterState.isDefault && stage == SearchStage.DISCOVERY) -> {
-                        val effectiveResults = remember(searchResultsData, aiMatchedUris, allMedia) {
-                            val semanticUris = aiMatchedUris
-                            if (semanticUris == null) {
-                                searchResultsData
-                            } else {
-                                val mediaMap = allMedia.filterNot { it.isTrashed }.associateBy { it.uri }
-                                val prioritized = semanticUris.mapNotNull { mediaMap[it] }
-                                val prioritizedSet = prioritized.map { it.uri }.toSet()
-                                val combined = prioritized + searchResultsData.items.filterNot { it.uri in prioritizedSet }
-                                searchResultsData.copy(
-                                    items = combined,
-                                    totalPhotosCount = combined.count { !it.isVideo },
-                                    totalVideosCount = combined.count { it.isVideo }
-                                )
-                            }
-                        }
-
                         SubmittedResultsContent(
                             query = query,
-                            resultsData = effectiveResults,
+                            resultsData = searchResultsData,
                             sortMode = sortMode,
                             onSortChange = { sortMode = it },
                             viewMode = viewMode,
@@ -394,19 +326,8 @@ fun SearchScreen(
                                 collapsedGroups[key] = !(collapsedGroups[key] ?: false)
                             },
                             onOpenMedia = { item ->
-                                onOpenMedia(item, effectiveResults.items)
+                                onOpenMedia(item, searchResultsData.items)
                             },
-                            hasAiKey = aiConfig.isConfigured,
-                            isAiSearching = isAiSearching,
-                            aiSearchSummary = aiSearchSummary,
-                            aiSearchError = aiSearchError,
-                            onRunAiSearch = { triggerSemanticAiSearch(query) },
-                            onClearAiSearch = {
-                                aiMatchedUris = null
-                                aiSearchSummary = null
-                                aiSearchError = null
-                            },
-                            onOpenAiSettings = onOpenAiSettings,
                             isDark = isDark
                         )
                     }
@@ -471,8 +392,6 @@ fun SearchScreen(
                                 keyboardController?.hide()
                                 onSubmitSearch(query.trim())
                             },
-                            hasAiKey = aiConfig.isConfigured,
-                            onAskAiQuery = { triggerSemanticAiSearch(query) },
                             isDark = isDark
                         )
                     }
@@ -562,8 +481,6 @@ private fun DiscoveryContent(
 ) {
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
-    val cardSurface = searchCardSurfaceColor(isDark)
-    val dividerCol = searchDividerColor(isDark)
     val context = LocalContext.current
 
     LazyColumn(
@@ -1114,14 +1031,8 @@ private fun TypingLiveSuggestionsContent(
     onSelectSuggestion: (SearchSuggestion) -> Unit,
     onFillSuggestion: (SearchSuggestion) -> Unit,
     onSubmitQuery: () -> Unit,
-    hasAiKey: Boolean = false,
-    onAskAiQuery: () -> Unit = {},
     isDark: Boolean = false
 ) {
-    val textColor = searchPrimaryTextColor(isDark)
-    val secondaryText = searchSecondaryTextColor(isDark)
-    val cardSurface = searchCardSurfaceColor(isDark)
-    val dividerCol = searchDividerColor(isDark)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1177,52 +1088,6 @@ private fun TypingLiveSuggestionsContent(
             }
         }
 
-        // Semantic AI Search Row
-        if (query.isNotBlank()) {
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onAskAiQuery)
-                        .testTag("search_ask_ai_typing_row"),
-                    shape = RoundedCornerShape(14.dp),
-                    color = cardSurface,
-                    border = BorderStroke(1.dp, dividerCol)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
-                            contentDescription = "Ask AI",
-                            tint = textColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Ask AI: “$query”",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = textColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = if (hasAiKey) "Ask AI" else "Set API key",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = secondaryText
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
         // Live Suggestion Rows (Grouped or ordered cleanly, max 1-2 per category)
         items(suggestions, key = { it.id }) { suggestion ->
             SearchSuggestionRow(
@@ -1252,13 +1117,6 @@ private fun SubmittedResultsContent(
     collapsedGroups: Map<Long, Boolean>,
     onToggleGroupCollapse: (Long) -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
-    hasAiKey: Boolean = false,
-    isAiSearching: Boolean = false,
-    aiSearchSummary: String? = null,
-    aiSearchError: String? = null,
-    onRunAiSearch: () -> Unit = {},
-    onClearAiSearch: () -> Unit = {},
-    onOpenAiSettings: (() -> Unit)? = null,
     isDark: Boolean = false
 ) {
     val textColor = searchPrimaryTextColor(isDark)
@@ -1270,22 +1128,6 @@ private fun SubmittedResultsContent(
 
     if (totalCount == 0) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (query.isNotBlank()) {
-                AiSemanticSearchBanner(
-                    query = query,
-                    hasAiKey = hasAiKey,
-                    isAiSearching = isAiSearching,
-                    aiSearchSummary = aiSearchSummary,
-                    aiSearchError = aiSearchError,
-                    onRunAiSearch = onRunAiSearch,
-                    onClearAiSearch = onClearAiSearch,
-                    onOpenAiSettings = onOpenAiSettings,
-                    textColor = textColor,
-                    secondaryText = secondaryText,
-                    cardSurface = cardSurface,
-                    dividerCol = dividerCol
-                )
-            }
             SearchEmptyState(
                 query = query,
                 hasActiveFilters = hasActiveFilters,
@@ -1319,22 +1161,6 @@ private fun SubmittedResultsContent(
                     isDark = isDark
                 )
 
-                if (query.isNotBlank()) {
-                    AiSemanticSearchBanner(
-                        query = query,
-                        hasAiKey = hasAiKey,
-                        isAiSearching = isAiSearching,
-                        aiSearchSummary = aiSearchSummary,
-                        aiSearchError = aiSearchError,
-                        onRunAiSearch = onRunAiSearch,
-                        onClearAiSearch = onClearAiSearch,
-                        onOpenAiSettings = onOpenAiSettings,
-                        textColor = textColor,
-                        secondaryText = secondaryText,
-                        cardSurface = cardSurface,
-                        dividerCol = dividerCol
-                    )
-                }
             }
         }
 
@@ -1397,98 +1223,6 @@ private fun SubmittedResultsContent(
     }
 }
 
-@Composable
-private fun AiSemanticSearchBanner(
-    query: String,
-    hasAiKey: Boolean,
-    isAiSearching: Boolean,
-    aiSearchSummary: String?,
-    aiSearchError: String?,
-    onRunAiSearch: () -> Unit,
-    onClearAiSearch: () -> Unit,
-    onOpenAiSettings: (() -> Unit)?,
-    textColor: Color,
-    secondaryText: Color,
-    cardSurface: Color,
-    dividerCol: Color
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = cardSurface,
-        border = BorderStroke(1.dp, dividerCol),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("search_ai_banner")
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        tint = textColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = when {
-                            isAiSearching -> "Searching…"
-                            !aiSearchSummary.isNullOrBlank() -> aiSearchSummary
-                            hasAiKey -> "AI Search"
-                            else -> "API key not set"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (aiSearchSummary != null) textColor else secondaryText,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                if (isAiSearching) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else if (aiSearchSummary != null) {
-                    TextButton(
-                        onClick = onClearAiSearch,
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 40.dp)
-                            .testTag("search_clear_ai_button")
-                    ) {
-                        Text("Reset")
-                    }
-                } else {
-                    TextButton(
-                        onClick = {
-                            if (hasAiKey) onRunAiSearch() else onOpenAiSettings?.invoke()
-                        },
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 40.dp)
-                            .testTag("search_ask_ai_button")
-                    ) {
-                        Text(if (hasAiKey) "Ask AI" else "Set Key")
-                    }
-                }
-            }
-
-            aiSearchError?.let { err ->
-                Text(
-                    text = err,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun SquareGrid(

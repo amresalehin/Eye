@@ -1539,8 +1539,7 @@ fun GalleryApp(
                                 }
                             },
                             initialFilter = pendingSearchFilter,
-                            onConsumeInitialFilter = { pendingSearchFilter = null },
-                            onOpenAiSettings = { navigateTo(Destination.AI_SETTINGS) }
+                            onConsumeInitialFilter = { pendingSearchFilter = null }
                         )
                     }
                     Destination.VIEWER -> {

@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.alpha
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.ai.AiMetadataStore
+import com.amresalehin.emregallery.ai.AiStoreEvents
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
@@ -773,12 +775,44 @@ fun OverviewTabContent(
         buildMetadataRows(item, metadata)
     }
 
+    val aiStore = remember(context) { AiMetadataStore(context.applicationContext) }
+    var aiTitle by remember(item.uri) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(item.uri) {
+        suspend fun loadTitle() {
+            aiTitle = withContext(Dispatchers.IO) {
+                aiStore.getAnalysis(item.uri)
+                    ?.takeIf { it.isCompleted }
+                    ?.title
+                    ?.takeIf { it.isNotBlank() }
+            }
+        }
+        loadTitle()
+        AiStoreEvents.updates.collect { updatedUri ->
+            if (updatedUri.isBlank() || updatedUri == item.uri) loadTitle()
+        }
+    }
+
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // AI-generated title sits above Albums; description and provider controls stay in AI section.
+        if (!aiTitle.isNullOrBlank()) {
+            item(key = "overview_ai_title") {
+                DetailCard {
+                    Text(
+                        text = aiTitle.orEmpty(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+
         // 1. Albums Section
         item(key = "overview_albums") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

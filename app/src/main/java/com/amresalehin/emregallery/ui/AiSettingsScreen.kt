@@ -155,113 +155,99 @@ fun AiSettingsScreen(
                 val defaultProvider = configuredProviders.firstOrNull { it.id == config.providerId }
                     ?: configuredProviders.first()
 
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("ai_default_model_card")
                 ) {
-                    Column(
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .clickable { isDefaultModelMenuExpanded = true }
+                            .testTag("ai_default_model_selector")
                     ) {
-                        Text(
-                            text = "Default Model",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { isDefaultModelMenuExpanded = true }
-                                    .testTag("ai_default_model_selector")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 13.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Default Model",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${defaultProvider.name} · ${defaultProvider.modelId}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Choose default model",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = isDefaultModelMenuExpanded,
+                        onDismissRequest = { isDefaultModelMenuExpanded = false }
+                    ) {
+                        configuredProviders.forEach { provider ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
                                         Text(
-                                            text = defaultProvider.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
+                                            text = provider.name,
+                                            fontWeight = FontWeight.Medium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = defaultProvider.modelId,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            text = provider.modelId,
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "Choose default model",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                },
+                                trailingIcon = if (provider.id == defaultProvider.id) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Default model",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    isDefaultModelMenuExpanded = false
+                                    if (provider.id != config.providerId) {
+                                        scope.launch { prefs.selectAiProvider(provider.id) }
+                                        capabilityReport = null
+                                        testError = null
+                                        actionFeedback = null
+                                        saveError = null
+                                        testedEndpointSignature = null
+                                    }
                                 }
-                            }
-                            DropdownMenu(
-                                expanded = isDefaultModelMenuExpanded,
-                                onDismissRequest = { isDefaultModelMenuExpanded = false }
-                            ) {
-                                configuredProviders.forEach { provider ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column {
-                                                Text(
-                                                    text = provider.name,
-                                                    fontWeight = FontWeight.Medium,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = provider.modelId,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        },
-                                        trailingIcon = if (provider.id == defaultProvider.id) {
-                                            {
-                                                Icon(
-                                                    Icons.Default.Check,
-                                                    contentDescription = "Default model",
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        } else null,
-                                        onClick = {
-                                            isDefaultModelMenuExpanded = false
-                                            if (provider.id != config.providerId) {
-                                                capabilityReport = null
-                                                testError = null
-                                                actionFeedback = null
-                                                saveError = null
-                                                testedEndpointSignature = null
-                                            }
-                                        }
-                                    )
-                                }
-                            }
+                            )
                         }
-
+                    }
                 }
+            }
 
                 Card(
                     shape = RoundedCornerShape(22.dp),

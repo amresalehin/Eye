@@ -374,25 +374,66 @@ fun AiSettingsScreen(
                             )
     
                             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedTextField(
-                                        value = modelInput,
-                                        onValueChange = { value ->
-                                            modelInput = value
-                                            capabilityReport = null
-                                            testError = null
-                                            actionFeedback = null
-                                            saveError = null
-                                            testedEndpointSignature = null
-                                        },
-                                        singleLine = true,
-                                        label = { Text("Model") },
-                                        placeholder = { Text("Enter or select model") },
-                                        trailingIcon = {
+                                OutlinedTextField(
+                                    value = modelInput,
+                                    onValueChange = { value ->
+                                        modelInput = value
+                                        capabilityReport = null
+                                        testError = null
+                                        actionFeedback = null
+                                        saveError = null
+                                        testedEndpointSignature = null
+                                    },
+                                    singleLine = true,
+                                    label = { Text("Model") },
+                                    placeholder = { Text("Enter or select model") },
+                                    trailingIcon = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(
+                                                onClick = {
+                                                    isFetchingModels = true
+                                                    isModelMenuExpanded = false
+                                                    availableModels = emptyList()
+                                                    modelFetchError = null
+                                                    scope.launch {
+                                                        val fetchConfig = config.copy(
+                                                            baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                            apiKey = apiKeyInput.trim()
+                                                        )
+                                                        try {
+                                                            aiClient.fetchAvailableModels(fetchConfig)
+                                                                .onSuccess { models ->
+                                                                    availableModels = models
+                                                                    modelFetchError = null
+                                                                    isModelMenuExpanded = false
+                                                                }
+                                                                .onFailure { error ->
+                                                                    modelFetchError = error.message ?: "Could not fetch models"
+                                                                    isModelMenuExpanded = false
+                                                                }
+                                                        } finally {
+                                                            isFetchingModels = false
+                                                        }
+                                                    }
+                                                },
+                                                enabled = !isFetchingModels &&
+                                                    baseUrlInput.isNotBlank() &&
+                                                    (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
+                                                modifier = Modifier.testTag("ai_fetch_models_button")
+                                            ) {
+                                                if (isFetchingModels) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(16.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = "Fetch models",
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
                                             IconButton(
                                                 onClick = { isModelMenuExpanded = !isModelMenuExpanded },
                                                 enabled = !isFetchingModels && availableModels.isNotEmpty(),
@@ -403,72 +444,14 @@ fun AiSettingsScreen(
                                                     contentDescription = "Show available models"
                                                 )
                                             }
-                                        },
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(56.dp)
-                                            .testTag("ai_model_id_input")
-                                    )
-                                    OutlinedButton(
-                                        onClick = {
-                                            isFetchingModels = true
-                                            isModelMenuExpanded = false
-                                            availableModels = emptyList()
-                                            modelFetchError = null
-                                            scope.launch {
-                                                val fetchConfig = config.copy(
-                                                    baseUrl = baseUrlInput.trim().trimEnd('/'),
-                                                    apiKey = apiKeyInput.trim()
-                                                )
-                                                try {
-                                                    aiClient.fetchAvailableModels(fetchConfig)
-                                                        .onSuccess { models ->
-                                                            availableModels = models
-                                                            modelFetchError = null
-                                                            isModelMenuExpanded = false
-                                                        }
-                                                        .onFailure { error ->
-                                                            modelFetchError = error.message ?: "Could not fetch models"
-                                                            isModelMenuExpanded = false
-                                                        }
-                                                } finally {
-                                                    isFetchingModels = false
-                                                }
-                                            }
-                                        },
-                                        enabled = !isFetchingModels &&
-                                            baseUrlInput.isNotBlank() &&
-                                            (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
-                                        contentPadding = PaddingValues(0.dp),
-                                        shape = RoundedCornerShape(14.dp),
-                                        border = BorderStroke(
-                                            1.dp,
-                                            MaterialTheme.colorScheme.outline
-                                        ),
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .align(Alignment.CenterVertically)
-                                            .testTag("ai_fetch_models_button")
-                                    ) {
-                                        if (isFetchingModels) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Refresh,
-                                                contentDescription = "Fetch models",
-                                                modifier = Modifier.size(18.dp)
-                                            )
                                         }
-                                    }
-                                }
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp)
+                                        .testTag("ai_model_id_input")
+                                )
                                 DropdownMenu(
                                     expanded = isModelMenuExpanded && !isFetchingModels && availableModels.isNotEmpty(),
                                     onDismissRequest = { isModelMenuExpanded = false },

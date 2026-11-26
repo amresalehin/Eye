@@ -294,15 +294,6 @@ fun AiViewerInsightsCard(
             }
         } else {
             if (currentAnalysis != null) {
-                DetailCard {
-                    Text(
-                        text = currentAnalysis.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
                 if (currentAnalysis.description.isNotBlank()) {
                     DetailCard {
                         Text(

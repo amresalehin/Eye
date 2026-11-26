@@ -998,7 +998,7 @@ fun GalleryApp(
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
                         }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
-                        onOpen = { openMediaInViewer(it, visibleMedia) },
+                        onOpen = { item, orderedItems -> openMediaInViewer(item, orderedItems) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
@@ -1153,7 +1153,7 @@ fun GalleryApp(
                             onMoveToLocked = { uris -> moveItemsToLocked(uris) },
                             onShareItems = { uris -> shareMultipleMediaItems(context, media.filter { it.uri in uris }) },
                             onAddToAlbum = null,
-                            onOpen = { openMediaInViewer(it, videoItems) }
+                            onOpen = { item, orderedItems -> openMediaInViewer(item, orderedItems) }
                         )
                     }
                     Destination.RECENTLY_ADDED -> {

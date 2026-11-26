@@ -19,8 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -44,6 +47,11 @@ fun AiSettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val nameFocusRequester = remember { FocusRequester() }
+    val baseUrlFocusRequester = remember { FocusRequester() }
+    val apiKeyFocusRequester = remember { FocusRequester() }
+    val modelFocusRequester = remember { FocusRequester() }
     val prefs = remember { PreferencesRepository(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
@@ -425,12 +433,17 @@ fun AiSettingsScreen(
                                                 label = { Text("Name") },
                                                 singleLine = true,
                                                 trailingIcon = {
-                                                    if (providerNameInput.isNotEmpty()) IconButton(onClick = { providerNameInput = ""; actionFeedback = null; saveError = null }) {
+                                                    if (providerNameInput.isNotEmpty()) IconButton(onClick = {
+                                            providerNameInput = ""; actionFeedback = null; saveError = null
+                                            nameFocusRequester.requestFocus()
+                                            keyboardController?.show()
+                                        }) {
                                                         Icon(Icons.Default.Close, contentDescription = "Clear name")
                                                     }
                                                 },
                                                 shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_provider_name_input")
+                                                modifier = Modifier.fillMaxWidth().focusRequester(nameFocusRequester)
+                                                .testTag("ai_inline_provider_name_input")
                                             )
                                             OutlinedTextField(
                                                 value = baseUrlInput,
@@ -448,10 +461,12 @@ fun AiSettingsScreen(
                                                     if (baseUrlInput.isNotEmpty()) IconButton(onClick = {
                                                         baseUrlInput = ""; capabilityReport = null; testError = null
                                                         actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                        baseUrlFocusRequester.requestFocus(); keyboardController?.show()
                                                     }) { Icon(Icons.Default.Close, contentDescription = "Clear base URL") }
                                                 },
                                                 shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_base_url_input")
+                                                modifier = Modifier.fillMaxWidth().focusRequester(baseUrlFocusRequester)
+                                                .testTag("ai_inline_base_url_input")
                                             )
                                             OutlinedTextField(
                                                 value = apiKeyInput,
@@ -469,10 +484,12 @@ fun AiSettingsScreen(
                                                     if (apiKeyInput.isNotEmpty()) IconButton(onClick = {
                                                         apiKeyInput = ""; capabilityReport = null; testError = null
                                                         actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                        apiKeyFocusRequester.requestFocus(); keyboardController?.show()
                                                     }) { Icon(Icons.Default.Close, contentDescription = "Clear API key") }
                                                 },
                                                 shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_api_key_input")
+                                                modifier = Modifier.fillMaxWidth().focusRequester(apiKeyFocusRequester)
+                                                .testTag("ai_inline_api_key_input")
                                             )
                                             OutlinedTextField(
                                                 value = modelInput,
@@ -490,10 +507,12 @@ fun AiSettingsScreen(
                                                     if (modelInput.isNotEmpty()) IconButton(onClick = {
                                                         modelInput = ""; capabilityReport = null; testError = null
                                                         actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                        modelFocusRequester.requestFocus(); keyboardController?.show()
                                                     }) { Icon(Icons.Default.Close, contentDescription = "Clear model") }
                                                 },
                                                 shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_model_id_input")
+                                                modifier = Modifier.fillMaxWidth().focusRequester(modelFocusRequester)
+                                                .testTag("ai_inline_model_id_input")
                                             )
                                             (testError ?: saveError)?.let { message ->
                                                 Text(
@@ -628,7 +647,11 @@ fun AiSettingsScreen(
                                 singleLine = true,
                                 trailingIcon = {
                                     if (providerNameInput.isNotEmpty()) {
-                                        IconButton(onClick = { providerNameInput = ""; actionFeedback = null; saveError = null }) {
+                                        IconButton(onClick = {
+                                                            providerNameInput = ""; actionFeedback = null; saveError = null
+                                                            nameFocusRequester.requestFocus()
+                                                            keyboardController?.show()
+                                                        }) {
                                             Icon(Icons.Default.Close, contentDescription = "Clear name")
                                         }
                                     }
@@ -636,7 +659,8 @@ fun AiSettingsScreen(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("ai_provider_name_input")
+                                    .focusRequester(nameFocusRequester)
+                                                .testTag("ai_provider_name_input")
                             )
     
                             OutlinedTextField(
@@ -657,6 +681,8 @@ fun AiSettingsScreen(
                                     if (baseUrlInput.isNotEmpty()) {
                                         IconButton(onClick = {
                                             baseUrlInput = ""
+                                            baseUrlFocusRequester.requestFocus()
+                                            keyboardController?.show()
                                             availableModels = emptyList()
                                             isModelMenuExpanded = false
                                             modelFetchError = null
@@ -671,7 +697,8 @@ fun AiSettingsScreen(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("ai_base_url_input")
+                                    .focusRequester(baseUrlFocusRequester)
+                                                .testTag("ai_base_url_input")
                             )
     
                             OutlinedTextField(
@@ -692,6 +719,8 @@ fun AiSettingsScreen(
                                     if (apiKeyInput.isNotEmpty()) {
                                         IconButton(onClick = {
                                             apiKeyInput = ""
+                                            apiKeyFocusRequester.requestFocus()
+                                            keyboardController?.show()
                                             availableModels = emptyList()
                                             isModelMenuExpanded = false
                                             modelFetchError = null
@@ -706,7 +735,8 @@ fun AiSettingsScreen(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("ai_api_key_input")
+                                    .focusRequester(apiKeyFocusRequester)
+                                                .testTag("ai_api_key_input")
                             )
     
                             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -728,6 +758,8 @@ fun AiSettingsScreen(
                                             if (modelInput.isNotEmpty()) {
                                                 IconButton(onClick = {
                                                     modelInput = ""
+                                                    modelFocusRequester.requestFocus()
+                                                    keyboardController?.show()
                                                     capabilityReport = null
                                                     testError = null
                                                     actionFeedback = null
@@ -798,7 +830,8 @@ fun AiSettingsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(56.dp)
-                                        .testTag("ai_model_id_input")
+                                        .focusRequester(modelFocusRequester)
+                                                .testTag("ai_model_id_input")
                                 )
                                 DropdownMenu(
                                     expanded = isModelMenuExpanded && !isFetchingModels && availableModels.isNotEmpty(),

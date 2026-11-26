@@ -151,9 +151,9 @@ fun AiSettingsScreen(
 
             val configuredProviders = providers.filter { it.isConfigured }
             var isDefaultModelMenuExpanded by remember { mutableStateOf(false) }
-            if (providersLoaded && configuredProviders.isNotEmpty()) {
+            if (providersLoaded) {
                 val defaultProvider = configuredProviders.firstOrNull { it.id == config.providerId }
-                    ?: configuredProviders.first()
+                    ?: configuredProviders.firstOrNull()
 
                 Card(
                     shape = RoundedCornerShape(22.dp),
@@ -178,7 +178,7 @@ fun AiSettingsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
-                                .clickable { isDefaultModelMenuExpanded = true }
+                                .clickable(enabled = configuredProviders.isNotEmpty()) { isDefaultModelMenuExpanded = true }
                                 .testTag("ai_default_model_selector")
                         ) {
                             Row(
@@ -195,7 +195,7 @@ fun AiSettingsScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${defaultProvider.name} · ${defaultProvider.modelId}",
+                                        text = defaultProvider?.let { "${it.name} · ${it.modelId}" } ?: "No model configured",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
@@ -232,7 +232,7 @@ fun AiSettingsScreen(
                                             )
                                         }
                                     },
-                                    trailingIcon = if (provider.id == defaultProvider.id) {
+                                    trailingIcon = if (provider.id == defaultProvider?.id) {
                                         {
                                             Icon(
                                                 Icons.Default.Check,

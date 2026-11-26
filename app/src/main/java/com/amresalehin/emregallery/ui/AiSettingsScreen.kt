@@ -47,7 +47,9 @@ fun AiSettingsScreen(
     val prefs = remember { PreferencesRepository(context.applicationContext) }
     val aiClient = remember { CustomAiClient() }
     val config by prefs.aiConfig.collectAsStateWithLifecycle(initialValue = AiConfig())
-    val providers by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = emptyList())
+    val providersState by prefs.aiProviders.collectAsStateWithLifecycle(initialValue = null)
+    val providers = providersState.orEmpty()
+    val providersLoaded = providersState != null
     var providerNameInput by remember(config.providerId, config.providerName) {
         mutableStateOf(config.providerName.takeUnless {
             it == "No provider selected" || it.equals("New provider", ignoreCase = true)
@@ -101,10 +103,8 @@ fun AiSettingsScreen(
     var testedEndpointSignature by remember { mutableStateOf<String?>(null) }
     var isSavingConfig by remember { mutableStateOf(false) }
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val hasConfiguredProviders = providers.any { it.isConfigured }
-    var isCreatingProvider by remember(hasConfiguredProviders) { mutableStateOf(!hasConfiguredProviders) }
+    var isCreatingProvider by remember { mutableStateOf(providers.none { it.isConfigured }) }
     var editingProviderId by remember { mutableStateOf<String?>(null) }
-    var isAiSetupExpanded by remember(providers.isEmpty()) { mutableStateOf(providers.none { it.isConfigured }) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
@@ -151,7 +151,7 @@ fun AiSettingsScreen(
 
             val configuredProviders = providers.filter { it.isConfigured }
             var isDefaultModelMenuExpanded by remember { mutableStateOf(false) }
-            if (configuredProviders.isNotEmpty()) {
+            if (providersLoaded && configuredProviders.isNotEmpty()) {
                 val defaultProvider = configuredProviders.firstOrNull { it.id == config.providerId }
                     ?: configuredProviders.first()
 
@@ -273,7 +273,26 @@ fun AiSettingsScreen(
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold
                             )
-
+                            IconButton(
+                                onClick = {
+                                    isCreatingProvider = true
+                                    editingProviderId = null
+                                    providerNameInput = ""
+                                    baseUrlInput = ""
+                                    apiKeyInput = ""
+                                    modelInput = ""
+                                    availableModels = emptyList()
+                                    modelFetchError = null
+                                    capabilityReport = null
+                                    testError = null
+                                    actionFeedback = null
+                                    saveError = null
+                                    testedEndpointSignature = null
+                                },
+                                modifier = Modifier.testTag("ai_add_provider_button")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add model")
+                            }
                         }
 
                         configuredProviders.forEach { provider ->
@@ -321,7 +340,6 @@ fun AiSettingsScreen(
                                                 modelInput = provider.modelId
                                                 availableModels = emptyList()
                                                 modelFetchError = null
-                                                isAiSetupExpanded = true
                                                 capabilityReport = null
                                                 testError = null
                                                 actionFeedback = null
@@ -346,6 +364,7 @@ fun AiSettingsScreen(
                 }
 
 
+            if (providersLoaded) {
             Card(
                 shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = cardBackground),
@@ -354,34 +373,8 @@ fun AiSettingsScreen(
                     .fillMaxWidth()
                     .testTag("ai_unified_config_card")
             ) {
-                if (!isAiSetupExpanded) {
-                    TextButton(
-                        onClick = {
-                            isCreatingProvider = true
-                            editingProviderId = null
-                            providerNameInput = ""
-                            baseUrlInput = ""
-                            apiKeyInput = ""
-                            modelInput = ""
-                            availableModels = emptyList()
-                            modelFetchError = null
-                            capabilityReport = null
-                            testError = null
-                            actionFeedback = null
-                            saveError = null
-                            testedEndpointSignature = null
-                            isAiSetupExpanded = true
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .testTag("ai_setup_expand_bar"),
-                        shape = RoundedCornerShape(18.dp)
-                    ) {
-                        Text("Configure Another Provider")
-                    }
-                }
-                    if (isAiSetupExpanded) {
+
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -770,8 +763,10 @@ fun AiSettingsScreen(
                             }
                         }
     
-                    }
+                    
                 }
+
+            }
 
             Card(
                 shape = RoundedCornerShape(22.dp),

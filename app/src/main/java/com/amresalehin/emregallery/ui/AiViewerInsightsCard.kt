@@ -307,7 +307,7 @@ fun AiViewerInsightsCard(
                     DetailCard {
                         Text(
                             text = currentAnalysis.description,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

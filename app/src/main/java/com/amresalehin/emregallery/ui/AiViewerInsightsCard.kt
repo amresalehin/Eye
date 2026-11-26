@@ -26,7 +26,6 @@ import com.amresalehin.emregallery.ai.CustomAiClient
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiConfig
-import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,16 +74,10 @@ fun AiViewerInsightsCard(
         isAnalyzing = true
         analysisError = null
         scope.launch {
-            val ocrText = if (aiConfig.includeOcrContext) {
-                withContext(Dispatchers.IO) {
-                    TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
-                }
-            } else null
             val result = aiClient.analyzeImage(
                 context = context,
                 mediaUri = item.uri,
-                config = aiConfig,
-                ocrContext = ocrText
+                config = aiConfig
             )
             result.onSuccess { parsed ->
                 withContext(Dispatchers.IO) { aiStore.saveAnalysis(parsed) }

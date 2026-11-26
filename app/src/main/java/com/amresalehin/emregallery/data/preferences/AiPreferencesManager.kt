@@ -350,7 +350,8 @@ class AiPreferencesManager(private val context: Context) {
             )
             if (index >= 0) profiles[index] = updated else profiles.add(updated)
             prefs[aiProfilesKey] = encodeProfiles(profiles)
-            prefs[aiActiveProfileIdKey] = savedId
+            // Saving a profile must not change the user's explicitly selected default.
+            // The active provider is changed only by selectProvider().
             // Keep legacy values synchronized for downgrade compatibility.
             prefs[aiBaseUrlKey] = updated.baseUrl
             prefs[aiApiKeyKey] = updated.apiKey

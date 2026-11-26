@@ -242,57 +242,61 @@ fun AiViewerInsightsCard(
         }
 
         if (aiConfig.hasCredentials && currentAnalysis == null) {
-            Button(
-                onClick = ::triggerAnalysis,
-                enabled = !isAnalyzing,
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 48.dp)
-                    .testTag("viewer_ai_analyze_button")
-            ) {
-                if (isAnalyzing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.5.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+            DetailCard {
+                Button(
+                    onClick = ::triggerAnalysis,
+                    enabled = !isAnalyzing,
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("viewer_ai_analyze_button")
+                ) {
+                    if (isAnalyzing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isAnalyzing) "Analyzing..." else "Analyze This Photo")
                 }
-                Spacer(Modifier.width(8.dp))
-                Text(if (isAnalyzing) "Analyzing..." else "Analyze This Photo")
             }
         }
 
         if (!aiConfig.hasCredentials) {
-            // Empty-state pill identical to "Add to album" / "Add tag" / "Add location"
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                modifier = Modifier
-                    .clickable(enabled = onOpenAiSettings != null) { onOpenAiSettings?.invoke() }
-                    .testTag("viewer_ai_setup_key_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            DetailCard {
+                // Empty-state pill identical to "Add to album" / "Add tag" / "Add location"
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                    modifier = Modifier
+                        .clickable(enabled = onOpenAiSettings != null) { onOpenAiSettings?.invoke() }
+                        .testTag("viewer_ai_setup_key_button")
                 ) {
-                    Icon(
-                        Icons.Default.Key,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "Configure AI",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Key,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Configure AI",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         } else {
@@ -312,8 +316,6 @@ fun AiViewerInsightsCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-
-
                     }
                 }
             }
@@ -327,7 +329,6 @@ fun AiViewerInsightsCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-
         }
     }
 }

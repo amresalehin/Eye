@@ -148,7 +148,7 @@ fun HomeScreen(
     onAddToAlbum: ((Set<String>) -> Unit)? = null,
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
-    onOpen: (MediaItem) -> Unit,
+    onOpen: (MediaItem, List<MediaItem>) -> Unit,
     isVisible: Boolean = true
 ) {
     val context = LocalContext.current
@@ -497,7 +497,7 @@ fun HomeScreen(
                             selectedUris = selectedUris,
                             onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
                             onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
-                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item) }
+                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item, sortedMedia) }
                         )
                     }
                 }

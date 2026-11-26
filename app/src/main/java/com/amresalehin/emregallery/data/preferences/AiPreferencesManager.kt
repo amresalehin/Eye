@@ -49,7 +49,25 @@ data class AiConfig(
     val providerName: String = "Default provider"
 ) {
     companion object {
-        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo and screenshot organizer.
+        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image for a media organizer app.
+Return ONLY a valid JSON object with this exact schema:
+{
+  "title": "",
+  "description": "",
+  "tags": [],
+  "collections": []
+}
+Rules:
+- Generate 5 to 10 tags in Title Case, covering broad to granular details.
+- Write a detailed description of the image.
+- Format every tag in Title Case, preserving standard acronyms and established brand casing.
+- Generate 1–3 distinct collections that genuinely and meaningfully apply to this image. Do not create redundant variations of the same collection.
+- Format every collection name in Title Case; keep short connecting words lowercase and preserve standard acronyms and established brand casing.
+- Make collections context-aware. Prefer a combination of broad, general categories and specific, context-aware groupings where appropriate.
+- Return an empty collections array only when no meaningful collection can be identified.
+"""
+
+        const val LEGACY_UNBOUNDED_COLLECTION_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo and screenshot organizer.
 Return ONLY a valid JSON object with this exact schema:
 {
   "title": "",
@@ -68,7 +86,7 @@ Rules:
 - Do not choose from, imitate, or expect a supplied list of existing collection names. Generate the most accurate names independently for this image.
 - Do not create redundant variations of the same collection, and do not infer details that are not supported by the image.
 - Return an empty collections array only when no meaningful collection can be identified.
-""";
+"""
 
         const val LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image or screenshot for a smart photo & screenshot organizer.
 Return ONLY a valid JSON object with this exact schema:
@@ -214,9 +232,13 @@ class AiPreferencesManager(private val context: Context) {
             }
         }
 
-        val legacyDefault = AiConfig.LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE
-        return if (storedTemplate.startsWith(legacyDefault)) {
-            AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE + storedTemplate.removePrefix(legacyDefault)
+        val legacyDefaults = listOf(
+            AiConfig.LEGACY_UNBOUNDED_COLLECTION_ANALYSIS_PROMPT_TEMPLATE,
+            AiConfig.LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE
+        )
+        val matchedLegacyDefault = legacyDefaults.firstOrNull { storedTemplate.startsWith(it) }
+        return if (matchedLegacyDefault != null) {
+            AiConfig.DEFAULT_ANALYSIS_PROMPT_TEMPLATE + storedTemplate.removePrefix(matchedLegacyDefault)
         } else {
             storedTemplate
         }

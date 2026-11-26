@@ -103,6 +103,7 @@ fun AiSettingsScreen(
     var providerToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
     val hasConfiguredProviders = providers.any { it.isConfigured }
     var isCreatingProvider by remember(hasConfiguredProviders) { mutableStateOf(!hasConfiguredProviders) }
+    var editingProviderId by remember { mutableStateOf<String?>(null) }
     var isAiSetupExpanded by remember(providers.isEmpty()) { mutableStateOf(providers.none { it.isConfigured }) }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -154,10 +155,7 @@ fun AiSettingsScreen(
                 val defaultProvider = configuredProviders.firstOrNull { it.id == config.providerId }
                     ?: configuredProviders.first()
 
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardBackground),
-                    border = cardBorder,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("ai_default_model_card")
@@ -251,21 +249,18 @@ fun AiSettingsScreen(
                                         onClick = {
                                             isDefaultModelMenuExpanded = false
                                             if (provider.id != config.providerId) {
-                                                scope.launch {
-                                                    prefs.selectAiProvider(provider.id)
-                                                    capabilityReport = null
-                                                    testError = null
-                                                    actionFeedback = null
-                                                    saveError = null
-                                                    testedEndpointSignature = null
-                                                }
+                                                capabilityReport = null
+                                                testError = null
+                                                actionFeedback = null
+                                                saveError = null
+                                                testedEndpointSignature = null
                                             }
                                         }
                                     )
                                 }
                             }
                         }
-                    }
+
                 }
 
                 Card(
@@ -333,6 +328,7 @@ fun AiSettingsScreen(
                                         IconButton(
                                             onClick = {
                                                 isCreatingProvider = false
+                                                editingProviderId = provider.id
                                                 providerNameInput = provider.name
                                                 baseUrlInput = provider.baseUrl
                                                 apiKeyInput = provider.apiKey
@@ -380,6 +376,7 @@ fun AiSettingsScreen(
                     TextButton(
                         onClick = {
                             isCreatingProvider = true
+                            editingProviderId = null
                             providerNameInput = ""
                             baseUrlInput = ""
                             apiKeyInput = ""
@@ -662,7 +659,7 @@ fun AiSettingsScreen(
                                             try {
                                                 runCatching {
                                                     prefs.saveAiProviderConfig(
-                                                        providerId = if (isCreatingProvider) "__new_provider__" else config.providerId,
+                                                        providerId = if (isCreatingProvider) "__new_provider__" else editingProviderId ?: config.providerId,
                                                         name = providerNameInput,
                                                         baseUrl = baseUrlInput.trim().trimEnd('/'),
                                                         apiKey = apiKeyInput.trim(),
@@ -670,6 +667,7 @@ fun AiSettingsScreen(
                                                     )
                                                 }.onSuccess {
                                                     isCreatingProvider = false
+                                                    editingProviderId = null
                                                     actionFeedback = "Saved"
                                                     testError = null
                                                 }.onFailure { error ->

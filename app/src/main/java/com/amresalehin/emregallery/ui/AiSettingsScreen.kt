@@ -336,14 +336,11 @@ fun AiSettingsScreen(
                                                 availableModels = emptyList()
                                                 modelFetchError = null
                                                 isAiSetupExpanded = true
-                                                scope.launch {
-                                                    prefs.selectAiProvider(provider.id)
-                                                    capabilityReport = null
-                                                    testError = null
-                                                    actionFeedback = null
-                                                    saveError = null
-                                                    testedEndpointSignature = null
-                                                }
+                                                capabilityReport = null
+                                                testError = null
+                                                actionFeedback = null
+                                                saveError = null
+                                                testedEndpointSignature = null
                                             },
                                             modifier = Modifier.testTag("ai_edit_provider_${provider.id}")
                                         ) {

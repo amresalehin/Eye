@@ -53,6 +53,8 @@ import com.amresalehin.emregallery.data.MediaSnapshotCache
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.SearchFilterState
+import com.amresalehin.emregallery.data.SearchSuggestion
+import com.amresalehin.emregallery.data.SuggestionType
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
@@ -1511,6 +1513,30 @@ fun GalleryApp(
                             },
                             onOpenMedia = { item, currentList ->
                                 openMediaInViewer(item, currentList)
+                            },
+                            onOpenSuggestion = { suggestion ->
+                                when (suggestion.type) {
+                                    SuggestionType.PERSON -> {
+                                        val personId = suggestion.targetFilter?.selectedPersonId
+                                        if (!personId.isNullOrBlank() && !personId.startsWith("name:")) {
+                                            activePersonId = personId
+                                            searchQuery = ""
+                                            searchStage = SearchStage.DISCOVERY
+                                            navigateTo(Destination.PEOPLE)
+                                        }
+                                    }
+                                    SuggestionType.ALBUM -> {
+                                        val albumId = suggestion.targetFilter?.selectedAlbumId
+                                        if (!albumId.isNullOrBlank()) {
+                                            albumFilterReturnDestination = Destination.SEARCH
+                                            albumFilter = albumId
+                                            searchQuery = ""
+                                            searchStage = SearchStage.DISCOVERY
+                                            navigateTo(Destination.HOME)
+                                        }
+                                    }
+                                    else -> Unit
+                                }
                             },
                             initialFilter = pendingSearchFilter,
                             onConsumeInitialFilter = { pendingSearchFilter = null },

@@ -66,6 +66,7 @@ fun SearchScreen(
     onClearRecent: () -> Unit,
     onBack: () -> Unit,
     onOpenMedia: (MediaItem, List<MediaItem>) -> Unit,
+    onOpenSuggestion: (SearchSuggestion) -> Unit,
     initialFilter: SearchFilterState? = null,
     onConsumeInitialFilter: () -> Unit = {},
     onOpenAiSettings: (() -> Unit)? = null
@@ -416,14 +417,48 @@ fun SearchScreen(
                             query = query,
                             suggestions = liveSuggestions,
                             onSelectSuggestion = { suggestion ->
-                                if (suggestion.targetFilter != null) {
-                                    filterState = suggestion.targetFilter
-                                }
-                                val q = suggestion.targetQuery ?: suggestion.title
-                                onQueryChange(q)
                                 focusManager.clearFocus()
                                 keyboardController?.hide()
-                                onSubmitSearch(q)
+
+                                // Media suggestions should open the matched asset itself.
+                                // AI_COLLECTION also represents individual AI-titled media rows;
+                                // those use the same direct-to-viewer behaviour.
+                                val targetMediaUri = when (suggestion.type) {
+                                    SuggestionType.FILE, SuggestionType.DOCUMENT -> suggestion.thumbnailUri
+                                    SuggestionType.AI_COLLECTION -> suggestion.thumbnailUri
+                                        .takeIf { suggestion.id.startsWith("ai_item_") }
+                                    else -> null
+                                }
+                                val targetMedia = targetMediaUri?.let { uri ->
+                                    allMedia.firstOrNull { it.uri == uri }
+                                }
+
+                                when {
+                                    targetMedia != null -> {
+                                        onOpenMedia(targetMedia, allMedia)
+                                    }
+                                    suggestion.type == SuggestionType.ALBUM -> {
+                                        onOpenSuggestion(suggestion)
+                                    }
+                                    suggestion.type == SuggestionType.PERSON &&
+                                        suggestion.targetFilter?.selectedPersonId?.startsWith("name:") != true -> {
+                                        // Face-cluster people have a dedicated People detail view.
+                                        onOpenSuggestion(suggestion)
+                                    }
+                                    suggestion.targetFilter != null -> {
+                                        // Places, tags, AI collections, and manually named people
+                                        // open directly into their filtered media results.
+                                        filterState = suggestion.targetFilter
+                                        onSubmitSearch("")
+                                    }
+                                    else -> {
+                                        // Non-entity suggestions (such as recent queries) remain
+                                        // searchable rather than being mistaken for destinations.
+                                        val q = suggestion.targetQuery ?: suggestion.title
+                                        onQueryChange(q)
+                                        onSubmitSearch(q)
+                                    }
+                                }
                             },
                             onFillSuggestion = { suggestion ->
                                 val q = suggestion.targetQuery ?: suggestion.title

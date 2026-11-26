@@ -799,16 +799,23 @@ fun OverviewTabContent(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // AI-generated title sits above Albums; description and provider controls stay in AI section.
+        // Generated title sits above Albums; description and provider controls stay in AI section.
         if (!aiTitle.isNullOrBlank()) {
             item(key = "overview_ai_title") {
-                DetailCard {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = aiTitle.orEmpty(),
+                        text = "Title",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    DetailCard {
+                        Text(
+                            text = aiTitle.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
         }

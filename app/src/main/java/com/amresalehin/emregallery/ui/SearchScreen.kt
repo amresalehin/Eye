@@ -1033,6 +1033,8 @@ private fun TypingLiveSuggestionsContent(
     onSubmitQuery: () -> Unit,
     isDark: Boolean = false
 ) {
+    val textColor = searchPrimaryTextColor(isDark)
+    val secondaryText = searchSecondaryTextColor(isDark)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1119,22 +1121,16 @@ private fun SubmittedResultsContent(
     onOpenMedia: (MediaItem) -> Unit,
     isDark: Boolean = false
 ) {
-    val textColor = searchPrimaryTextColor(isDark)
-    val secondaryText = searchSecondaryTextColor(isDark)
-    val cardSurface = searchCardSurfaceColor(isDark)
-    val dividerCol = searchDividerColor(isDark)
     val results = resultsData.items
     val totalCount = results.size
 
     if (totalCount == 0) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            SearchEmptyState(
-                query = query,
-                hasActiveFilters = hasActiveFilters,
-                onResetFilters = onResetFilters,
-                isDark = isDark
-            )
-        }
+        SearchEmptyState(
+            query = query,
+            hasActiveFilters = hasActiveFilters,
+            onResetFilters = onResetFilters,
+            isDark = isDark
+        )
         return
     }
 
@@ -1148,20 +1144,17 @@ private fun SubmittedResultsContent(
     ) {
         // Results Header: Query title, count, content summary, Sort & View controls
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SearchResultsHeader(
-                    queryTitle = query.ifBlank { "All results" },
-                    totalCount = totalCount,
-                    photosCount = resultsData.totalPhotosCount,
-                    videosCount = resultsData.totalVideosCount,
-                    sortMode = sortMode,
-                    onSortChange = onSortChange,
-                    viewMode = viewMode,
-                    onViewModeChange = onViewModeChange,
-                    isDark = isDark
-                )
-
-            }
+            SearchResultsHeader(
+                queryTitle = query.ifBlank { "All results" },
+                totalCount = totalCount,
+                photosCount = resultsData.totalPhotosCount,
+                videosCount = resultsData.totalVideosCount,
+                sortMode = sortMode,
+                onSortChange = onSortChange,
+                viewMode = viewMode,
+                onViewModeChange = onViewModeChange,
+                isDark = isDark
+            )
         }
 
         // Date Groups

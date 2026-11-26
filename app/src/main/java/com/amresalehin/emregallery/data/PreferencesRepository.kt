@@ -135,7 +135,6 @@ class PreferencesRepository(context: Context) {
     ): String = aiPrefs.saveProviderConfig(providerId, name, baseUrl, apiKey, modelId)
     suspend fun setAiAutoApplyTags(enabled: Boolean) = aiPrefs.setAutoApplyTags(enabled)
     suspend fun setAiAutoOrganizeCollections(enabled: Boolean) = aiPrefs.setAutoOrganizeCollections(enabled)
-    suspend fun setAiIncludeOcrContext(enabled: Boolean) = aiPrefs.setIncludeOcrContext(enabled)
     suspend fun setAiCustomPromptInstructions(instructions: String) = aiPrefs.setCustomPromptInstructions(instructions)
     suspend fun setAiAnalysisPromptTemplate(template: String) = aiPrefs.setAnalysisPromptTemplate(template)
     suspend fun setAiBatchDelayMs(delayMs: Long) = aiPrefs.setBatchDelayMs(delayMs)

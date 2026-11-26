@@ -424,6 +424,11 @@ fun AiSettingsScreen(
                                                 onValueChange = { providerNameInput = it; actionFeedback = null; saveError = null },
                                                 label = { Text("Name") },
                                                 singleLine = true,
+                                                trailingIcon = {
+                                                    if (providerNameInput.isNotEmpty()) IconButton(onClick = { providerNameInput = ""; actionFeedback = null; saveError = null }) {
+                                                        Icon(Icons.Default.Close, contentDescription = "Clear name")
+                                                    }
+                                                },
                                                 shape = RoundedCornerShape(14.dp),
                                                 modifier = Modifier.fillMaxWidth().testTag("ai_inline_provider_name_input")
                                             )
@@ -439,6 +444,12 @@ fun AiSettingsScreen(
                                                 },
                                                 label = { Text("Base URL") },
                                                 singleLine = true,
+                                                trailingIcon = {
+                                                    if (baseUrlInput.isNotEmpty()) IconButton(onClick = {
+                                                        baseUrlInput = ""; capabilityReport = null; testError = null
+                                                        actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                    }) { Icon(Icons.Default.Close, contentDescription = "Clear base URL") }
+                                                },
                                                 shape = RoundedCornerShape(14.dp),
                                                 modifier = Modifier.fillMaxWidth().testTag("ai_inline_base_url_input")
                                             )
@@ -454,6 +465,12 @@ fun AiSettingsScreen(
                                                 },
                                                 label = { Text("API Key") },
                                                 singleLine = true,
+                                                trailingIcon = {
+                                                    if (apiKeyInput.isNotEmpty()) IconButton(onClick = {
+                                                        apiKeyInput = ""; capabilityReport = null; testError = null
+                                                        actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                    }) { Icon(Icons.Default.Close, contentDescription = "Clear API key") }
+                                                },
                                                 shape = RoundedCornerShape(14.dp),
                                                 modifier = Modifier.fillMaxWidth().testTag("ai_inline_api_key_input")
                                             )
@@ -469,6 +486,12 @@ fun AiSettingsScreen(
                                                 },
                                                 label = { Text("Model") },
                                                 singleLine = true,
+                                                trailingIcon = {
+                                                    if (modelInput.isNotEmpty()) IconButton(onClick = {
+                                                        modelInput = ""; capabilityReport = null; testError = null
+                                                        actionFeedback = null; saveError = null; testedEndpointSignature = null
+                                                    }) { Icon(Icons.Default.Close, contentDescription = "Clear model") }
+                                                },
                                                 shape = RoundedCornerShape(14.dp),
                                                 modifier = Modifier.fillMaxWidth().testTag("ai_inline_model_id_input")
                                             )
@@ -603,6 +626,13 @@ fun AiSettingsScreen(
                                 },
                                 label = { Text("Name") },
                                 singleLine = true,
+                                trailingIcon = {
+                                    if (providerNameInput.isNotEmpty()) {
+                                        IconButton(onClick = { providerNameInput = ""; actionFeedback = null; saveError = null }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear name")
+                                        }
+                                    }
+                                },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -623,6 +653,21 @@ fun AiSettingsScreen(
                                 },
                                 label = { Text("Base URL") },
                                 singleLine = true,
+                                trailingIcon = {
+                                    if (baseUrlInput.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            baseUrlInput = ""
+                                            availableModels = emptyList()
+                                            isModelMenuExpanded = false
+                                            modelFetchError = null
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            saveError = null
+                                            testedEndpointSignature = null
+                                        }) { Icon(Icons.Default.Close, contentDescription = "Clear base URL") }
+                                    }
+                                },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -643,6 +688,21 @@ fun AiSettingsScreen(
                                 },
                                 label = { Text("API Key") },
                                 singleLine = true,
+                                trailingIcon = {
+                                    if (apiKeyInput.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            apiKeyInput = ""
+                                            availableModels = emptyList()
+                                            isModelMenuExpanded = false
+                                            modelFetchError = null
+                                            capabilityReport = null
+                                            testError = null
+                                            actionFeedback = null
+                                            saveError = null
+                                            testedEndpointSignature = null
+                                        }) { Icon(Icons.Default.Close, contentDescription = "Clear API key") }
+                                    }
+                                },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -665,6 +725,18 @@ fun AiSettingsScreen(
                                     placeholder = { Text("Enter or select model") },
                                     trailingIcon = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (modelInput.isNotEmpty()) {
+                                                IconButton(onClick = {
+                                                    modelInput = ""
+                                                    capabilityReport = null
+                                                    testError = null
+                                                    actionFeedback = null
+                                                    saveError = null
+                                                    testedEndpointSignature = null
+                                                }) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Clear model")
+                                                }
+                                            }
                                             IconButton(
                                                 onClick = {
                                                     isFetchingModels = true

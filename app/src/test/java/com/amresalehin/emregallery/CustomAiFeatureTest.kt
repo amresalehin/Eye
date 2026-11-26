@@ -563,7 +563,7 @@ class CustomAiFeatureTest {
     }
 
     @Test
-    fun searchEngine_matchesAiMetadataFiltersAndCollections() = runBlocking {
+    fun searchEngine_matchesAiMetadataFiltersAndEnrichedMediaTitles() = runBlocking {
         val sampleMedia = listOf(
             MediaItem(
                 id = 1L,
@@ -655,25 +655,16 @@ class CustomAiFeatureTest {
         )
         assertEquals(listOf("content://media/external/images/media/201"), collectionFiltered.items.map { it.uri })
 
-        val discovery = engine.getDiscoveryContent(
-            media = sampleMedia,
-            customAlbums = emptyList(),
-            customTagsMap = emptyMap(),
-            customPeopleMap = emptyMap(),
-            favourites = emptySet()
-        )
-        assertTrue(discovery.aiCollections.any { it.title == "Kotlin Coroutine Snippets" })
-
         val suggestions = engine.getLiveSuggestions(
-            query = "Kotlin Coroutine Snippets",
+            query = "Kotlin Coroutine Snippet",
             media = sampleMedia,
             recentSearches = emptyList(),
             customAlbums = emptyList(),
             customTagsMap = emptyMap(),
             customPeopleMap = emptyMap()
         )
-        assertTrue(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Kotlin Coroutine Snippets" })
-        assertFalse(suggestions.any { it.type == SuggestionType.AI_COLLECTION && it.title == "Unknown" })
+        assertTrue(suggestions.any { it.type == SuggestionType.AI_MEDIA && it.title == "Kotlin Coroutine Snippet" })
+        assertFalse(suggestions.any { it.id.startsWith("ai_col_") })
     }
 
     private fun createTempJpegFile(fileName: String): File {

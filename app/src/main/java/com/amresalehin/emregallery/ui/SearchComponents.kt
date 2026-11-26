@@ -912,7 +912,7 @@ fun SearchSuggestionRow(
                             SuggestionType.FILE -> Icons.Default.Image
                             SuggestionType.TAG -> Icons.Default.Tag
                             SuggestionType.DOCUMENT -> Icons.Default.Description
-                            SuggestionType.AI_COLLECTION -> Icons.Outlined.AutoAwesome
+                            SuggestionType.AI_MEDIA -> Icons.Outlined.AutoAwesome
                         }
                         Icon(icon, contentDescription = null, tint = secondaryText, modifier = Modifier.size(20.dp))
                     }

@@ -27,7 +27,7 @@ enum class SuggestionType {
     FILE,
     TAG,
     DOCUMENT,
-    AI_COLLECTION
+    AI_MEDIA
 }
 
 data class SearchSuggestion(
@@ -351,22 +351,8 @@ class SearchEngine(private val context: Context) {
             )
         }
 
-        // 4b. AI Analyzed & Smart Collections
-        val allowedUris = nonTrashMedia.map { it.uri }.toSet()
+        // 4b. AI analysis status is used by the analyzed-media category shortcut.
         val aiAnalyses = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
-        val aiCollectionSummaries = runCatching {
-            aiStore.getCollectionSummaries(allowedUris)
-        }.getOrDefault(emptyList())
-        val aiCollectionItems = aiCollectionSummaries.take(10).map { summary ->
-            DiscoveryEntityItem(
-                id = "ai_col_${summary.name}",
-                title = summary.name,
-                subtitle = "${summary.count} items · AI",
-                thumbnailUri = summary.mediaUris.firstOrNull(),
-                queryAction = summary.name,
-                filterAction = SearchFilterState(selectedAiCollection = summary.name)
-            )
-        }
 
         // 5. Category Shortcuts: Photos, Videos, Documents (OCR text items), AI Analyzed, Favourites
         val categories = mutableListOf<DiscoveryCategory>()
@@ -446,8 +432,7 @@ class SearchEngine(private val context: Context) {
             people = peopleItems,
             places = placeItems,
             albums = albumItems,
-            tags = tagItems,
-            aiCollections = aiCollectionItems
+            tags = tagItems
         )
     }
 
@@ -627,24 +612,7 @@ class SearchEngine(private val context: Context) {
             }
         }
 
-        // 8. Matching AI Smart Collections & AI Titles
-        val aiCollections = runCatching {
-            aiStore.getCollectionSummaries(media.map { it.uri }.toSet())
-        }.getOrDefault(emptyList())
-        for (col in aiCollections.filter { it.name.contains(q, ignoreCase = true) }.take(2)) {
-            suggestions.add(
-                SearchSuggestion(
-                    id = "ai_col_${col.name}",
-                    type = SuggestionType.AI_COLLECTION,
-                    title = col.name,
-                    subtitle = "${col.count} items · AI Collection",
-                    thumbnailUri = col.mediaUris.firstOrNull(),
-                    targetQuery = col.name,
-                    targetFilter = SearchFilterState(selectedAiCollection = col.name)
-                )
-            )
-        }
-
+        // 8. Matching AI-enriched media titles
         val aiCompleted = runCatching { aiStore.getAllCompleted() }.getOrDefault(emptyMap())
         if (aiCompleted.isNotEmpty()) {
             val mediaByUri = media.associateBy { it.uri }
@@ -658,7 +626,7 @@ class SearchEngine(private val context: Context) {
                     suggestions.add(
                         SearchSuggestion(
                             id = "ai_item_${item.id}",
-                            type = SuggestionType.AI_COLLECTION,
+                            type = SuggestionType.AI_MEDIA,
                             title = analysis.title.ifBlank { item.name },
                             subtitle = analysis.suggestedCollections.take(3).joinToString(", ").ifBlank { "AI insight match" },
                             thumbnailUri = item.uri,
@@ -1043,8 +1011,7 @@ data class DiscoveryData(
     val people: List<DiscoveryEntityItem>,
     val places: List<DiscoveryEntityItem>,
     val albums: List<DiscoveryEntityItem>,
-    val tags: List<DiscoveryEntityItem>,
-    val aiCollections: List<DiscoveryEntityItem> = emptyList()
+    val tags: List<DiscoveryEntityItem>
 )
 
 data class SearchResultData(

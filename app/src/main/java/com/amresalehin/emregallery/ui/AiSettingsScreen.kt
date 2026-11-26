@@ -344,7 +344,6 @@ fun AiSettingsScreen(
                             }
                     }
                 }
-            }
 
 
             Card(

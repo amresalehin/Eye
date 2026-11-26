@@ -338,8 +338,7 @@ class CustomAiFeatureTest {
                 context = context,
                 mediaUri = imageUri,
                 question = "How much was the total?",
-                config = config,
-                ocrContext = "TOTAL $9.50"
+                config = config
             )
             assertTrue(qaResult.isSuccess)
             assertEquals("The total on the receipt is $9.50.", qaResult.getOrThrow())

@@ -109,8 +109,16 @@ fun AiViewerInsightsCard(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            if (aiConfig.hasCredentials && currentAnalysis?.description?.isNotBlank() == true) {
+                Text(
+                    text = "Description",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -295,12 +303,6 @@ fun AiViewerInsightsCard(
         } else {
             if (currentAnalysis != null) {
                 if (currentAnalysis.description.isNotBlank()) {
-                    Text(
-                        text = "Description",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
                     DetailCard {
                         Text(
                             text = currentAnalysis.description,

@@ -753,7 +753,7 @@ class CustomAiClient(
                 Regex("""(?m)^[ \t]*"key_details"\s*:\s*[^\r\n]*,?[ \t]*\r?\n?"""),
                 ""
             )
-            .replace(Regex(""",([ \t]*\r?\n[ \t]*})""")) { it.groupValues[1] }
+            .replace(Regex(""",([ \t]*\r?\n[ \t]*[}])""")) { it.groupValues[1] }
             .replace("{{existing_collections}}", "")
             .replace(Regex("(?im)^Existing collections:\\s*$"), "")
             .replace(

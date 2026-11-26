@@ -296,8 +296,7 @@ class CustomAiFeatureTest {
             val analysisResult = client.analyzeImage(
                 context = context,
                 mediaUri = imageUri,
-                config = config,
-                ocrContext = "TOTAL $9.50"
+                config = config
             )
 
             assertTrue("analyzeImage should succeed after fallback retry", analysisResult.isSuccess)
@@ -327,7 +326,7 @@ class CustomAiFeatureTest {
             assertFalse(retryReqBody.contains("Receipts, Documents, Code"))
             assertFalse(retryReqBody.contains("Existing collections:"))
             assertFalse(retryReqBody.contains("{{existing_collections}}"))
-            assertFalse(retryReqBody.contains("{{ocr_context}}"))
+            assertFalse(retryReqBody.contains("Extracted on-device OCR text"))
             assertTrue(retryReqBody.contains("Highlight totals on receipts"))
 
             server.enqueue(

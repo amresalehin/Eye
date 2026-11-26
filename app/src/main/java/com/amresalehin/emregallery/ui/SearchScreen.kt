@@ -932,8 +932,6 @@ private fun DiscoveryContent(
                 }
             }
         }
-
-        }
     }
 }
 

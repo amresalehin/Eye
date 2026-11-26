@@ -1092,7 +1092,7 @@ fun GalleryApp(
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
-                        onOpen = { openMediaInViewer(it, visibleMedia) }
+                        onOpen = { item, orderedItems -> openMediaInViewer(item, orderedItems) }
                     )
                     }
 

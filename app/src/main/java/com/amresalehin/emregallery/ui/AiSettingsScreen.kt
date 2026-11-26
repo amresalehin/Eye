@@ -864,7 +864,9 @@ fun AiSettingsScreen(
                                     )
                                 }
                             }
-    
+
+                        Spacer(Modifier.height(12.dp))
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()

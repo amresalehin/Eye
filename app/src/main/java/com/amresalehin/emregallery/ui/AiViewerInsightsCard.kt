@@ -295,6 +295,12 @@ fun AiViewerInsightsCard(
         } else {
             if (currentAnalysis != null) {
                 if (currentAnalysis.description.isNotBlank()) {
+                    Text(
+                        text = "Description",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     DetailCard {
                         Text(
                             text = currentAnalysis.description,

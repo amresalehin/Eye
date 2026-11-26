@@ -49,7 +49,26 @@ data class AiConfig(
     val providerName: String = "Default provider"
 ) {
     companion object {
-        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image for a media organizer app.
+        const val DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image for an media organizer app.
+Return ONLY a valid JSON object with this exact schema:
+{
+  "title": "",
+  "description": "",
+  "tags": [],
+  "collections": []
+}
+Rules:
+- Generate a single line Title that details the image precisely.
+- Generate 5 to 10 tags in Title Case that covers broad to granular details.
+- Write a detailed description of the image.
+- Format every tag in Title Case, preserving standard acronyms and established brand casing.
+- Generate 1-3 distinct collection that genuinely and meaningfully applies to this image. Do not create redundant variations of the same collection.
+- Format every collection name in Title Case; keep short connecting words lowercase and preserve standard acronyms and established brand casing.
+- Make the collection context aware. Prefer collection names that covered both broad, generic, catch-all categories and also specific context aware.
+- Return an empty collections array only when no meaningful collection can be identified.
+"""
+
+        const val LEGACY_PREVIOUS_DEFAULT_ANALYSIS_PROMPT_TEMPLATE = """Analyze this image for a media organizer app.
 Return ONLY a valid JSON object with this exact schema:
 {
   "title": "",
@@ -233,6 +252,7 @@ class AiPreferencesManager(private val context: Context) {
         }
 
         val legacyDefaults = listOf(
+            AiConfig.LEGACY_PREVIOUS_DEFAULT_ANALYSIS_PROMPT_TEMPLATE,
             AiConfig.LEGACY_UNBOUNDED_COLLECTION_ANALYSIS_PROMPT_TEMPLATE,
             AiConfig.LEGACY_SINGLE_COLLECTION_ANALYSIS_PROMPT_TEMPLATE
         )

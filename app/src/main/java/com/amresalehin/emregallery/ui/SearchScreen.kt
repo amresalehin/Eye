@@ -481,6 +481,8 @@ private fun DiscoveryContent(
 ) {
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
+    val cardSurface = searchCardSurfaceColor(isDark)
+    val dividerCol = searchDividerColor(isDark)
     val context = LocalContext.current
 
     LazyColumn(

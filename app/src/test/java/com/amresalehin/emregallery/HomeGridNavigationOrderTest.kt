@@ -36,13 +36,18 @@ class HomeGridNavigationOrderTest {
             DayGroup(
                 dayKey = 10L,
                 dayLabel = "Camera",
-                items = listOf(firstVideo, secondVideo)
-            ) to listOf(listOf(firstVideo), listOf(secondVideo)),
+                items = listOf(firstVideo)
+            ) to listOf(listOf(firstVideo)),
             DayGroup(
                 dayKey = 20L,
                 dayLabel = "Screenshots",
-                items = listOf(interveningPhoto, finalPhoto)
-            ) to listOf(listOf(interveningPhoto, finalPhoto))
+                items = listOf(interveningPhoto)
+            ) to listOf(listOf(interveningPhoto)),
+            DayGroup(
+                dayKey = 30L,
+                dayLabel = "Clips",
+                items = listOf(secondVideo, finalPhoto)
+            ) to listOf(listOf(secondVideo, finalPhoto))
         )
 
         assertEquals(

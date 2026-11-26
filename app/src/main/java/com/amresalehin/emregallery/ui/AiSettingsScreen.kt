@@ -399,13 +399,173 @@ fun AiSettingsScreen(
                                         }
                                     }
                                 }
+
+                                if (editingProviderId == provider.id) {
+                                    Card(
+                                        shape = RoundedCornerShape(18.dp),
+                                        colors = CardDefaults.cardColors(containerColor = cardBackground),
+                                        border = cardBorder,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp)
+                                            .testTag("ai_inline_model_editor_${provider.id}")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Text(
+                                                text = "Edit model",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            OutlinedTextField(
+                                                value = providerNameInput,
+                                                onValueChange = { providerNameInput = it; actionFeedback = null; saveError = null },
+                                                label = { Text("Name") },
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_provider_name_input")
+                                            )
+                                            OutlinedTextField(
+                                                value = baseUrlInput,
+                                                onValueChange = {
+                                                    baseUrlInput = it
+                                                    capabilityReport = null
+                                                    testError = null
+                                                    actionFeedback = null
+                                                    saveError = null
+                                                    testedEndpointSignature = null
+                                                },
+                                                label = { Text("Base URL") },
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_base_url_input")
+                                            )
+                                            OutlinedTextField(
+                                                value = apiKeyInput,
+                                                onValueChange = {
+                                                    apiKeyInput = it
+                                                    capabilityReport = null
+                                                    testError = null
+                                                    actionFeedback = null
+                                                    saveError = null
+                                                    testedEndpointSignature = null
+                                                },
+                                                label = { Text("API Key") },
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_api_key_input")
+                                            )
+                                            OutlinedTextField(
+                                                value = modelInput,
+                                                onValueChange = {
+                                                    modelInput = it
+                                                    capabilityReport = null
+                                                    testError = null
+                                                    actionFeedback = null
+                                                    saveError = null
+                                                    testedEndpointSignature = null
+                                                },
+                                                label = { Text("Model") },
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("ai_inline_model_id_input")
+                                            )
+                                            (testError ?: saveError)?.let { message ->
+                                                Text(
+                                                    text = message,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        editingProviderId = null
+                                                        capabilityReport = null
+                                                        testError = null
+                                                        saveError = null
+                                                        actionFeedback = null
+                                                        testedEndpointSignature = null
+                                                    },
+                                                    modifier = Modifier.weight(1f).height(48.dp)
+                                                ) { Text("Cancel") }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        isTestingCapabilities = true
+                                                        testError = null
+                                                        scope.launch {
+                                                            try {
+                                                                val testConfig = config.copy(
+                                                                    baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                                    apiKey = apiKeyInput.trim(),
+                                                                    modelId = modelInput.trim()
+                                                                )
+                                                                aiClient.testEndpointCapabilities(testConfig)
+                                                                    .onSuccess { report ->
+                                                                        capabilityReport = report
+                                                                        testedEndpointSignature = if (report.fullyReady) endpointSignature else null
+                                                                    }
+                                                                    .onFailure { error ->
+                                                                        testError = error.message ?: "Endpoint test failed"
+                                                                    }
+                                                            } finally {
+                                                                isTestingCapabilities = false
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !isTestingCapabilities && providerNameInput.isNotBlank() &&
+                                                        baseUrlInput.isNotBlank() && modelInput.isNotBlank() &&
+                                                        (apiKeyInput.isNotBlank() || isOllamaEndpoint(baseUrlInput)),
+                                                    modifier = Modifier.weight(1f).height(48.dp)
+                                                ) {
+                                                    Text(if (isTestingCapabilities) "Testing…" else "Test")
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        isSavingConfig = true
+                                                        saveError = null
+                                                        scope.launch {
+                                                            try {
+                                                                prefs.saveAiProviderConfig(
+                                                                    providerId = provider.id,
+                                                                    name = providerNameInput,
+                                                                    baseUrl = baseUrlInput.trim().trimEnd('/'),
+                                                                    apiKey = apiKeyInput.trim(),
+                                                                    modelId = modelInput.trim()
+                                                                )
+                                                                editingProviderId = null
+                                                                capabilityReport = null
+                                                                testError = null
+                                                                actionFeedback = "Saved"
+                                                                testedEndpointSignature = null
+                                                            } catch (error: Exception) {
+                                                                saveError = error.message ?: "Could not save model"
+                                                            } finally {
+                                                                isSavingConfig = false
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = endpointTestPassed && !isSavingConfig && providerNameInput.isNotBlank(),
+                                                    modifier = Modifier.weight(1f).height(48.dp)
+                                                ) {
+                                                    Text(if (isSavingConfig) "Saving…" else "Save")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
 
-            if (providersLoaded) {
+            if (providersLoaded && editingProviderId == null) {
             Card(
                 shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = cardBackground),

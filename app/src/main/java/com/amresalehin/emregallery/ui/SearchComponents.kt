@@ -260,7 +260,6 @@ fun SearchBarCapsule(
                     val viewIcon = when (viewMode) {
                         SearchViewMode.MASONRY -> Icons.Default.Dashboard
                         SearchViewMode.GRID -> Icons.Default.GridView
-                        SearchViewMode.LARGE_GRID -> Icons.Default.Window
                         SearchViewMode.LIST -> Icons.Default.ViewAgenda
                     }
                     Surface(

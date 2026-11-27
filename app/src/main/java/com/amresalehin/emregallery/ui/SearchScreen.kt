@@ -198,11 +198,21 @@ fun SearchScreen(
         }
     }
 
+    // Backing out of a filter-only result set should return to Discovery.
+    // Clearing the filter while staying in RESULTS would immediately run an empty
+    // query against the unfiltered library, making the entire media collection appear.
+    fun clearFilterAndReturnToDiscoveryIfNeeded() {
+        filterState = SearchFilterState()
+        if (query.isBlank()) {
+            onQueryChange("")
+        }
+    }
+
     // Handle Back Press navigation cleanly
     BackHandler {
         when {
             !filterState.isDefault -> {
-                filterState = SearchFilterState()
+                clearFilterAndReturnToDiscoveryIfNeeded()
             }
             stage == SearchStage.RESULTS -> {
                 // If in results, go back to typing/discovery
@@ -266,7 +276,7 @@ fun SearchScreen(
                     focusManager.clearFocus()
                     keyboardController?.hide()
                     if (!filterState.isDefault) {
-                        filterState = SearchFilterState()
+                        clearFilterAndReturnToDiscoveryIfNeeded()
                     } else if (stage == SearchStage.RESULTS) {
                         onQueryChange("")
                     } else {

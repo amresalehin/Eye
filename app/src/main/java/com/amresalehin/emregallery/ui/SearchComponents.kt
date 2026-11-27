@@ -96,6 +96,11 @@ fun SearchBarCapsule(
     onBack: () -> Unit,
     onOpenFilterSheet: () -> Unit,
     hasActiveFilters: Boolean,
+    showResultActions: Boolean = false,
+    sortMode: SearchSortMode = SearchSortMode.RELEVANCE,
+    onSortChange: (SearchSortMode) -> Unit = {},
+    viewMode: SearchViewMode = SearchViewMode.MASONRY,
+    onViewModeChange: (SearchViewMode) -> Unit = {},
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     isDark: Boolean = false,
@@ -105,6 +110,8 @@ fun SearchBarCapsule(
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
     val dividerCol = searchDividerColor(isDark)
+    var showSortMenu by remember { mutableStateOf(false) }
+    var showViewMenu by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier
@@ -205,7 +212,100 @@ fun SearchBarCapsule(
                 }
             }
 
-            // Subtle vertical separator between text field and filter icon inside bar
+            // Compact icon-only result controls stay inside the search capsule.
+            if (showResultActions) {
+                Box {
+                    Surface(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showSortMenu = true }
+                            .testTag("sort_menu_button"),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.SwapVert,
+                                contentDescription = "Sort",
+                                modifier = Modifier.size(20.dp),
+                                tint = textColor
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false },
+                        modifier = Modifier.background(searchCardSurfaceColor(isDark))
+                    ) {
+                        SearchSortMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = mode.label,
+                                        color = textColor,
+                                        fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    onSortChange(mode)
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Box {
+                    val viewIcon = when (viewMode) {
+                        SearchViewMode.MASONRY -> Icons.Default.Dashboard
+                        SearchViewMode.GRID -> Icons.Default.GridView
+                        SearchViewMode.LARGE_GRID -> Icons.Default.Window
+                        SearchViewMode.LIST -> Icons.Default.ViewAgenda
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showViewMenu = true }
+                            .testTag("view_mode_button"),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = viewIcon,
+                                contentDescription = "View mode",
+                                modifier = Modifier.size(20.dp),
+                                tint = textColor
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showViewMenu,
+                        onDismissRequest = { showViewMenu = false },
+                        modifier = Modifier.background(searchCardSurfaceColor(isDark))
+                    ) {
+                        SearchViewMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = mode.label,
+                                        color = textColor,
+                                        fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    onViewModeChange(mode)
+                                    showViewMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Separator before the filter action.
             Spacer(
                 modifier = Modifier
                     .height(20.dp)
@@ -218,7 +318,7 @@ fun SearchBarCapsule(
                 IconButton(
                     onClick = onOpenFilterSheet,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(40.dp)
                         .testTag("search_filter_button")
                 ) {
                     Icon(
@@ -675,20 +775,11 @@ fun SearchResultsHeader(
     totalCount: Int,
     photosCount: Int,
     videosCount: Int,
-    sortMode: SearchSortMode,
-    onSortChange: (SearchSortMode) -> Unit,
-    viewMode: SearchViewMode,
-    onViewModeChange: (SearchViewMode) -> Unit,
     modifier: Modifier = Modifier,
     isDark: Boolean = false
 ) {
-    var showSortMenu by remember { mutableStateOf(false) }
-    var showViewMenu by remember { mutableStateOf(false) }
-
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
-    val cardSurface = searchCardSurfaceColor(isDark)
-    val barSurface = searchBarSurfaceColor(isDark)
 
     Row(
         modifier = modifier
@@ -696,7 +787,6 @@ fun SearchResultsHeader(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Column: Query Title & Real Result Count Summary
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = queryTitle.ifBlank { "All items" },
@@ -725,131 +815,6 @@ fun SearchResultsHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-        }
-
-        // Right Controls: Sort & View
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // Sort Control
-            Box {
-                Surface(
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showSortMenu = true }
-                        .testTag("sort_menu_button"),
-                    shape = RoundedCornerShape(8.dp),
-                    color = barSurface
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SwapVert,
-                            contentDescription = "Sort",
-                            modifier = Modifier.size(16.dp),
-                            tint = textColor
-                        )
-                        Text(
-                            text = sortMode.label,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                            color = textColor
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = secondaryText
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showSortMenu,
-                    onDismissRequest = { showSortMenu = false },
-                    modifier = Modifier.background(cardSurface)
-                ) {
-                    SearchSortMode.entries.forEach { mode ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = mode.label,
-                                    color = textColor,
-                                    fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            onClick = {
-                                onSortChange(mode)
-                                showSortMenu = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            // View Control
-            Box {
-                Surface(
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showViewMenu = true }
-                        .testTag("view_mode_button"),
-                    shape = RoundedCornerShape(8.dp),
-                    color = barSurface
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val viewIcon = when (viewMode) {
-                            SearchViewMode.MASONRY -> Icons.Default.Dashboard
-                            SearchViewMode.GRID -> Icons.Default.GridView
-                            SearchViewMode.LARGE_GRID -> Icons.Default.Window
-                            SearchViewMode.LIST -> Icons.Default.ViewAgenda
-                        }
-                        Icon(
-                            imageVector = viewIcon,
-                            contentDescription = "View",
-                            modifier = Modifier.size(16.dp),
-                            tint = textColor
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = secondaryText
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showViewMenu,
-                    onDismissRequest = { showViewMenu = false },
-                    modifier = Modifier.background(cardSurface)
-                ) {
-                    SearchViewMode.entries.forEach { mode ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = mode.label,
-                                    color = textColor,
-                                    fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            onClick = {
-                                onViewModeChange(mode)
-                                showViewMenu = false
-                            }
-                        )
-                    }
-                }
-            }
         }
     }
 }

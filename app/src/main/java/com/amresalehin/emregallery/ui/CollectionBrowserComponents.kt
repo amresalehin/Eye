@@ -139,16 +139,16 @@ fun <T> groupCollectionBrowserItems(
                                 yesterday.timeInMillis -> "Yesterday"
                                 else -> SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault()).format(Date(timestamp))
                             }
-                            "day:\${start.timeInMillis}" to label
+                            "day:${start.timeInMillis}" to label
                         }
                         "month" -> {
                             val start = (cal.clone() as Calendar).apply {
                                 set(Calendar.DAY_OF_MONTH, 1)
                                 normalizeToDay()
                             }
-                            "month:\${start.get(Calendar.YEAR)}-\${start.get(Calendar.MONTH)}" to SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(timestamp))
+                            "month:${start.get(Calendar.YEAR)}-${start.get(Calendar.MONTH)}" to SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(timestamp))
                         }
-                        else -> "year:\${cal.get(Calendar.YEAR)}" to cal.get(Calendar.YEAR).toString()
+                        else -> "year:${cal.get(Calendar.YEAR)}" to cal.get(Calendar.YEAR).toString()
                     }
                 }
             }

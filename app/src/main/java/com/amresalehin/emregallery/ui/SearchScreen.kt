@@ -438,7 +438,14 @@ fun SearchScreen(
                                 if (category.filterAction != null) {
                                     filterState = category.filterAction
                                 }
-                                val q = category.queryAction ?: category.title
+                                // A discovery filter already identifies the intended result set.
+                                // Do not also search for the card/entity label: that would
+                                // intersect the filter with an unrelated text query (e.g. "Photos").
+                                val q = if (category.filterAction != null) {
+                                    ""
+                                } else {
+                                    category.queryAction ?: category.title
+                                }
                                 onQueryChange(q)
                                 focusManager.clearFocus()
                                 keyboardController?.hide()
@@ -448,7 +455,11 @@ fun SearchScreen(
                                 if (entity.filterAction != null) {
                                     filterState = entity.filterAction
                                 }
-                                val q = entity.queryAction ?: entity.title
+                                val q = if (entity.filterAction != null) {
+                                    ""
+                                } else {
+                                    entity.queryAction ?: entity.title
+                                }
                                 onQueryChange(q)
                                 focusManager.clearFocus()
                                 keyboardController?.hide()

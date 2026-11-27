@@ -79,6 +79,10 @@ fun SearchScreen(
         else -> isSystemInDarkTheme()
     }
 
+    // Treat filtered Discovery destinations as result screens as well.
+    val isResultsScreen = stage == SearchStage.RESULTS ||
+        (!filterState.isDefault && stage == SearchStage.DISCOVERY)
+
     val searchEngine = remember { SearchEngine(context) }
 
     // Search & Filter State
@@ -286,14 +290,18 @@ fun SearchScreen(
                 },
                 onOpenFilterSheet = { showFilterSheet = true },
                 hasActiveFilters = !filterState.isDefault,
+                showResultActions = isResultsScreen,
+                sortMode = sortMode,
+                onSortChange = { sortMode = it },
+                viewMode = viewMode,
+                onViewModeChange = { viewMode = it },
                 focusRequester = focusRequester,
                 isDark = isDark
             )
 
-            // SINGLE SCROLLABLE ROW OF FILTER PILLS (State A, State B, and State C)
-            // Hides as keyboard hides and appears as keyboard appears
+            // Keep quick filters visible while browsing submitted results, even with the keyboard dismissed.
             AnimatedVisibility(
-                visible = WindowInsets.isImeVisible,
+                visible = WindowInsets.isImeVisible || isResultsScreen,
                 enter = expandVertically(tween(200)) + fadeIn(tween(150)),
                 exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
             ) {
@@ -1125,10 +1133,6 @@ private fun SubmittedResultsContent(
                     totalCount = totalCount,
                     photosCount = resultsData.totalPhotosCount,
                     videosCount = resultsData.totalVideosCount,
-                    sortMode = sortMode,
-                    onSortChange = onSortChange,
-                    viewMode = viewMode,
-                    onViewModeChange = onViewModeChange,
                     isDark = isDark
                 )
             }

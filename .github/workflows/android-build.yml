@@ -91,13 +91,25 @@ jobs:
           SAFE_BRANCH=$(echo "$GITHUB_REF_NAME" | tr '/ ' '--')
           TAG="build-${SAFE_BRANCH}-${SHORT_SHA}"
 
-          gh release create "$TAG" "$APK_PATH" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Emre Gallery - ${GITHUB_REF_NAME} - ${SHORT_SHA}" \
-            --notes "Automated successful Android debug build.
+          RELEASE_TITLE="Emre Gallery - ${GITHUB_REF_NAME} - ${SHORT_SHA}"
+          RELEASE_NOTES="Automated successful Android debug build.
 
           Branch: ${GITHUB_REF_NAME}
           Commit: ${GITHUB_SHA}
           Workflow: Android Build"
+
+          # A rerun or duplicate push can target a release that already exists.
+          # Update its APK asset instead of failing on the existing tag.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing its APK asset."
+            gh release upload "$TAG" "$APK_PATH" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK_PATH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TITLE" \
+              --notes "$RELEASE_NOTES"
+          fi
 
           echo "Successfully published APK release: $TAG"

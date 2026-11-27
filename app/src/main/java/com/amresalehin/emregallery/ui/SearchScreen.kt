@@ -109,6 +109,10 @@ fun SearchScreen(
         mutableStateOf(SearchResultData(query = "", items = emptyList(), dynamicChips = emptyList(), totalPhotosCount = 0, totalVideosCount = 0))
     }
 
+
+    // Load Discovery Data when entering Search / changing media / updating AI metadata
+    var aiUpdateTick by remember { mutableIntStateOf(0) }
+
     // A request key changes immediately when any search input changes, so stale empty
     // results are never rendered during the frame before the new search coroutine starts.
     val shouldComputeSearchResults = stage == SearchStage.RESULTS || !filterState.isDefault
@@ -126,9 +130,6 @@ fun SearchScreen(
     var completedSearchRequestKey by remember { mutableStateOf<Any?>(null) }
     val isSearchRunning = shouldComputeSearchResults &&
         completedSearchRequestKey !== searchRequestKey
-
-    // Load Discovery Data when entering Search / changing media / updating AI metadata
-    var aiUpdateTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         AiStoreEvents.updates.collect { aiUpdateTick++ }
     }

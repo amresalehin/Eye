@@ -765,9 +765,9 @@ fun SearchFilterPill(
 }
 
 /**
- * Compact Results Header (State C):
- * Left: Query title and result count / content type summary (e.g. "624 items · Photos, Videos").
- * Right: Sort control (default "Most relevant") and View control (Masonry, Grid, Large grid, List).
+ * Compact Results Summary (State C):
+ * Shows the query title and result count / content type summary below the fixed search toolbar.
+ * Sort and view controls live in the search capsule while results are displayed.
  */
 @Composable
 fun SearchResultsHeader(

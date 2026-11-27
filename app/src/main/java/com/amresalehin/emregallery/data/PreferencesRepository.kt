@@ -75,6 +75,28 @@ class PreferencesRepository(context: Context) {
     val searchListView: Flow<Boolean> get() = uiPrefs.searchListView
     suspend fun setSearchListView(value: Boolean) = uiPrefs.setSearchListView(value)
 
+    val albumCatalogSortOrder: Flow<String> get() = uiPrefs.albumCatalogSortOrder
+    suspend fun setAlbumCatalogSortOrder(value: String) = uiPrefs.setAlbumCatalogSortOrder(value)
+    val albumCatalogGroupBy: Flow<String> get() = uiPrefs.albumCatalogGroupBy
+    suspend fun setAlbumCatalogGroupBy(value: String) = uiPrefs.setAlbumCatalogGroupBy(value)
+    val albumCatalogGridColumns: Flow<Int> get() = uiPrefs.albumCatalogGridColumns
+    suspend fun setAlbumCatalogGridColumns(value: Int) = uiPrefs.setAlbumCatalogGridColumns(value)
+    val albumCatalogGridStyle: Flow<String> get() = uiPrefs.albumCatalogGridStyle
+    suspend fun setAlbumCatalogGridStyle(value: String) = uiPrefs.setAlbumCatalogGridStyle(value)
+    val albumCatalogListView: Flow<Boolean> get() = uiPrefs.albumCatalogListView
+    suspend fun setAlbumCatalogListView(value: Boolean) = uiPrefs.setAlbumCatalogListView(value)
+
+    val deviceFoldersSortOrder: Flow<String> get() = uiPrefs.deviceFoldersSortOrder
+    suspend fun setDeviceFoldersSortOrder(value: String) = uiPrefs.setDeviceFoldersSortOrder(value)
+    val deviceFoldersGroupBy: Flow<String> get() = uiPrefs.deviceFoldersGroupBy
+    suspend fun setDeviceFoldersGroupBy(value: String) = uiPrefs.setDeviceFoldersGroupBy(value)
+    val deviceFoldersGridColumns: Flow<Int> get() = uiPrefs.deviceFoldersGridColumns
+    suspend fun setDeviceFoldersGridColumns(value: Int) = uiPrefs.setDeviceFoldersGridColumns(value)
+    val deviceFoldersGridStyle: Flow<String> get() = uiPrefs.deviceFoldersGridStyle
+    suspend fun setDeviceFoldersGridStyle(value: String) = uiPrefs.setDeviceFoldersGridStyle(value)
+    val deviceFoldersListView: Flow<Boolean> get() = uiPrefs.deviceFoldersListView
+    suspend fun setDeviceFoldersListView(value: Boolean) = uiPrefs.setDeviceFoldersListView(value)
+
     // --- Vault & Security ---
     val lockedFolderPinHash: Flow<String?> get() = vaultPrefs.lockedFolderPinHash
     val lockedFolderBiometricEnabled: Flow<Boolean> get() = vaultPrefs.lockedFolderBiometricEnabled

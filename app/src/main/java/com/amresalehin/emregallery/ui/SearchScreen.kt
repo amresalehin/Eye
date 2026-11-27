@@ -1049,79 +1049,142 @@ private fun SubmittedResultsContent(
         return
     }
 
-    // Date grouping for results
+    // Reuse Home's justified masonry by preparing stable, lazy row chunks per date group.
     val dayGroups = remember(results) { groupMediaByDay(results) }
+    val masonryRowsByDay = remember(dayGroups) {
+        dayGroups.associate { group -> group.dayKey to group.items.chunked(3) }
+    }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Results Header: Query title, count, content summary, Sort & View controls
-        item {
-            SearchResultsHeader(
-                queryTitle = query.ifBlank { "All results" },
-                totalCount = totalCount,
-                photosCount = resultsData.totalPhotosCount,
-                videosCount = resultsData.totalVideosCount,
-                sortMode = sortMode,
-                onSortChange = onSortChange,
-                viewMode = viewMode,
-                onViewModeChange = onViewModeChange,
-                isDark = isDark
-            )
-        }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val containerWidth = maxWidth
 
-        // Date Groups
-        items(dayGroups, key = { it.dayKey }) { group ->
-            val isCollapsed = collapsedGroups[group.dayKey] == true
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                SearchDateGroupHeader(
-                    label = group.dayLabel,
-                    count = group.items.size,
-                    isExpanded = !isCollapsed,
-                    onToggleExpand = { onToggleGroupCollapse(group.dayKey) },
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            item(key = "search_results_header", contentType = "header") {
+                SearchResultsHeader(
+                    queryTitle = query.ifBlank { "All results" },
+                    totalCount = totalCount,
+                    photosCount = resultsData.totalPhotosCount,
+                    videosCount = resultsData.totalVideosCount,
+                    sortMode = sortMode,
+                    onSortChange = onSortChange,
+                    viewMode = viewMode,
+                    onViewModeChange = onViewModeChange,
                     isDark = isDark
                 )
+            }
 
-                AnimatedVisibility(
-                    visible = !isCollapsed,
-                    enter = expandVertically(tween(200)) + fadeIn(tween(150)),
-                    exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+            dayGroups.forEach { group ->
+                val isCollapsed = collapsedGroups[group.dayKey] == true
+
+                item(
+                    key = "search_date_group_${group.dayKey}",
+                    contentType = "date_header"
                 ) {
-                    when (viewMode) {
-                        SearchViewMode.MASONRY -> {
-                            // Natural varied image heights, narrow 4dp gutters, rounded corners
-                            DynamicMasonryGrid(
-                                media = group.items,
-                                columnsCount = 3,
-                                onOpen = onOpenMedia
-                            )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SearchDateGroupHeader(
+                            label = group.dayLabel,
+                            count = group.items.size,
+                            isExpanded = !isCollapsed,
+                            onToggleExpand = { onToggleGroupCollapse(group.dayKey) },
+                            isDark = isDark
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+
+                when (viewMode) {
+                    SearchViewMode.MASONRY -> {
+                        val rows = masonryRowsByDay[group.dayKey].orEmpty()
+                        items(
+                            count = rows.size,
+                            key = { rowIndex ->
+                                "search_masonry_${group.dayKey}_${rows[rowIndex].first().id}"
+                            },
+                            contentType = { "search_masonry_row" }
+                        ) { rowIndex ->
+                            AnimatedVisibility(
+                                visible = !isCollapsed,
+                                enter = expandVertically(tween(200)) + fadeIn(tween(150)),
+                                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                            ) {
+                                JustifiedMosaicRow(
+                                    items = rows[rowIndex],
+                                    containerWidth = containerWidth,
+                                    rowIndex = rowIndex,
+                                    isSquare = false,
+                                    modifier = if (rowIndex == rows.lastIndex) {
+                                        Modifier.padding(bottom = 12.dp)
+                                    } else {
+                                        Modifier
+                                    },
+                                    onOpen = onOpenMedia
+                                )
+                            }
                         }
-                        SearchViewMode.GRID -> {
-                            SquareGrid(
-                                media = group.items,
-                                columnsCount = 3,
-                                onOpen = onOpenMedia
-                            )
+                    }
+
+                    SearchViewMode.GRID -> {
+                        item(
+                            key = "search_grid_${group.dayKey}",
+                            contentType = "search_grid"
+                        ) {
+                            AnimatedVisibility(
+                                visible = !isCollapsed,
+                                enter = expandVertically(tween(200)) + fadeIn(tween(150)),
+                                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                            ) {
+                                SquareGrid(
+                                    media = group.items,
+                                    columnsCount = 3,
+                                    onOpen = onOpenMedia,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                            }
                         }
-                        SearchViewMode.LARGE_GRID -> {
-                            SquareGrid(
-                                media = group.items,
-                                columnsCount = 2,
-                                onOpen = onOpenMedia
-                            )
+                    }
+
+                    SearchViewMode.LARGE_GRID -> {
+                        item(
+                            key = "search_large_grid_${group.dayKey}",
+                            contentType = "search_large_grid"
+                        ) {
+                            AnimatedVisibility(
+                                visible = !isCollapsed,
+                                enter = expandVertically(tween(200)) + fadeIn(tween(150)),
+                                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                            ) {
+                                SquareGrid(
+                                    media = group.items,
+                                    columnsCount = 2,
+                                    onOpen = onOpenMedia,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                            }
                         }
-                        SearchViewMode.LIST -> {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                group.items.forEach { item ->
-                                    CompactMediaListRow(
-                                        item = item,
-                                        onOpen = { onOpenMedia(item) },
-                                        isDark = isDark
-                                    )
-                                }
+                    }
+
+                    SearchViewMode.LIST -> {
+                        items(
+                            count = group.items.size,
+                            key = { itemIndex ->
+                                "search_list_${group.dayKey}_${group.items[itemIndex].id}"
+                            },
+                            contentType = { "search_list_row" }
+                        ) { itemIndex ->
+                            AnimatedVisibility(
+                                visible = !isCollapsed,
+                                enter = expandVertically(tween(200)) + fadeIn(tween(150)),
+                                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                            ) {
+                                CompactMediaListRow(
+                                    item = group.items[itemIndex],
+                                    onOpen = { onOpenMedia(group.items[itemIndex]) },
+                                    isDark = isDark
+                                )
                             }
                         }
                     }
@@ -1130,7 +1193,6 @@ private fun SubmittedResultsContent(
         }
     }
 }
-
 
 @Composable
 private fun SquareGrid(
@@ -1198,74 +1260,7 @@ private fun SquareGrid(
     }
 }
 
-@Composable
-private fun DynamicMasonryGrid(
-    media: List<MediaItem>,
-    columnsCount: Int,
-    onOpen: (MediaItem) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val cols = columnsCount.coerceAtLeast(1)
-    val columns = remember(media, cols) {
-        List(cols) { colIndex ->
-            media.filterIndexed { index, _ -> index % cols == colIndex }
-        }
-    }
 
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        columns.forEach { colItems ->
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                colItems.forEach { item ->
-                    val aspect = when (Math.abs(item.id.hashCode()) % 3) {
-                        0 -> 0.85f
-                        1 -> 1.0f
-                        else -> 1.25f
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(aspect)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onOpen(item) }
-                            .testTag("media_item_${item.id}")
-                    ) {
-                        AsyncImage(
-                            model = remember(item.uri, context) {
-                                ThumbnailUtils.buildThumbnailRequest(context, item.uri)
-                            },
-                            contentDescription = item.name,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        if (item.isVideo) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp)
-                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                                    .padding(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Video",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /**
  * Compact list row for list view mode in search results.

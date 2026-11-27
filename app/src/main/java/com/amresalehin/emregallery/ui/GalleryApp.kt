@@ -820,7 +820,21 @@ fun GalleryApp(
     }
 
     val activeCustomAlbum = remember(albumFilter, customAlbums) {
-        customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter }
+        customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter }
+    }
+    val activeCollectionMediaType = remember(albumFilter, albumFilterReturnDestination, activeCustomAlbum, media) {
+        when {
+            activeCustomAlbum != null -> "album"
+            albumFilter != null && (
+                albumFilterReturnDestination == Destination.DEVICE_FOLDERS ||
+                    media.any { item ->
+                        val path = item.relativePath.trim().trim('/')
+                        val parentPath = path.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" }
+                        path.equals(albumFilter, ignoreCase = true) || parentPath.equals(albumFilter, ignoreCase = true)
+                    }
+                ) -> "folder"
+            else -> null
+        }
     }
     val activeAlbumTitle = remember(albumFilter, activeCustomAlbum) {
         activeCustomAlbum?.fullPath ?: when (albumFilter) {
@@ -1012,7 +1026,20 @@ fun GalleryApp(
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> {
+                            val isCustomAlbumFilter = customAlbums.any { album ->
+                                album.id == it || album.fullPath == it || album.name == it
+                            }
+                            val isFolderFilter = !isCustomAlbumFilter && media.any { item ->
+                                val path = item.relativePath.trim().trim('/')
+                                val parentPath = path.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" }
+                                path.equals(it, ignoreCase = true) || parentPath.equals(it, ignoreCase = true)
+                            }
+                            albumFilterReturnDestination = Destination.ALBUMS
+                            if (isFolderFilter) albumFilterReturnDestination = Destination.ALBUMS
+                            albumFilter = it
+                            navigateTo(Destination.HOME)
+                        } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
@@ -1081,10 +1108,72 @@ fun GalleryApp(
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },
                         albumTitle = activeAlbumTitle,
-                        sortOrder = sortOrderPref,
-                        groupBy = groupByPref,
-                        gridColumns = gridColumnsPref,
-                        gridStyle = gridStylePref,
+                        sortOrder = when (activeCollectionMediaType) {
+                            "album" -> albumContentSortOrderPref
+                            "folder" -> folderContentSortOrderPref
+                            else -> sortOrderPref
+                        },
+                        groupBy = when (activeCollectionMediaType) {
+                            "album" -> albumContentGroupByPref
+                            "folder" -> folderContentGroupByPref
+                            else -> groupByPref
+                        },
+                        gridColumns = when (activeCollectionMediaType) {
+                            "album" -> albumContentGridColumnsPref
+                            "folder" -> folderContentGridColumnsPref
+                            else -> gridColumnsPref
+                        },
+                        gridStyle = when (activeCollectionMediaType) {
+                            "album" -> albumContentGridStylePref
+                            "folder" -> folderContentGridStylePref
+                            else -> gridStylePref
+                        },
+                        collectionMediaType = activeCollectionMediaType,
+                        collectionListView = when (activeCollectionMediaType) {
+                            "album" -> albumContentListViewPref
+                            "folder" -> folderContentListViewPref
+                            else -> false
+                        },
+                        onCollectionListViewChange = { enabled ->
+                            scope.launch {
+                                when (activeCollectionMediaType) {
+                                    "album" -> prefs.setAlbumContentListView(enabled)
+                                    "folder" -> prefs.setFolderContentListView(enabled)
+                                }
+                            }
+                        },
+                        onCollectionSortOrderChange = { value ->
+                            scope.launch {
+                                when (activeCollectionMediaType) {
+                                    "album" -> prefs.setAlbumContentSortOrder(value)
+                                    "folder" -> prefs.setFolderContentSortOrder(value)
+                                }
+                            }
+                        },
+                        onCollectionGroupByChange = { value ->
+                            scope.launch {
+                                when (activeCollectionMediaType) {
+                                    "album" -> prefs.setAlbumContentGroupBy(value)
+                                    "folder" -> prefs.setFolderContentGroupBy(value)
+                                }
+                            }
+                        },
+                        onCollectionGridColumnsChange = { value ->
+                            scope.launch {
+                                when (activeCollectionMediaType) {
+                                    "album" -> prefs.setAlbumContentGridColumns(value)
+                                    "folder" -> prefs.setFolderContentGridColumns(value)
+                                }
+                            }
+                        },
+                        onCollectionGridStyleChange = { value ->
+                            scope.launch {
+                                when (activeCollectionMediaType) {
+                                    "album" -> prefs.setAlbumContentGridStyle(value)
+                                    "folder" -> prefs.setFolderContentGridStyle(value)
+                                }
+                            }
+                        },
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
                         onClearAlbumFilter = { performBackNavigation() },

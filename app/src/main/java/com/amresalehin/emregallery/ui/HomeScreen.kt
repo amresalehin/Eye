@@ -97,15 +97,6 @@ private fun buildHomeGroupedData(
     return HomeGroupedData(sortedMedia = sortedMedia, groups = groups)
 }
 
-/** Re-chunk already sorted groups when the column count changes; never sort the library again. */
-private fun buildHomeGroupedRows(
-    grouped: HomeGroupedData,
-    columns: Int
-): List<Pair<DayGroup, List<List<MediaItem>>>> {
-    val clampedCols = columns.coerceIn(1, 6)
-    return grouped.groups.map { group -> group to group.items.chunked(clampedCols) }
-}
-
 private fun buildHomeGridData(
     grouped: HomeGroupedData,
     groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
@@ -199,7 +190,7 @@ fun HomeScreen(
         if (!isVisible) return@LaunchedEffect
         gridData = withContext(Dispatchers.Default) {
             val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
-            val groupedRows = buildHomeGroupedRows(grouped, pinchGridColumns)
+            val groupedRows = buildGroupedRows(grouped.groups, pinchGridColumns)
             buildHomeGridData(grouped, groupedRows)
         }
     }

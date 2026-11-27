@@ -38,11 +38,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amresalehin.emregallery.data.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -1073,6 +1075,12 @@ private fun TypingLiveSuggestionsContent(
     }
 }
 
+private data class PreparedSearchGridData(
+    val sourceItems: List<MediaItem>,
+    val columnCount: Int,
+    val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
+)
+
 /**
  * State C: Submitted Search Results.
  * Date-grouped masonry photo grid, Sort/View controls beside results header.
@@ -1110,13 +1118,29 @@ private fun SubmittedResultsContent(
 
     // Share the same lazy-list state and fast scrollbar behaviour as Home.
     val resultsListState = rememberLazyListState()
-
-    // Reuse Home's justified masonry by preparing stable, lazy row chunks per date group.
-    val dayGroups = remember(results) { groupMediaByDay(results) }
     val homeGridColumns = gridColumns.coerceIn(1, 6)
-    val gridRowsByDay = remember(dayGroups, homeGridColumns) {
-        dayGroups.associate { group -> group.dayKey to group.items.chunked(homeGridColumns) }
+
+    // Search used to regroup and chunk its results synchronously during composition.
+    // Prepare the exact same grouped-row structure as Home off the UI thread instead.
+    var preparedGrid by remember { mutableStateOf<PreparedSearchGridData?>(null) }
+    LaunchedEffect(results, homeGridColumns) {
+        val nextGrid = withContext(Dispatchers.Default) {
+            val groups = groupMediaByDay(results)
+            PreparedSearchGridData(
+                sourceItems = results,
+                columnCount = homeGridColumns,
+                groupedRows = buildGroupedRows(groups, homeGridColumns)
+            )
+        }
+        preparedGrid = nextGrid
     }
+
+    val currentGrid = preparedGrid
+    if (currentGrid == null ||
+        currentGrid.sourceItems != results ||
+        currentGrid.columnCount != homeGridColumns
+    ) return
+    val groupedRows = currentGrid.groupedRows
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val containerWidth = maxWidth
@@ -1137,7 +1161,7 @@ private fun SubmittedResultsContent(
                 )
             }
 
-            dayGroups.forEach { group ->
+            groupedRows.forEach { (group, rows) ->
                 val isCollapsed = collapsedGroups[group.dayKey] == true
 
                 item(
@@ -1158,7 +1182,6 @@ private fun SubmittedResultsContent(
 
                 when (viewMode) {
                     SearchViewMode.MASONRY -> {
-                        val rows = gridRowsByDay[group.dayKey].orEmpty()
                         items(
                             count = rows.size,
                             key = { rowIndex ->
@@ -1195,7 +1218,6 @@ private fun SubmittedResultsContent(
                     }
 
                     SearchViewMode.GRID -> {
-                        val rows = gridRowsByDay[group.dayKey].orEmpty()
                         items(
                             count = rows.size,
                             key = { rowIndex ->

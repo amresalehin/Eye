@@ -14,6 +14,22 @@ data class DayGroup(
     val items: List<MediaItem>
 )
 
+/**
+ * Shared row preparation for Home and Search.
+ *
+ * Both screens render the same prepared row structure; only the source groups differ.
+ * Call from a background dispatcher when preparing a large media collection.
+ */
+fun buildGroupedRows(
+    groups: List<DayGroup>,
+    columns: Int
+): List<Pair<DayGroup, List<List<MediaItem>>>> {
+    val columnCount = columns.coerceIn(1, 6)
+    return groups.map { group ->
+        group to group.items.chunked(columnCount)
+    }
+}
+
 fun groupMediaByDay(media: List<MediaItem>): List<DayGroup> {
     if (media.isEmpty()) return emptyList()
 
@@ -32,7 +48,6 @@ fun groupMediaByDay(media: List<MediaItem>): List<DayGroup> {
     val dayFormatOtherYear = SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault())
 
     val groupedMap = LinkedHashMap<Long, MutableList<MediaItem>>()
-    var lastTimestamp = Long.MIN_VALUE
     var lastDayStart = Long.MIN_VALUE
 
     for (item in media) {
@@ -52,8 +67,6 @@ fun groupMediaByDay(media: List<MediaItem>): List<DayGroup> {
             cal.timeInMillis
         }
         lastDayStart = dayStart
-        lastTimestamp = validTimestamp
-
         groupedMap.getOrPut(dayStart) { mutableListOf() }.add(item)
     }
 

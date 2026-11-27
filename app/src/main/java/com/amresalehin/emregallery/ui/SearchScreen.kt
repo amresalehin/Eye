@@ -361,6 +361,7 @@ fun SearchScreen(
                             query = query,
                             resultsData = searchResultsData,
                             isSearching = isSearchRunning,
+                            gridColumns = gridColumns,
                             viewMode = viewMode,
                             onViewModeChange = { viewMode = it },
                             hasActiveFilters = !filterState.isDefault,

@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -14,6 +15,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +28,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +37,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +95,8 @@ private fun buildHomeGroupedData(
 
 private fun buildHomeGridData(
     grouped: HomeGroupedData,
-    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
+    groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>,
+    listView: Boolean = false
 ): HomeGridData {
     val predictivePrefetchRows = groupedRows.flatMap { (group, rowChunks) ->
         rowChunks.map { row ->
@@ -104,13 +109,13 @@ private fun buildHomeGridData(
     }
     return HomeGridData(
         sortedMedia = grouped.sortedMedia,
-        viewerOrderedMedia = flattenHomeGridRows(groupedRows),
+        viewerOrderedMedia = if (listView) grouped.groups.flatMap { it.items } else flattenHomeGridRows(groupedRows),
         groupedRows = groupedRows,
         predictivePrefetchRows = predictivePrefetchRows,
         predictivePrefetchIndex = predictivePrefetchIndex
     )
 }
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
@@ -128,6 +133,13 @@ fun HomeScreen(
     bottomContentPadding: Dp,
     onClearAlbumFilter: () -> Unit = {},
     onAddPhotosToAlbum: (() -> Unit)? = null,
+    collectionMediaType: String? = null,
+    collectionListView: Boolean = false,
+    onCollectionListViewChange: (Boolean) -> Unit = {},
+    onCollectionSortOrderChange: (String) -> Unit = {},
+    onCollectionGroupByChange: (String) -> Unit = {},
+    onCollectionGridColumnsChange: (Int) -> Unit = {},
+    onCollectionGridStyleChange: (String) -> Unit = {},
     onPermissionGranted: () -> Unit = {},
     onMoveToBin: (Set<String>) -> Unit = {},
     onMoveToLocked: (Set<String>) -> Unit = {},
@@ -143,6 +155,21 @@ fun HomeScreen(
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
+    val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
+    var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
+    var showCollectionViewOptions by remember { mutableStateOf(false) }
+    val collectionSearchFocusRequester = remember(collectionMediaType, albumTitle) { FocusRequester() }
+    val collectionDisplayMedia = remember(media, collectionSearchQuery, isCollectionMediaView) {
+        if (!isCollectionMediaView || collectionSearchQuery.isBlank()) {
+            media
+        } else {
+            val query = collectionSearchQuery.trim()
+            media.filter { item ->
+                item.name.contains(query, ignoreCase = true) ||
+                    item.relativePath.contains(query, ignoreCase = true)
+            }
+        }
+    }
 
     BackHandler(enabled = isVisible && selectionMode) {
         onSelectionChange(emptySet())
@@ -178,13 +205,30 @@ fun HomeScreen(
     }
     // Build the actual gallery rows directly in the background. While this runs, Home stays
     // visually empty rather than drawing placeholder cells that are immediately discarded.
-    LaunchedEffect(isVisible, media, sortOrder, groupBy, pinchGridColumns) {
+    LaunchedEffect(
+        isVisible,
+        collectionDisplayMedia,
+        sortOrder,
+        groupBy,
+        pinchGridColumns,
+        isCollectionMediaView,
+        collectionListView
+    ) {
         if (!isVisible) return@LaunchedEffect
         gridData = withContext(Dispatchers.Default) {
-            val grouped = buildHomeGroupedData(media, sortOrder, groupBy)
-            val groupedRows = buildGroupedRows(grouped.groups, pinchGridColumns)
-            buildHomeGridData(grouped, groupedRows)
+            val grouped = buildHomeGroupedData(collectionDisplayMedia, sortOrder, groupBy)
+            val useListView = isCollectionMediaView && collectionListView
+            val groupedRows = if (useListView) {
+                grouped.groups.map { group -> group to emptyList<List<MediaItem>>() }
+            } else {
+                buildGroupedRows(grouped.groups, pinchGridColumns)
+            }
+            buildHomeGridData(grouped, groupedRows, useListView)
         }
+    }
+
+    LaunchedEffect(isCollectionMediaView, pinchGridColumns) {
+        if (isCollectionMediaView) onCollectionGridColumnsChange(pinchGridColumns)
     }
     val sortedMedia = gridData.sortedMedia
     val viewerOrderedMedia = gridData.viewerOrderedMedia
@@ -351,7 +395,34 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (albumTitle != null) {
+            if (isCollectionMediaView) {
+                stickyHeader(key = "opened-collection-search-header") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CollectionBrowserSearchBar(
+                            query = collectionSearchQuery,
+                            onQueryChange = { collectionSearchQuery = it },
+                            placeholder = "Search in " + (albumTitle ?: if (collectionMediaType == "album") "album" else "folder") + "…",
+                            onBack = onClearAlbumFilter,
+                            onOpenViewOptions = { showCollectionViewOptions = true },
+                            focusRequester = collectionSearchFocusRequester,
+                            onAdd = if (collectionMediaType == "album") onAddPhotosToAlbum else null
+                        )
+                        Text(
+                            collectionDisplayMedia.size.toString() +
+                                if (collectionDisplayMedia.size == 1) " item" else " items",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                    }
+                }
+            } else if (albumTitle != null) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
                 val collectionIcon = when (albumTitle) {
                     "Favourites" -> Icons.Default.Favorite
@@ -433,7 +504,7 @@ fun HomeScreen(
                         }
                     }
                 }
-            } else if (sortedMedia.isEmpty() && (loading || media.isNotEmpty())) {
+            } else if (sortedMedia.isEmpty() && (loading || collectionDisplayMedia.isNotEmpty())) {
                 // No loading skeleton: keep the gallery blank until real media rows are ready.
             } else if (sortedMedia.isEmpty()) {
                 item {
@@ -447,9 +518,20 @@ fun HomeScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(12.dp))
-                                Text("No photos in this album", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    if (collectionSearchQuery.isNotBlank()) "No matching media" else if (collectionMediaType == "folder") "No media in this folder" else "No photos in this album",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                                 Spacer(Modifier.height(6.dp))
-                                Text("Add photos from your gallery to populate this album.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    if (collectionSearchQuery.isNotBlank()) "Try a different name or search term."
+                                    else if (collectionMediaType == "folder") "This folder does not contain accessible photos or videos."
+                                    else "Add photos from your gallery to populate this album.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                                 if (onAddPhotosToAlbum != null) {
                                     Spacer(Modifier.height(16.dp))
                                     Button(onClick = onAddPhotosToAlbum) {
@@ -472,21 +554,43 @@ fun HomeScreen(
                         }
                     }
 
-                    items(
-                        count = rowChunks.size,
-                        key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
-                        contentType = { "photo_row" }
-                    ) { rowIndex ->
-                        JustifiedMosaicRow(
-                            items = rowChunks[rowIndex],
-                            containerWidth = containerWidth,
-                            rowIndex = rowIndex,
-                            isSquare = (gridStyle == "square"),
-                            selectedUris = selectedUris,
-                            onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
-                            onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
-                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item, viewerOrderedMedia) }
-                        )
+                    if (isCollectionMediaView && collectionListView) {
+                        items(
+                            count = group.items.size,
+                            key = { itemIndex -> "collection_list_${group.dayKey}_${group.items[itemIndex].id}" },
+                            contentType = { "collection_list_row" }
+                        ) { itemIndex ->
+                            val item = group.items[itemIndex]
+                            CollectionMediaListRow(
+                                item = item,
+                                selected = item.uri in selectedUris,
+                                onClick = {
+                                    if (selectionMode) {
+                                        onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri)
+                                    } else {
+                                        onOpen(item, viewerOrderedMedia)
+                                    }
+                                },
+                                onLongClick = { onSelectionChange(selectedUris + item.uri) }
+                            )
+                        }
+                    } else {
+                        items(
+                            count = rowChunks.size,
+                            key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
+                            contentType = { "photo_row" }
+                        ) { rowIndex ->
+                            JustifiedMosaicRow(
+                                items = rowChunks[rowIndex],
+                                containerWidth = containerWidth,
+                                rowIndex = rowIndex,
+                                isSquare = (gridStyle == "square"),
+                                selectedUris = selectedUris,
+                                onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
+                                onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
+                                onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item, viewerOrderedMedia) }
+                            )
+                        }
                     }
                 }
             }
@@ -499,6 +603,23 @@ fun HomeScreen(
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+    }
+
+    if (isCollectionMediaView && showCollectionViewOptions) {
+        HomeViewOptionsBottomSheet(
+            sortOrder = sortOrder,
+            groupBy = groupBy,
+            gridColumns = gridColumns,
+            gridStyle = gridStyle,
+            onSortOrderChange = onCollectionSortOrderChange,
+            onGroupByChange = onCollectionGroupByChange,
+            onGridColumnsChange = onCollectionGridColumnsChange,
+            onGridStyleChange = onCollectionGridStyleChange,
+            onDismiss = { showCollectionViewOptions = false },
+            showListOption = true,
+            listViewSelected = collectionListView,
+            onListViewSelected = onCollectionListViewChange
+        )
     }
 }
 

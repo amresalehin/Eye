@@ -1030,13 +1030,7 @@ fun GalleryApp(
                             val isCustomAlbumFilter = customAlbums.any { album ->
                                 album.id == it || album.fullPath == it || album.name == it
                             }
-                            val isFolderFilter = !isCustomAlbumFilter && media.any { item ->
-                                val path = item.relativePath.trim().trim('/')
-                                val parentPath = path.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" }
-                                path.equals(it, ignoreCase = true) || parentPath.equals(it, ignoreCase = true)
-                            }
                             albumFilterReturnDestination = Destination.ALBUMS
-                            if (isFolderFilter) albumFilterReturnDestination = Destination.ALBUMS
                             albumFilter = it
                             navigateTo(Destination.HOME)
                         } } },

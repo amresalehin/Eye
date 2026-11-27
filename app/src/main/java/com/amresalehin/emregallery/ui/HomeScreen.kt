@@ -85,15 +85,7 @@ private fun buildHomeGroupedData(
         "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
         else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
     }
-    val groups = when (groupBy) {
-        "day" -> groupMediaByDay(sortedMedia)
-        "month" -> groupMediaByMonth(sortedMedia)
-        "year" -> groupMediaByYear(sortedMedia)
-        "folder" -> groupMediaByFolder(sortedMedia)
-        "initial" -> groupMediaByInitial(sortedMedia)
-        "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-        else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-    }
+    val groups = groupMediaBy(sortedMedia, groupBy)
     return HomeGroupedData(sortedMedia = sortedMedia, groups = groups)
 }
 

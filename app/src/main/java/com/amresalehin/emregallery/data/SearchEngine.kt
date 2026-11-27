@@ -647,11 +647,12 @@ class SearchEngine(private val context: Context) {
         query: String,
         media: List<MediaItem>,
         filter: SearchFilterState,
-        sortMode: SearchSortMode,
+        sortMode: SearchSortMode?,
         customAlbums: List<CustomAlbum>,
         customTagsMap: Map<String, Set<String>>,
         customPeopleMap: Map<String, Set<String>>,
-        favourites: Set<String>
+        favourites: Set<String>,
+        sortOrder: String = "date_desc"
     ): SearchResultData = withContext(Dispatchers.Default) {
         val q = query.trim()
         val nonTrash = media.filterNot { it.isTrashed }
@@ -824,12 +825,34 @@ class SearchEngine(private val context: Context) {
             scoredItems.sortedByDescending { it.second }.map { it.first }
         }
 
-        // Apply sorting
-        val sortedList = when (sortMode) {
-            SearchSortMode.RELEVANCE -> matchedList // Already relevance scored if query present, or date
-            SearchSortMode.NEWEST_FIRST -> matchedList.sortedByDescending { getItemTimestamp(it) }
-            SearchSortMode.OLDEST_FIRST -> matchedList.sortedBy { getItemTimestamp(it) }
-            SearchSortMode.NAME -> matchedList.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        // Apply the same sort key and direction used by Home's View options sheet.
+        // Legacy enum-based callers remain supported for existing tests and integrations.
+        val sortedList = if (sortMode != null) {
+            when (sortMode) {
+                SearchSortMode.RELEVANCE -> matchedList
+                SearchSortMode.NEWEST_FIRST -> matchedList.sortedByDescending { getItemTimestamp(it) }
+                SearchSortMode.OLDEST_FIRST -> matchedList.sortedBy { getItemTimestamp(it) }
+                SearchSortMode.NAME -> matchedList.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+            }
+        } else {
+            when (sortOrder) {
+                "date_taken_asc", "date_asc" ->
+                    matchedList.sortedWith(compareBy<MediaItem>({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
+                "date_added_asc" ->
+                    matchedList.sortedWith(compareBy<MediaItem>({ it.dateAddedSeconds }, { it.id }))
+                "date_added_desc" ->
+                    matchedList.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds }.thenBy { it.id })
+                "name_asc" ->
+                    matchedList.sortedWith(compareBy<MediaItem>({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
+                "name_desc" ->
+                    matchedList.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
+                "size_asc" ->
+                    matchedList.sortedWith(compareBy<MediaItem>({ it.sizeBytes }, { it.id }))
+                "size_desc" ->
+                    matchedList.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
+                else ->
+                    matchedList.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+            }
         }
 
         // Extract dynamic entity chips strictly present in the CURRENT result set!

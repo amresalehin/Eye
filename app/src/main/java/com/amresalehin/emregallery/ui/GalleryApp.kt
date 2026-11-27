@@ -1484,7 +1484,14 @@ fun GalleryApp(
                         }
                         SearchScreen(
                             query = searchQuery,
+                            sortOrder = sortOrderPref,
+                            groupBy = groupByPref,
                             gridColumns = gridColumnsPref,
+                            gridStyle = gridStylePref,
+                            onSortOrderChange = { scope.launch { prefs.setSortOrder(it) } },
+                            onGroupByChange = { scope.launch { prefs.setGroupBy(it) } },
+                            onGridColumnsChange = { scope.launch { prefs.setGridColumns(it) } },
+                            onGridStyleChange = { scope.launch { prefs.setGridStyle(it) } },
                             stage = searchStage,
                             allMedia = searchScopeMedia,
                             recentSearches = recentSearches,

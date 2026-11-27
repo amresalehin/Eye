@@ -97,10 +97,7 @@ fun SearchBarCapsule(
     onOpenFilterSheet: () -> Unit,
     hasActiveFilters: Boolean,
     showResultActions: Boolean = false,
-    sortMode: SearchSortMode = SearchSortMode.RELEVANCE,
-    onSortChange: (SearchSortMode) -> Unit = {},
-    viewMode: SearchViewMode = SearchViewMode.MASONRY,
-    onViewModeChange: (SearchViewMode) -> Unit = {},
+    onOpenViewOptionsSheet: () -> Unit = {},
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     isDark: Boolean = false,
@@ -110,9 +107,6 @@ fun SearchBarCapsule(
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
     val dividerCol = searchDividerColor(isDark)
-    var showSortMenu by remember { mutableStateOf(false) }
-    var showViewMenu by remember { mutableStateOf(false) }
-
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -212,95 +206,20 @@ fun SearchBarCapsule(
                 }
             }
 
-            // Compact icon-only result controls stay inside the search capsule.
+            // Open the same View, Sort and Group settings sheet used by Home.
             if (showResultActions) {
-                Box {
-                    Surface(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showSortMenu = true }
-                            .testTag("sort_menu_button"),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.Transparent
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.SwapVert,
-                                contentDescription = "Sort",
-                                modifier = Modifier.size(20.dp),
-                                tint = textColor
-                            )
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = showSortMenu,
-                        onDismissRequest = { showSortMenu = false },
-                        modifier = Modifier.background(searchCardSurfaceColor(isDark))
-                    ) {
-                        SearchSortMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = mode.label,
-                                        color = textColor,
-                                        fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                onClick = {
-                                    onSortChange(mode)
-                                    showSortMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Box {
-                    val viewIcon = when (viewMode) {
-                        SearchViewMode.MASONRY -> Icons.Default.Dashboard
-                        SearchViewMode.GRID -> Icons.Default.GridView
-                        SearchViewMode.LIST -> Icons.Default.ViewAgenda
-                    }
-                    Surface(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showViewMenu = true }
-                            .testTag("view_mode_button"),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.Transparent
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = viewIcon,
-                                contentDescription = "View mode",
-                                modifier = Modifier.size(20.dp),
-                                tint = textColor
-                            )
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = showViewMenu,
-                        onDismissRequest = { showViewMenu = false },
-                        modifier = Modifier.background(searchCardSurfaceColor(isDark))
-                    ) {
-                        SearchViewMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = mode.label,
-                                        color = textColor,
-                                        fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                onClick = {
-                                    onViewModeChange(mode)
-                                    showViewMenu = false
-                                }
-                            )
-                        }
-                    }
+                IconButton(
+                    onClick = onOpenViewOptionsSheet,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("search_view_options_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "View and sort options",
+                        tint = textColor,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 

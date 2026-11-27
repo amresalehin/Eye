@@ -14,6 +14,19 @@ data class DayGroup(
     val items: List<MediaItem>
 )
 
+/** Applies the same grouping choices to both Home and Search result sets. */
+fun groupMediaBy(media: List<MediaItem>, groupBy: String): List<DayGroup> = when (groupBy) {
+    "day" -> groupMediaByDay(media)
+    "month" -> groupMediaByMonth(media)
+    "year" -> groupMediaByYear(media)
+    "folder" -> groupMediaByFolder(media)
+    "initial" -> groupMediaByInitial(media)
+    "none" -> if (media.isEmpty()) emptyList() else {
+        listOf(DayGroup(dayKey = 0L, dayLabel = "", items = media))
+    }
+    else -> groupMediaByDay(media)
+}
+
 /**
  * Shared row preparation for Home and Search.
  *

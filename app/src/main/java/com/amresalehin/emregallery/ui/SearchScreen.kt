@@ -60,7 +60,14 @@ fun SearchScreen(
     customPeopleMap: Map<String, Set<String>>,
     favourites: Set<String>,
     themePref: String = "system",
+    sortOrder: String = "date_desc",
+    groupBy: String = "day",
     gridColumns: Int = 3,
+    gridStyle: String = "masonry",
+    onSortOrderChange: (String) -> Unit = {},
+    onGroupByChange: (String) -> Unit = {},
+    onGridColumnsChange: (Int) -> Unit = {},
+    onGridStyleChange: (String) -> Unit = {},
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
@@ -86,8 +93,8 @@ fun SearchScreen(
 
     // Search & Filter State
     var filterState by remember { mutableStateOf(initialFilter ?: SearchFilterState()) }
-    var sortMode by remember { mutableStateOf(SearchSortMode.RELEVANCE) }
-    var viewMode by remember { mutableStateOf(SearchViewMode.MASONRY) }
+    var useListView by remember { mutableStateOf(false) }
+    var showViewOptionsSheet by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
 
@@ -127,7 +134,7 @@ fun SearchScreen(
     val searchRequestKey = remember(
         query,
         filterState,
-        sortMode,
+        sortOrder,
         allMedia,
         customAlbums,
         customTagsMap,
@@ -193,11 +200,12 @@ fun SearchScreen(
                 query = query,
                 media = allMedia,
                 filter = filterState,
-                sortMode = sortMode,
+                sortMode = null,
                 customAlbums = customAlbums,
                 customTagsMap = customTagsMap,
                 customPeopleMap = customPeopleMap,
-                favourites = favourites
+                favourites = favourites,
+                sortOrder = sortOrder
             )
             // Do not publish results from a request which was cancelled by newer input.
             currentCoroutineContext().ensureActive()
@@ -294,10 +302,7 @@ fun SearchScreen(
                 onOpenFilterSheet = { showFilterSheet = true },
                 hasActiveFilters = !filterState.isDefault,
                 showResultActions = isResultsScreen,
-                sortMode = sortMode,
-                onSortChange = { sortMode = it },
-                viewMode = viewMode,
-                onViewModeChange = { viewMode = it },
+                onOpenViewOptionsSheet = { showViewOptionsSheet = true },
                 focusRequester = focusRequester,
                 isDark = isDark
             )
@@ -364,8 +369,9 @@ fun SearchScreen(
                             resultsData = searchResultsData,
                             isSearching = isSearchRunning,
                             gridColumns = gridColumns,
-                            viewMode = viewMode,
-                            onViewModeChange = { viewMode = it },
+                            groupBy = groupBy,
+                            gridStyle = gridStyle,
+                            useListView = useListView,
                             hasActiveFilters = !filterState.isDefault,
                             onResetFilters = { filterState = SearchFilterState() },
                             collapsedGroups = collapsedGroups,
@@ -492,6 +498,24 @@ fun SearchScreen(
                 }
             }
         }
+    }
+
+    // Reuse the exact Home settings sheet. Search also exposes its List view.
+    if (showViewOptionsSheet) {
+        HomeViewOptionsBottomSheet(
+            sortOrder = sortOrder,
+            groupBy = groupBy,
+            gridColumns = gridColumns,
+            gridStyle = gridStyle,
+            onSortOrderChange = onSortOrderChange,
+            onGroupByChange = onGroupByChange,
+            onGridColumnsChange = onGridColumnsChange,
+            onGridStyleChange = onGridStyleChange,
+            onDismiss = { showViewOptionsSheet = false },
+            showListOption = true,
+            listViewSelected = useListView,
+            onListViewSelected = { useListView = it }
+        )
     }
 
     // Modal Advanced Filter Sheet
@@ -1078,6 +1102,8 @@ private fun TypingLiveSuggestionsContent(
 private data class PreparedSearchGridData(
     val sourceItems: List<MediaItem>,
     val columnCount: Int,
+    val groupBy: String,
+    val listMode: Boolean,
     val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
 )
 
@@ -1091,8 +1117,9 @@ private fun SubmittedResultsContent(
     resultsData: SearchResultData,
     isSearching: Boolean,
     gridColumns: Int,
-    viewMode: SearchViewMode,
-    onViewModeChange: (SearchViewMode) -> Unit,
+    groupBy: String,
+    gridStyle: String,
+    useListView: Boolean,
     hasActiveFilters: Boolean,
     onResetFilters: () -> Unit,
     collapsedGroups: Map<Long, Boolean>,
@@ -1123,13 +1150,20 @@ private fun SubmittedResultsContent(
     // Search used to regroup and chunk its results synchronously during composition.
     // Prepare the exact same grouped-row structure as Home off the UI thread instead.
     var preparedGrid by remember { mutableStateOf<PreparedSearchGridData?>(null) }
-    LaunchedEffect(results, homeGridColumns) {
+    LaunchedEffect(results, homeGridColumns, groupBy, useListView) {
         val nextGrid = withContext(Dispatchers.Default) {
-            val groups = groupMediaByDay(results)
+            val groups = groupMediaBy(results, groupBy)
+            val rows = if (useListView) {
+                groups.map { group -> group to emptyList<List<MediaItem>>() }
+            } else {
+                buildGroupedRows(groups, homeGridColumns)
+            }
             PreparedSearchGridData(
                 sourceItems = results,
                 columnCount = homeGridColumns,
-                groupedRows = buildGroupedRows(groups, homeGridColumns)
+                groupBy = groupBy,
+                listMode = useListView,
+                groupedRows = rows
             )
         }
         preparedGrid = nextGrid
@@ -1137,10 +1171,17 @@ private fun SubmittedResultsContent(
 
     val currentGrid = preparedGrid
     if (currentGrid == null ||
-        currentGrid.sourceItems != results ||
-        currentGrid.columnCount != homeGridColumns
+        currentGrid.sourceItems !== results ||
+        currentGrid.columnCount != homeGridColumns ||
+        currentGrid.groupBy != groupBy ||
+        currentGrid.listMode != useListView
     ) return
     val groupedRows = currentGrid.groupedRows
+    val viewMode = when {
+        useListView -> SearchViewMode.LIST
+        gridStyle == "square" -> SearchViewMode.GRID
+        else -> SearchViewMode.MASONRY
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val containerWidth = maxWidth
@@ -1164,19 +1205,21 @@ private fun SubmittedResultsContent(
             groupedRows.forEach { (group, rows) ->
                 val isCollapsed = collapsedGroups[group.dayKey] == true
 
-                item(
-                    key = "search_date_group_${group.dayKey}",
-                    contentType = "date_header"
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        SearchDateGroupHeader(
-                            label = group.dayLabel,
-                            count = group.items.size,
-                            isExpanded = !isCollapsed,
-                            onToggleExpand = { onToggleGroupCollapse(group.dayKey) },
-                            isDark = isDark
-                        )
-                        Spacer(Modifier.height(4.dp))
+                if (group.dayLabel.isNotBlank()) {
+                    item(
+                        key = "search_date_group_${group.dayKey}",
+                        contentType = "date_header"
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SearchDateGroupHeader(
+                                label = group.dayLabel,
+                                count = group.items.size,
+                                isExpanded = !isCollapsed,
+                                onToggleExpand = { onToggleGroupCollapse(group.dayKey) },
+                                isDark = isDark
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
                 }
 

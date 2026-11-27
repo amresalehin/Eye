@@ -36,10 +36,14 @@ fun HomeViewOptionsBottomSheet(
     onGroupByChange: (String) -> Unit,
     onGridColumnsChange: (Int) -> Unit,
     onGridStyleChange: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    showListOption: Boolean = false,
+    listViewSelected: Boolean = false,
+    onListViewSelected: (Boolean) -> Unit = {}
 ) {
     var tempGridStyle by remember(gridStyle) { mutableStateOf(gridStyle) }
     var tempGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
+    var tempListView by remember(listViewSelected) { mutableStateOf(listViewSelected) }
 
     val initialField = when {
         sortOrder.startsWith("date_added") -> "date_added"
@@ -56,6 +60,7 @@ fun HomeViewOptionsBottomSheet(
     val applySelections = {
         onGridStyleChange(tempGridStyle)
         onGridColumnsChange(tempGridColumns)
+        if (showListOption) onListViewSelected(tempListView)
         val mappedSortOrder = when (tempSortField) {
             "date_taken" -> if (tempSortDirection == "asc") "date_taken_asc" else "date_taken_desc"
             "date_added" -> if (tempSortDirection == "asc") "date_added_asc" else "date_added_desc"
@@ -97,9 +102,9 @@ fun HomeViewOptionsBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Grid Button
-                val isGridSelected = tempGridStyle == "square"
+                val isGridSelected = !tempListView && tempGridStyle == "square"
                 Surface(
-                    onClick = { tempGridStyle = "square" },
+                    onClick = { tempListView = false; tempGridStyle = "square" },
                     shape = RoundedCornerShape(16.dp),
                     color = if (isGridSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -117,29 +122,29 @@ fun HomeViewOptionsBottomSheet(
                         Icon(
                             Icons.Default.GridView,
                             contentDescription = null,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(if (showListOption) 20.dp else 26.dp)
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(if (showListOption) 5.dp else 10.dp))
                         Text(
                             text = "Grid",
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
+                            fontSize = if (showListOption) 13.sp else 16.sp
                         )
                         if (isGridSelected) {
                             Spacer(Modifier.width(6.dp))
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = "Selected",
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(if (showListOption) 14.dp else 18.dp)
                             )
                         }
                     }
                 }
 
                 // Masonry Button
-                val isMasonrySelected = tempGridStyle == "masonry"
+                val isMasonrySelected = !tempListView && tempGridStyle == "masonry"
                 Surface(
-                    onClick = { tempGridStyle = "masonry" },
+                    onClick = { tempListView = false; tempGridStyle = "masonry" },
                     shape = RoundedCornerShape(16.dp),
                     color = if (isMasonrySelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -157,21 +162,50 @@ fun HomeViewOptionsBottomSheet(
                         Icon(
                             Icons.Default.Dashboard,
                             contentDescription = null,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(if (showListOption) 20.dp else 26.dp)
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(if (showListOption) 5.dp else 10.dp))
                         Text(
                             text = "Masonry",
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
+                            fontSize = if (showListOption) 13.sp else 16.sp
                         )
                         if (isMasonrySelected) {
                             Spacer(Modifier.width(6.dp))
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = "Selected",
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(if (showListOption) 14.dp else 18.dp)
                             )
+                        }
+                    }
+                }
+
+                if (showListOption) {
+                    val isListSelected = tempListView
+                    Surface(
+                        onClick = { tempListView = true },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isListSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        border = if (isListSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .testTag("view_option_list")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.ViewAgenda, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("List", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            if (isListSelected) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
                 }
@@ -424,6 +458,7 @@ fun HomeViewOptionsBottomSheet(
                         tempSortField = "date_taken"
                         tempSortDirection = "desc"
                         tempGroupBy = "none"
+                        tempListView = false
                     },
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceContainerLow,

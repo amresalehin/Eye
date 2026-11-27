@@ -827,9 +827,13 @@ fun GalleryApp(
     val activeCollectionMediaType = remember(albumFilter, albumFilterReturnDestination, activeCustomAlbum) {
         when {
             albumFilter == null -> null
-            activeCustomAlbum != null -> "album"
-            albumFilterReturnDestination == Destination.ALBUM_CATALOG -> "album"
             albumFilterReturnDestination == Destination.DEVICE_FOLDERS -> "folder"
+            activeCustomAlbum != null -> "album"
+            albumFilterReturnDestination in listOf(
+                Destination.ALBUM_CATALOG,
+                Destination.ALBUMS,
+                Destination.SEARCH
+            ) -> "album"
             else -> null
         }
     }

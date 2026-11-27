@@ -58,6 +58,7 @@ fun SearchScreen(
     customPeopleMap: Map<String, Set<String>>,
     favourites: Set<String>,
     themePref: String = "system",
+    gridColumns: Int = 3,
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
@@ -1080,6 +1081,7 @@ private fun SubmittedResultsContent(
     query: String,
     resultsData: SearchResultData,
     isSearching: Boolean,
+    gridColumns: Int,
     viewMode: SearchViewMode,
     onViewModeChange: (SearchViewMode) -> Unit,
     hasActiveFilters: Boolean,
@@ -1110,8 +1112,9 @@ private fun SubmittedResultsContent(
 
     // Reuse Home's justified masonry by preparing stable, lazy row chunks per date group.
     val dayGroups = remember(results) { groupMediaByDay(results) }
-    val masonryRowsByDay = remember(dayGroups) {
-        dayGroups.associate { group -> group.dayKey to group.items.chunked(3) }
+    val homeGridColumns = gridColumns.coerceIn(1, 6)
+    val gridRowsByDay = remember(dayGroups, homeGridColumns) {
+        dayGroups.associate { group -> group.dayKey to group.items.chunked(homeGridColumns) }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1154,7 +1157,7 @@ private fun SubmittedResultsContent(
 
                 when (viewMode) {
                     SearchViewMode.MASONRY -> {
-                        val rows = masonryRowsByDay[group.dayKey].orEmpty()
+                        val rows = gridRowsByDay[group.dayKey].orEmpty()
                         items(
                             count = rows.size,
                             key = { rowIndex ->
@@ -1191,40 +1194,25 @@ private fun SubmittedResultsContent(
                     }
 
                     SearchViewMode.GRID -> {
-                        item(
-                            key = "search_grid_${group.dayKey}",
-                            contentType = "search_grid"
-                        ) {
+                        val rows = gridRowsByDay[group.dayKey].orEmpty()
+                        items(
+                            count = rows.size,
+                            key = { rowIndex ->
+                                "search_square_${group.dayKey}_${rows[rowIndex].first().id}"
+                            },
+                            contentType = { "search_square_row" }
+                        ) { rowIndex ->
                             AnimatedVisibility(
                                 visible = !isCollapsed,
                                 enter = expandVertically(tween(200)) + fadeIn(tween(150)),
                                 exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
                             ) {
-                                SquareGrid(
-                                    media = group.items,
-                                    columnsCount = 3,
-                                    onOpen = onOpenMedia,
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    SearchViewMode.LARGE_GRID -> {
-                        item(
-                            key = "search_large_grid_${group.dayKey}",
-                            contentType = "search_large_grid"
-                        ) {
-                            AnimatedVisibility(
-                                visible = !isCollapsed,
-                                enter = expandVertically(tween(200)) + fadeIn(tween(150)),
-                                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
-                            ) {
-                                SquareGrid(
-                                    media = group.items,
-                                    columnsCount = 2,
-                                    onOpen = onOpenMedia,
-                                    modifier = Modifier.padding(bottom = 12.dp)
+                                JustifiedMosaicRow(
+                                    items = rows[rowIndex],
+                                    containerWidth = containerWidth,
+                                    rowIndex = rowIndex,
+                                    isSquare = true,
+                                    onOpen = onOpenMedia
                                 )
                             }
                         }
@@ -1264,77 +1252,6 @@ private fun SubmittedResultsContent(
     }
 }
 
-@Composable
-private fun SquareGrid(
-    media: List<MediaItem>,
-    columnsCount: Int,
-    onOpen: (MediaItem) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val cols = columnsCount.coerceAtLeast(1)
-    val rows = remember(media, cols) {
-        media.chunked(cols)
-    }
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        rows.forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                rowItems.forEach { item ->
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onOpen(item) }
-                            .testTag("media_item_${item.id}")
-                    ) {
-                        AsyncImage(
-                            model = remember(item.uri, context) {
-                                ThumbnailUtils.buildThumbnailRequest(context, item.uri)
-                            },
-                            contentDescription = item.name,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        if (item.isVideo) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp)
-                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                                    .padding(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Video",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-                val remainder = cols - rowItems.size
-                repeat(remainder) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-
-
-/**
- * Compact list row for list view mode in search results.
- */
 @Composable
 private fun CompactMediaListRow(
     item: MediaItem,

@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -1100,6 +1101,9 @@ private fun SubmittedResultsContent(
         return
     }
 
+    // Share the same lazy-list state and fast scrollbar behaviour as Home.
+    val resultsListState = rememberLazyListState()
+
     // Reuse Home's justified masonry by preparing stable, lazy row chunks per date group.
     val dayGroups = remember(results) { groupMediaByDay(results) }
     val masonryRowsByDay = remember(dayGroups) {
@@ -1110,6 +1114,7 @@ private fun SubmittedResultsContent(
         val containerWidth = maxWidth
 
         LazyColumn(
+            state = resultsListState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -1249,6 +1254,13 @@ private fun SubmittedResultsContent(
                 }
             }
         }
+
+        HomeFastScrollbar(
+            listState = resultsListState,
+            topContentPadding = 4.dp,
+            bottomContentPadding = 32.dp,
+            thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

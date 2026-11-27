@@ -113,8 +113,7 @@ enum class SearchSortMode(val label: String) {
 
 enum class SearchViewMode(val label: String) {
     MASONRY("Masonry"),
-    GRID("Grid (3×3)"),
-    LARGE_GRID("Large grid (2×2)"),
+    GRID("Square grid"),
     LIST("List")
 }
 

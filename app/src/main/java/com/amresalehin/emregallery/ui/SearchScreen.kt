@@ -64,10 +64,12 @@ fun SearchScreen(
     groupBy: String = "day",
     gridColumns: Int = 3,
     gridStyle: String = "masonry",
+    listView: Boolean = false,
     onSortOrderChange: (String) -> Unit = {},
     onGroupByChange: (String) -> Unit = {},
     onGridColumnsChange: (Int) -> Unit = {},
     onGridStyleChange: (String) -> Unit = {},
+    onListViewChange: (Boolean) -> Unit = {},
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
@@ -93,7 +95,6 @@ fun SearchScreen(
 
     // Search & Filter State
     var filterState by remember { mutableStateOf(initialFilter ?: SearchFilterState()) }
-    var useListView by remember { mutableStateOf(false) }
     var showViewOptionsSheet by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
@@ -371,7 +372,7 @@ fun SearchScreen(
                             gridColumns = gridColumns,
                             groupBy = groupBy,
                             gridStyle = gridStyle,
-                            useListView = useListView,
+                            listView = listView,
                             hasActiveFilters = !filterState.isDefault,
                             onResetFilters = { filterState = SearchFilterState() },
                             collapsedGroups = collapsedGroups,
@@ -513,8 +514,8 @@ fun SearchScreen(
             onGridStyleChange = onGridStyleChange,
             onDismiss = { showViewOptionsSheet = false },
             showListOption = true,
-            listViewSelected = useListView,
-            onListViewSelected = { useListView = it }
+            listViewSelected = listView,
+            onListViewSelected = onListViewChange
         )
     }
 
@@ -1119,7 +1120,7 @@ private fun SubmittedResultsContent(
     gridColumns: Int,
     groupBy: String,
     gridStyle: String,
-    useListView: Boolean,
+    listView: Boolean,
     hasActiveFilters: Boolean,
     onResetFilters: () -> Unit,
     collapsedGroups: Map<Long, Boolean>,
@@ -1150,10 +1151,10 @@ private fun SubmittedResultsContent(
     // Search used to regroup and chunk its results synchronously during composition.
     // Prepare the exact same grouped-row structure as Home off the UI thread instead.
     var preparedGrid by remember { mutableStateOf<PreparedSearchGridData?>(null) }
-    LaunchedEffect(results, homeGridColumns, groupBy, useListView) {
+    LaunchedEffect(results, homeGridColumns, groupBy, listView) {
         val nextGrid = withContext(Dispatchers.Default) {
             val groups = groupMediaBy(results, groupBy)
-            val rows = if (useListView) {
+            val rows = if (listView) {
                 groups.map { group -> group to emptyList<List<MediaItem>>() }
             } else {
                 buildGroupedRows(groups, homeGridColumns)
@@ -1162,7 +1163,7 @@ private fun SubmittedResultsContent(
                 sourceItems = results,
                 columnCount = homeGridColumns,
                 groupBy = groupBy,
-                listMode = useListView,
+                listMode = listView,
                 groupedRows = rows
             )
         }
@@ -1174,11 +1175,11 @@ private fun SubmittedResultsContent(
         currentGrid.sourceItems !== results ||
         currentGrid.columnCount != homeGridColumns ||
         currentGrid.groupBy != groupBy ||
-        currentGrid.listMode != useListView
+        currentGrid.listMode != listView
     ) return
     val groupedRows = currentGrid.groupedRows
     val viewMode = when {
-        useListView -> SearchViewMode.LIST
+        listView -> SearchViewMode.LIST
         gridStyle == "square" -> SearchViewMode.GRID
         else -> SearchViewMode.MASONRY
     }

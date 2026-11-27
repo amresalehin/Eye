@@ -124,6 +124,11 @@ fun GalleryApp(
     val groupByPref by prefs.groupBy.collectAsStateWithLifecycle(initialValue = "day")
     val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val searchSortOrderPref by prefs.searchSortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
+    val searchGroupByPref by prefs.searchGroupBy.collectAsStateWithLifecycle(initialValue = "day")
+    val searchGridColumnsPref by prefs.searchGridColumns.collectAsStateWithLifecycle(initialValue = 3)
+    val searchGridStylePref by prefs.searchGridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val searchListViewPref by prefs.searchListView.collectAsStateWithLifecycle(initialValue = false)
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val mlKitLanguagesPref by prefs.mlKitLanguages.collectAsStateWithLifecycle(initialValue = setOf("latin"))
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
@@ -1484,14 +1489,16 @@ fun GalleryApp(
                         }
                         SearchScreen(
                             query = searchQuery,
-                            sortOrder = sortOrderPref,
-                            groupBy = groupByPref,
-                            gridColumns = gridColumnsPref,
-                            gridStyle = gridStylePref,
-                            onSortOrderChange = { scope.launch { prefs.setSortOrder(it) } },
-                            onGroupByChange = { scope.launch { prefs.setGroupBy(it) } },
-                            onGridColumnsChange = { scope.launch { prefs.setGridColumns(it) } },
-                            onGridStyleChange = { scope.launch { prefs.setGridStyle(it) } },
+                            sortOrder = searchSortOrderPref,
+                            groupBy = searchGroupByPref,
+                            gridColumns = searchGridColumnsPref,
+                            gridStyle = searchGridStylePref,
+                            listView = searchListViewPref,
+                            onSortOrderChange = { scope.launch { prefs.setSearchSortOrder(it) } },
+                            onGroupByChange = { scope.launch { prefs.setSearchGroupBy(it) } },
+                            onGridColumnsChange = { scope.launch { prefs.setSearchGridColumns(it) } },
+                            onGridStyleChange = { scope.launch { prefs.setSearchGridStyle(it) } },
+                            onListViewChange = { scope.launch { prefs.setSearchListView(it) } },
                             stage = searchStage,
                             allMedia = searchScopeMedia,
                             recentSearches = recentSearches,

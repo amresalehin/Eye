@@ -59,6 +59,22 @@ class PreferencesRepository(context: Context) {
     val gridStyle: Flow<String> get() = uiPrefs.gridStyle
     suspend fun setGridStyle(value: String) = uiPrefs.setGridStyle(value)
 
+    // Search presentation settings are deliberately separate from Home settings.
+    val searchSortOrder: Flow<String> get() = uiPrefs.searchSortOrder
+    suspend fun setSearchSortOrder(value: String) = uiPrefs.setSearchSortOrder(value)
+
+    val searchGroupBy: Flow<String> get() = uiPrefs.searchGroupBy
+    suspend fun setSearchGroupBy(value: String) = uiPrefs.setSearchGroupBy(value)
+
+    val searchGridColumns: Flow<Int> get() = uiPrefs.searchGridColumns
+    suspend fun setSearchGridColumns(value: Int) = uiPrefs.setSearchGridColumns(value)
+
+    val searchGridStyle: Flow<String> get() = uiPrefs.searchGridStyle
+    suspend fun setSearchGridStyle(value: String) = uiPrefs.setSearchGridStyle(value)
+
+    val searchListView: Flow<Boolean> get() = uiPrefs.searchListView
+    suspend fun setSearchListView(value: Boolean) = uiPrefs.setSearchListView(value)
+
     // --- Vault & Security ---
     val lockedFolderPinHash: Flow<String?> get() = vaultPrefs.lockedFolderPinHash
     val lockedFolderBiometricEnabled: Flow<Boolean> get() = vaultPrefs.lockedFolderBiometricEnabled

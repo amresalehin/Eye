@@ -17,6 +17,11 @@ class UiPreferencesManager(private val context: Context) {
     private val groupByKey = stringPreferencesKey("group_by")
     private val gridColumnsKey = stringPreferencesKey("grid_columns")
     private val gridStyleKey = stringPreferencesKey("grid_style")
+    private val searchSortOrderKey = stringPreferencesKey("search_sort_order")
+    private val searchGroupByKey = stringPreferencesKey("search_group_by")
+    private val searchGridColumnsKey = intPreferencesKey("search_grid_columns")
+    private val searchGridStyleKey = stringPreferencesKey("search_grid_style")
+    private val searchListViewKey = booleanPreferencesKey("search_list_view")
     private val homeScrollIndexKey = intPreferencesKey("home_scroll_index")
     private val homeScrollOffsetKey = intPreferencesKey("home_scroll_offset")
     private val welcomeCompletedKey = booleanPreferencesKey("welcome_completed")
@@ -94,5 +99,46 @@ class UiPreferencesManager(private val context: Context) {
 
     suspend fun setGridStyle(value: String) {
         context.galleryDataStore.edit { it[gridStyleKey] = value }
+    }
+
+    // Search presentation settings are independent from Home presentation settings.
+    val searchSortOrder: Flow<String> = context.galleryDataStore.data.map {
+        it[searchSortOrderKey] ?: "date_desc"
+    }.distinctUntilChanged()
+
+    suspend fun setSearchSortOrder(value: String) {
+        context.galleryDataStore.edit { it[searchSortOrderKey] = value }
+    }
+
+    val searchGroupBy: Flow<String> = context.galleryDataStore.data.map {
+        it[searchGroupByKey] ?: "day"
+    }.distinctUntilChanged()
+
+    suspend fun setSearchGroupBy(value: String) {
+        context.galleryDataStore.edit { it[searchGroupByKey] = value }
+    }
+
+    val searchGridColumns: Flow<Int> = context.galleryDataStore.data.map {
+        it[searchGridColumnsKey] ?: 3
+    }.distinctUntilChanged()
+
+    suspend fun setSearchGridColumns(value: Int) {
+        context.galleryDataStore.edit { it[searchGridColumnsKey] = value.coerceIn(1, 6) }
+    }
+
+    val searchGridStyle: Flow<String> = context.galleryDataStore.data.map {
+        it[searchGridStyleKey] ?: "masonry"
+    }.distinctUntilChanged()
+
+    suspend fun setSearchGridStyle(value: String) {
+        context.galleryDataStore.edit { it[searchGridStyleKey] = value }
+    }
+
+    val searchListView: Flow<Boolean> = context.galleryDataStore.data.map {
+        it[searchListViewKey] ?: false
+    }.distinctUntilChanged()
+
+    suspend fun setSearchListView(value: Boolean) {
+        context.galleryDataStore.edit { it[searchListViewKey] = value }
     }
 }

@@ -39,6 +39,8 @@ import coil.compose.AsyncImage
 import com.amresalehin.emregallery.data.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -107,6 +109,24 @@ fun SearchScreen(
         mutableStateOf(SearchResultData(query = "", items = emptyList(), dynamicChips = emptyList(), totalPhotosCount = 0, totalVideosCount = 0))
     }
 
+    // A request key changes immediately when any search input changes, so stale empty
+    // results are never rendered during the frame before the new search coroutine starts.
+    val shouldComputeSearchResults = stage == SearchStage.RESULTS || !filterState.isDefault
+    val searchRequestKey = remember(
+        query,
+        filterState,
+        sortMode,
+        allMedia,
+        customAlbums,
+        customTagsMap,
+        customPeopleMap,
+        favourites,
+        aiUpdateTick
+    ) { Any() }
+    var completedSearchRequestKey by remember { mutableStateOf<Any?>(null) }
+    val isSearchRunning = shouldComputeSearchResults &&
+        completedSearchRequestKey !== searchRequestKey
+
     // Load Discovery Data when entering Search / changing media / updating AI metadata
     var aiUpdateTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
@@ -156,9 +176,10 @@ fun SearchScreen(
         }
     }
 
-    // Compute Search Results for State C or whenever query/filters/sort change
-    LaunchedEffect(query, stage, filterState, sortMode, allMedia, customAlbums, customTagsMap, customPeopleMap, favourites, aiUpdateTick) {
-        if (stage == SearchStage.RESULTS || !filterState.isDefault) {
+    // Compute Search Results for State C or whenever query/filters/sort change.
+    // The request key drives the UI loading state synchronously, before this effect runs.
+    LaunchedEffect(searchRequestKey, stage) {
+        if (shouldComputeSearchResults) {
             val results = searchEngine.searchMedia(
                 query = query,
                 media = allMedia,
@@ -169,7 +190,10 @@ fun SearchScreen(
                 customPeopleMap = customPeopleMap,
                 favourites = favourites
             )
+            // Do not publish results from a request which was cancelled by newer input.
+            currentCoroutineContext().ensureActive()
             searchResultsData = results
+            completedSearchRequestKey = searchRequestKey
         }
     }
 
@@ -315,6 +339,7 @@ fun SearchScreen(
                         SubmittedResultsContent(
                             query = query,
                             resultsData = searchResultsData,
+                            isSearching = isSearchRunning,
                             sortMode = sortMode,
                             onSortChange = { sortMode = it },
                             viewMode = viewMode,
@@ -1025,6 +1050,7 @@ private fun TypingLiveSuggestionsContent(
 private fun SubmittedResultsContent(
     query: String,
     resultsData: SearchResultData,
+    isSearching: Boolean,
     sortMode: SearchSortMode,
     onSortChange: (SearchSortMode) -> Unit,
     viewMode: SearchViewMode,
@@ -1036,6 +1062,9 @@ private fun SubmittedResultsContent(
     onOpenMedia: (MediaItem) -> Unit,
     isDark: Boolean = false
 ) {
+    // Keep the results surface completely blank until the current request completes.
+    if (isSearching) return
+
     val results = resultsData.items
     val totalCount = results.size
 

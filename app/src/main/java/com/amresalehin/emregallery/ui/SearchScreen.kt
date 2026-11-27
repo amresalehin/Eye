@@ -1111,18 +1111,25 @@ private fun SubmittedResultsContent(
                                 enter = expandVertically(tween(200)) + fadeIn(tween(150)),
                                 exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
                             ) {
-                                JustifiedMosaicRow(
-                                    items = rows[rowIndex],
-                                    containerWidth = containerWidth,
-                                    rowIndex = rowIndex,
-                                    isSquare = false,
-                                    modifier = if (rowIndex == rows.lastIndex) {
-                                        Modifier.padding(bottom = 12.dp)
-                                    } else {
-                                        Modifier
-                                    },
-                                    onOpen = onOpenMedia
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (rowIndex == rows.lastIndex) {
+                                                Modifier.padding(bottom = 12.dp)
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                ) {
+                                    JustifiedMosaicRow(
+                                        items = rows[rowIndex],
+                                        containerWidth = containerWidth,
+                                        rowIndex = rowIndex,
+                                        isSquare = false,
+                                        onOpen = onOpenMedia
+                                    )
+                                }
                             }
                         }
                     }

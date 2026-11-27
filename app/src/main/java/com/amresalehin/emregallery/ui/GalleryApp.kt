@@ -1484,6 +1484,7 @@ fun GalleryApp(
                         }
                         SearchScreen(
                             query = searchQuery,
+                            gridColumns = gridColumnsPref,
                             stage = searchStage,
                             allMedia = searchScopeMedia,
                             recentSearches = recentSearches,

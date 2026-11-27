@@ -16,6 +16,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -33,10 +36,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -49,8 +55,14 @@ fun FloatingSearchPill(
     showMoreOptions: Boolean = false,
     onMenuClick: () -> Unit = {},
     onOptionsClick: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    searchQuery: String? = null,
+    onSearchQueryChange: (String) -> Unit = {},
+    onAddAction: (() -> Unit)? = null
 ) {
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val isCollectionSearch = searchQuery != null
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -65,53 +77,115 @@ fun FloatingSearchPill(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 4.dp, end = if (showMoreOptions) 4.dp else 12.dp),
+                .padding(start = 4.dp, end = if (showMoreOptions || onAddAction != null) 4.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(44.dp).testTag("open_side_panel")
+                modifier = Modifier.size(44.dp).testTag(if (isCollectionSearch) "collection_search_back" else "open_side_panel")
             ) {
                 Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Open navigation menu",
-                    tint = MaterialTheme.colorScheme.onSurface
+                    imageVector = if (isCollectionSearch) Icons.Default.ArrowBack else Icons.Default.Menu,
+                    contentDescription = if (isCollectionSearch) "Back" else "Open navigation menu",
+                    tint = textColor
                 )
             }
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clickable(onClick = onClick)
                     .padding(start = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp)
+                    tint = secondaryColor,
+                    modifier = Modifier.size(22.dp)
                 )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Spacer(Modifier.width(10.dp))
+                if (searchQuery == null) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(onClick = onClick),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = secondaryColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = secondaryColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            modifier = Modifier.fillMaxWidth().testTag("collection_top_search_input"),
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = textColor,
+                                fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                                fontWeight = FontWeight.Normal
+                            ),
+                            cursorBrush = SolidColor(textColor),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {})
+                        )
+                    }
+                }
+            }
+            if (searchQuery != null && searchQuery.isNotEmpty()) {
+                IconButton(
+                    onClick = { onSearchQueryChange("") },
+                    modifier = Modifier.size(40.dp).testTag("collection_top_search_clear")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear search",
+                        tint = secondaryColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            if (onAddAction != null) {
+                IconButton(
+                    onClick = onAddAction,
+                    modifier = Modifier.size(40.dp).testTag("collection_top_add")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add photos to album",
+                        tint = textColor,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
             if (showMoreOptions) {
                 IconButton(
                     onClick = onOptionsClick,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .testTag("home_options_button")
+                    modifier = Modifier.size(44.dp).testTag("home_options_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "View options",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = textColor
                     )
                 }
             }

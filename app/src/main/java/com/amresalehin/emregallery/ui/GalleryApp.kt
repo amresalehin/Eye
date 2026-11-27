@@ -113,6 +113,7 @@ fun GalleryApp(
     var searchVideosOnly by remember { mutableStateOf(false) }
     var pendingSearchFilter by remember { mutableStateOf<SearchFilterState?>(null) }
     var albumFilter by remember { mutableStateOf<String?>(null) }
+    var collectionSearchQuery by remember(albumFilter) { mutableStateOf("") }
     val favourites by prefs.favourites.collectAsStateWithLifecycle(initialValue = emptySet())
     val hidden by prefs.hidden.collectAsStateWithLifecycle(initialValue = emptySet())
     val inBin by prefs.bin.collectAsStateWithLifecycle(initialValue = emptySet())
@@ -148,6 +149,7 @@ fun GalleryApp(
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
+    var showCollectionViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     val lockedFolderPinHash by prefs.lockedFolderPinHash.collectAsStateWithLifecycle(initialValue = null)
     var isLockedFolderUnlocked by remember { mutableStateOf(false) }
@@ -822,22 +824,17 @@ fun GalleryApp(
     val activeCustomAlbum = remember(albumFilter, customAlbums) {
         customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter }
     }
-    val activeCollectionMediaType = remember(albumFilter, albumFilterReturnDestination, activeCustomAlbum, media) {
+    val activeCollectionMediaType = remember(albumFilter, albumFilterReturnDestination, activeCustomAlbum) {
         when {
+            albumFilter == null -> null
             activeCustomAlbum != null -> "album"
-            albumFilter != null && (
-                albumFilterReturnDestination == Destination.DEVICE_FOLDERS ||
-                    media.any { item ->
-                        val path = item.relativePath.trim().trim('/')
-                        val parentPath = path.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" }
-                        path.equals(albumFilter, ignoreCase = true) || parentPath.equals(albumFilter, ignoreCase = true)
-                    }
-                ) -> "folder"
+            albumFilterReturnDestination == Destination.ALBUM_CATALOG -> "album"
+            albumFilterReturnDestination == Destination.DEVICE_FOLDERS -> "folder"
             else -> null
         }
     }
     val activeAlbumTitle = remember(albumFilter, activeCustomAlbum) {
-        activeCustomAlbum?.fullPath ?: when (albumFilter) {
+        activeCustomAlbum?.name ?: when (albumFilter) {
             "Hidden" -> "Locked folder"
             "Bin" -> "Bin"
             "Archive" -> "Archive"
@@ -848,7 +845,7 @@ fun GalleryApp(
             "Places", "Map" -> "Map & Places"
             "Albums" -> "Albums"
             "Folders" -> "Device folders"
-            else -> albumFilter
+            else -> albumFilter?.substringAfterLast("/")?.ifBlank { albumFilter }
         }
     }
 
@@ -1123,6 +1120,9 @@ fun GalleryApp(
                             else -> gridStylePref
                         },
                         collectionMediaType = activeCollectionMediaType,
+                        collectionSearchQuery = collectionSearchQuery,
+                        collectionViewOptionsVisible = showCollectionViewOptionsSheet,
+                        onDismissCollectionViewOptions = { showCollectionViewOptionsSheet = false },
                         collectionListView = when (activeCollectionMediaType) {
                             "album" -> albumContentListViewPref
                             "folder" -> folderContentListViewPref
@@ -1858,14 +1858,29 @@ fun GalleryApp(
                             alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
+                    val isOpenedCollection = baseDestination == Destination.HOME &&
+                        albumFilter != null && activeCollectionMediaType != null
                     FloatingSearchPill(
-                        label = when (returnDestination) {
+                        label = if (isOpenedCollection) {
+                            "Search in " + (activeAlbumTitle ?: if (activeCollectionMediaType == "album") "album" else "folder") + "…"
+                        } else when (returnDestination) {
                             Destination.ALBUMS -> "Search folders, albums…"
                             else -> "Search photos, people, places…"
                         },
+                        searchQuery = if (isOpenedCollection) collectionSearchQuery else null,
+                        onSearchQueryChange = { if (isOpenedCollection) collectionSearchQuery = it },
+                        onAddAction = if (isOpenedCollection && activeCollectionMediaType == "album" && activeCustomAlbum != null) {
+                            { showAddPhotosPickerForAlbum = activeCustomAlbum }
+                        } else null,
                         showMoreOptions = returnDestination == Destination.HOME,
-                        onMenuClick = { showSidePanel = true },
-                        onOptionsClick = { showHomeViewOptionsSheet = true },
+                        onMenuClick = {
+                            if (isOpenedCollection) performBackNavigation()
+                            else showSidePanel = true
+                        },
+                        onOptionsClick = {
+                            if (isOpenedCollection) showCollectionViewOptionsSheet = true
+                            else showHomeViewOptionsSheet = true
+                        },
                         onClick = {
                             navigateTo(Destination.SEARCH)
                             searchStage = SearchStage.DISCOVERY

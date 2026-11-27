@@ -28,7 +28,6 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,7 +36,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,6 +132,9 @@ fun HomeScreen(
     onClearAlbumFilter: () -> Unit = {},
     onAddPhotosToAlbum: (() -> Unit)? = null,
     collectionMediaType: String? = null,
+    collectionSearchQuery: String = "",
+    collectionViewOptionsVisible: Boolean = false,
+    onDismissCollectionViewOptions: () -> Unit = {},
     collectionListView: Boolean = false,
     onCollectionListViewChange: (Boolean) -> Unit = {},
     onCollectionSortOrderChange: (String) -> Unit = {},
@@ -156,9 +157,6 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
-    var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
-    var showCollectionViewOptions by remember { mutableStateOf(false) }
-    val collectionSearchFocusRequester = remember(collectionMediaType, albumTitle) { FocusRequester() }
     val collectionDisplayMedia = remember(media, collectionSearchQuery, isCollectionMediaView) {
         if (!isCollectionMediaView || collectionSearchQuery.isBlank()) {
             media
@@ -395,34 +393,7 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (isCollectionMediaView) {
-                stickyHeader(key = "opened-collection-search-header") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.background)
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        CollectionBrowserSearchBar(
-                            query = collectionSearchQuery,
-                            onQueryChange = { collectionSearchQuery = it },
-                            placeholder = "Search in " + (albumTitle ?: if (collectionMediaType == "album") "album" else "folder") + "…",
-                            onBack = onClearAlbumFilter,
-                            onOpenViewOptions = { showCollectionViewOptions = true },
-                            focusRequester = collectionSearchFocusRequester,
-                            onAdd = if (collectionMediaType == "album") onAddPhotosToAlbum else null
-                        )
-                        Text(
-                            collectionDisplayMedia.size.toString() +
-                                if (collectionDisplayMedia.size == 1) " item" else " items",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 12.dp)
-                        )
-                    }
-                }
-            } else if (albumTitle != null) {
+            if (albumTitle != null && !isCollectionMediaView) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
                 val collectionIcon = when (albumTitle) {
                     "Favourites" -> Icons.Default.Favorite
@@ -605,7 +576,7 @@ fun HomeScreen(
     }
     }
 
-    if (isCollectionMediaView && showCollectionViewOptions) {
+    if (isCollectionMediaView && collectionViewOptionsVisible) {
         HomeViewOptionsBottomSheet(
             sortOrder = sortOrder,
             groupBy = groupBy,
@@ -615,7 +586,7 @@ fun HomeScreen(
             onGroupByChange = onCollectionGroupByChange,
             onGridColumnsChange = onCollectionGridColumnsChange,
             onGridStyleChange = onCollectionGridStyleChange,
-            onDismiss = { showCollectionViewOptions = false },
+            onDismiss = onDismissCollectionViewOptions,
             showListOption = true,
             listViewSelected = collectionListView,
             onListViewSelected = onCollectionListViewChange

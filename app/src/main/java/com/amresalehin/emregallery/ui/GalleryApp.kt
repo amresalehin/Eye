@@ -129,16 +129,16 @@ fun GalleryApp(
     val searchGridColumnsPref by prefs.searchGridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val searchGridStylePref by prefs.searchGridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
     val searchListViewPref by prefs.searchListView.collectAsStateWithLifecycle(initialValue = false)
-    val albumCatalogSortOrderPref by prefs.albumCatalogSortOrder.collectAsStateWithLifecycle(initialValue = "name_asc")
-    val albumCatalogGroupByPref by prefs.albumCatalogGroupBy.collectAsStateWithLifecycle(initialValue = "none")
-    val albumCatalogGridColumnsPref by prefs.albumCatalogGridColumns.collectAsStateWithLifecycle(initialValue = 3)
-    val albumCatalogGridStylePref by prefs.albumCatalogGridStyle.collectAsStateWithLifecycle(initialValue = "square")
-    val albumCatalogListViewPref by prefs.albumCatalogListView.collectAsStateWithLifecycle(initialValue = true)
-    val deviceFoldersSortOrderPref by prefs.deviceFoldersSortOrder.collectAsStateWithLifecycle(initialValue = "name_asc")
-    val deviceFoldersGroupByPref by prefs.deviceFoldersGroupBy.collectAsStateWithLifecycle(initialValue = "none")
-    val deviceFoldersGridColumnsPref by prefs.deviceFoldersGridColumns.collectAsStateWithLifecycle(initialValue = 3)
-    val deviceFoldersGridStylePref by prefs.deviceFoldersGridStyle.collectAsStateWithLifecycle(initialValue = "square")
-    val deviceFoldersListViewPref by prefs.deviceFoldersListView.collectAsStateWithLifecycle(initialValue = true)
+    val albumContentSortOrderPref by prefs.albumContentSortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
+    val albumContentGroupByPref by prefs.albumContentGroupBy.collectAsStateWithLifecycle(initialValue = "day")
+    val albumContentGridColumnsPref by prefs.albumContentGridColumns.collectAsStateWithLifecycle(initialValue = 3)
+    val albumContentGridStylePref by prefs.albumContentGridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val albumContentListViewPref by prefs.albumContentListView.collectAsStateWithLifecycle(initialValue = false)
+    val folderContentSortOrderPref by prefs.folderContentSortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
+    val folderContentGroupByPref by prefs.folderContentGroupBy.collectAsStateWithLifecycle(initialValue = "day")
+    val folderContentGridColumnsPref by prefs.folderContentGridColumns.collectAsStateWithLifecycle(initialValue = 3)
+    val folderContentGridStylePref by prefs.folderContentGridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val folderContentListViewPref by prefs.folderContentListView.collectAsStateWithLifecycle(initialValue = false)
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val mlKitLanguagesPref by prefs.mlKitLanguages.collectAsStateWithLifecycle(initialValue = setOf("latin"))
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
@@ -1288,17 +1288,7 @@ fun GalleryApp(
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onBack = { performBackNavigation() },
-                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.DEVICE_FOLDERS; albumFilter = folderPath; navigateTo(Destination.HOME) },
-                        sortOrder = deviceFoldersSortOrderPref,
-                        groupBy = deviceFoldersGroupByPref,
-                        gridColumns = deviceFoldersGridColumnsPref,
-                        gridStyle = deviceFoldersGridStylePref,
-                        listView = deviceFoldersListViewPref,
-                        onSortOrderChange = { scope.launch { prefs.setDeviceFoldersSortOrder(it) } },
-                        onGroupByChange = { scope.launch { prefs.setDeviceFoldersGroupBy(it) } },
-                        onGridColumnsChange = { scope.launch { prefs.setDeviceFoldersGridColumns(it) } },
-                        onGridStyleChange = { scope.launch { prefs.setDeviceFoldersGridStyle(it) } },
-                        onListViewChange = { scope.launch { prefs.setDeviceFoldersListView(it) } }
+                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.DEVICE_FOLDERS; albumFilter = folderPath; navigateTo(Destination.HOME) }
                     )
                     Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
                         albums = customAlbums,
@@ -1314,17 +1304,7 @@ fun GalleryApp(
                             albumFilterReturnDestination = Destination.ALBUM_CATALOG
                             albumFilter = album.id
                             navigateTo(Destination.HOME)
-                        },
-                        sortOrder = albumCatalogSortOrderPref,
-                        groupBy = albumCatalogGroupByPref,
-                        gridColumns = albumCatalogGridColumnsPref,
-                        gridStyle = albumCatalogGridStylePref,
-                        listView = albumCatalogListViewPref,
-                        onSortOrderChange = { scope.launch { prefs.setAlbumCatalogSortOrder(it) } },
-                        onGroupByChange = { scope.launch { prefs.setAlbumCatalogGroupBy(it) } },
-                        onGridColumnsChange = { scope.launch { prefs.setAlbumCatalogGridColumns(it) } },
-                        onGridStyleChange = { scope.launch { prefs.setAlbumCatalogGridStyle(it) } },
-                        onListViewChange = { scope.launch { prefs.setAlbumCatalogListView(it) } }
+                        }
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,

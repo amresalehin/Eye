@@ -22,16 +22,16 @@ class UiPreferencesManager(private val context: Context) {
     private val searchGridColumnsKey = intPreferencesKey("search_grid_columns")
     private val searchGridStyleKey = stringPreferencesKey("search_grid_style")
     private val searchListViewKey = booleanPreferencesKey("search_list_view")
-    private val albumCatalogSortOrderKey = stringPreferencesKey("album_catalog_sort_order")
-    private val albumCatalogGroupByKey = stringPreferencesKey("album_catalog_group_by")
-    private val albumCatalogGridColumnsKey = intPreferencesKey("album_catalog_grid_columns")
-    private val albumCatalogGridStyleKey = stringPreferencesKey("album_catalog_grid_style")
-    private val albumCatalogListViewKey = booleanPreferencesKey("album_catalog_list_view")
-    private val deviceFoldersSortOrderKey = stringPreferencesKey("device_folders_sort_order")
-    private val deviceFoldersGroupByKey = stringPreferencesKey("device_folders_group_by")
-    private val deviceFoldersGridColumnsKey = intPreferencesKey("device_folders_grid_columns")
-    private val deviceFoldersGridStyleKey = stringPreferencesKey("device_folders_grid_style")
-    private val deviceFoldersListViewKey = booleanPreferencesKey("device_folders_list_view")
+    private val albumContentSortOrderKey = stringPreferencesKey("album_content_sort_order")
+    private val albumContentGroupByKey = stringPreferencesKey("album_content_group_by")
+    private val albumContentGridColumnsKey = intPreferencesKey("album_content_grid_columns")
+    private val albumContentGridStyleKey = stringPreferencesKey("album_content_grid_style")
+    private val albumContentListViewKey = booleanPreferencesKey("album_content_list_view")
+    private val folderContentSortOrderKey = stringPreferencesKey("folder_content_sort_order")
+    private val folderContentGroupByKey = stringPreferencesKey("folder_content_group_by")
+    private val folderContentGridColumnsKey = intPreferencesKey("folder_content_grid_columns")
+    private val folderContentGridStyleKey = stringPreferencesKey("folder_content_grid_style")
+    private val folderContentListViewKey = booleanPreferencesKey("folder_content_list_view")
     private val homeScrollIndexKey = intPreferencesKey("home_scroll_index")
     private val homeScrollOffsetKey = intPreferencesKey("home_scroll_offset")
     private val welcomeCompletedKey = booleanPreferencesKey("welcome_completed")
@@ -152,75 +152,75 @@ class UiPreferencesManager(private val context: Context) {
         context.galleryDataStore.edit { it[searchListViewKey] = value }
     }
 
-    // Album Catalog preferences are isolated from Home, Search and Device Folders.
-    val albumCatalogSortOrder: Flow<String> = context.galleryDataStore.data.map {
-        it[albumCatalogSortOrderKey] ?: "name_asc"
+    // Presentation preferences for media shown inside an opened custom album.
+    val albumContentSortOrder: Flow<String> = context.galleryDataStore.data.map {
+        it[albumContentSortOrderKey] ?: "date_desc"
     }.distinctUntilChanged()
-    suspend fun setAlbumCatalogSortOrder(value: String) {
-        context.galleryDataStore.edit { it[albumCatalogSortOrderKey] = value }
+    suspend fun setAlbumContentSortOrder(value: String) {
+        context.galleryDataStore.edit { it[albumContentSortOrderKey] = value }
     }
 
-    val albumCatalogGroupBy: Flow<String> = context.galleryDataStore.data.map {
-        it[albumCatalogGroupByKey] ?: "none"
+    val albumContentGroupBy: Flow<String> = context.galleryDataStore.data.map {
+        it[albumContentGroupByKey] ?: "day"
     }.distinctUntilChanged()
-    suspend fun setAlbumCatalogGroupBy(value: String) {
-        context.galleryDataStore.edit { it[albumCatalogGroupByKey] = value }
+    suspend fun setAlbumContentGroupBy(value: String) {
+        context.galleryDataStore.edit { it[albumContentGroupByKey] = value }
     }
 
-    val albumCatalogGridColumns: Flow<Int> = context.galleryDataStore.data.map {
-        it[albumCatalogGridColumnsKey] ?: 3
+    val albumContentGridColumns: Flow<Int> = context.galleryDataStore.data.map {
+        it[albumContentGridColumnsKey] ?: 3
     }.distinctUntilChanged()
-    suspend fun setAlbumCatalogGridColumns(value: Int) {
-        context.galleryDataStore.edit { it[albumCatalogGridColumnsKey] = value.coerceIn(1, 6) }
+    suspend fun setAlbumContentGridColumns(value: Int) {
+        context.galleryDataStore.edit { it[albumContentGridColumnsKey] = value.coerceIn(1, 6) }
     }
 
-    val albumCatalogGridStyle: Flow<String> = context.galleryDataStore.data.map {
-        it[albumCatalogGridStyleKey] ?: "square"
+    val albumContentGridStyle: Flow<String> = context.galleryDataStore.data.map {
+        it[albumContentGridStyleKey] ?: "masonry"
     }.distinctUntilChanged()
-    suspend fun setAlbumCatalogGridStyle(value: String) {
-        context.galleryDataStore.edit { it[albumCatalogGridStyleKey] = value }
+    suspend fun setAlbumContentGridStyle(value: String) {
+        context.galleryDataStore.edit { it[albumContentGridStyleKey] = value }
     }
 
-    val albumCatalogListView: Flow<Boolean> = context.galleryDataStore.data.map {
-        it[albumCatalogListViewKey] ?: true
+    val albumContentListView: Flow<Boolean> = context.galleryDataStore.data.map {
+        it[albumContentListViewKey] ?: false
     }.distinctUntilChanged()
-    suspend fun setAlbumCatalogListView(value: Boolean) {
-        context.galleryDataStore.edit { it[albumCatalogListViewKey] = value }
+    suspend fun setAlbumContentListView(value: Boolean) {
+        context.galleryDataStore.edit { it[albumContentListViewKey] = value }
     }
 
-    // Device Folders preferences are isolated from Album Catalog preferences.
-    val deviceFoldersSortOrder: Flow<String> = context.galleryDataStore.data.map {
-        it[deviceFoldersSortOrderKey] ?: "name_asc"
+    // Presentation preferences for media shown inside an opened device folder.
+    val folderContentSortOrder: Flow<String> = context.galleryDataStore.data.map {
+        it[folderContentSortOrderKey] ?: "date_desc"
     }.distinctUntilChanged()
-    suspend fun setDeviceFoldersSortOrder(value: String) {
-        context.galleryDataStore.edit { it[deviceFoldersSortOrderKey] = value }
+    suspend fun setFolderContentSortOrder(value: String) {
+        context.galleryDataStore.edit { it[folderContentSortOrderKey] = value }
     }
 
-    val deviceFoldersGroupBy: Flow<String> = context.galleryDataStore.data.map {
-        it[deviceFoldersGroupByKey] ?: "none"
+    val folderContentGroupBy: Flow<String> = context.galleryDataStore.data.map {
+        it[folderContentGroupByKey] ?: "day"
     }.distinctUntilChanged()
-    suspend fun setDeviceFoldersGroupBy(value: String) {
-        context.galleryDataStore.edit { it[deviceFoldersGroupByKey] = value }
+    suspend fun setFolderContentGroupBy(value: String) {
+        context.galleryDataStore.edit { it[folderContentGroupByKey] = value }
     }
 
-    val deviceFoldersGridColumns: Flow<Int> = context.galleryDataStore.data.map {
-        it[deviceFoldersGridColumnsKey] ?: 3
+    val folderContentGridColumns: Flow<Int> = context.galleryDataStore.data.map {
+        it[folderContentGridColumnsKey] ?: 3
     }.distinctUntilChanged()
-    suspend fun setDeviceFoldersGridColumns(value: Int) {
-        context.galleryDataStore.edit { it[deviceFoldersGridColumnsKey] = value.coerceIn(1, 6) }
+    suspend fun setFolderContentGridColumns(value: Int) {
+        context.galleryDataStore.edit { it[folderContentGridColumnsKey] = value.coerceIn(1, 6) }
     }
 
-    val deviceFoldersGridStyle: Flow<String> = context.galleryDataStore.data.map {
-        it[deviceFoldersGridStyleKey] ?: "square"
+    val folderContentGridStyle: Flow<String> = context.galleryDataStore.data.map {
+        it[folderContentGridStyleKey] ?: "masonry"
     }.distinctUntilChanged()
-    suspend fun setDeviceFoldersGridStyle(value: String) {
-        context.galleryDataStore.edit { it[deviceFoldersGridStyleKey] = value }
+    suspend fun setFolderContentGridStyle(value: String) {
+        context.galleryDataStore.edit { it[folderContentGridStyleKey] = value }
     }
 
-    val deviceFoldersListView: Flow<Boolean> = context.galleryDataStore.data.map {
-        it[deviceFoldersListViewKey] ?: true
+    val folderContentListView: Flow<Boolean> = context.galleryDataStore.data.map {
+        it[folderContentListViewKey] ?: false
     }.distinctUntilChanged()
-    suspend fun setDeviceFoldersListView(value: Boolean) {
-        context.galleryDataStore.edit { it[deviceFoldersListViewKey] = value }
+    suspend fun setFolderContentListView(value: Boolean) {
+        context.galleryDataStore.edit { it[folderContentListViewKey] = value }
     }
 }

@@ -393,8 +393,15 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (albumTitle != null && !isCollectionMediaView) {
-                val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
+            // Album and device-folder identity is already shown in the screen-scoped
+            // floating search bar. Do not add a second banner below it. Keep this
+            // in-list header only for global collection shortcuts.
+            if (
+                albumTitle != null &&
+                !isCollectionMediaView &&
+                albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
+            ) {
+                val isCollection = true
                 val collectionIcon = when (albumTitle) {
                     "Favourites" -> Icons.Default.Favorite
                     "Videos" -> Icons.Default.PlayCircle

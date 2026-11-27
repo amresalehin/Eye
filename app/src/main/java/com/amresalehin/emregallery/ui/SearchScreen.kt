@@ -79,10 +79,6 @@ fun SearchScreen(
         else -> isSystemInDarkTheme()
     }
 
-    // Treat filtered Discovery destinations as result screens as well.
-    val isResultsScreen = stage == SearchStage.RESULTS ||
-        (!filterState.isDefault && stage == SearchStage.DISCOVERY)
-
     val searchEngine = remember { SearchEngine(context) }
 
     // Search & Filter State
@@ -91,6 +87,10 @@ fun SearchScreen(
     var viewMode by remember { mutableStateOf(SearchViewMode.MASONRY) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
+
+    // Treat filtered Discovery destinations as result screens as well.
+    val isResultsScreen = stage == SearchStage.RESULTS ||
+        (!filterState.isDefault && stage == SearchStage.DISCOVERY)
 
     LaunchedEffect(initialFilter) {
         if (initialFilter != null) {
@@ -360,8 +360,6 @@ fun SearchScreen(
                             query = query,
                             resultsData = searchResultsData,
                             isSearching = isSearchRunning,
-                            sortMode = sortMode,
-                            onSortChange = { sortMode = it },
                             viewMode = viewMode,
                             onViewModeChange = { viewMode = it },
                             hasActiveFilters = !filterState.isDefault,
@@ -1082,8 +1080,6 @@ private fun SubmittedResultsContent(
     query: String,
     resultsData: SearchResultData,
     isSearching: Boolean,
-    sortMode: SearchSortMode,
-    onSortChange: (SearchSortMode) -> Unit,
     viewMode: SearchViewMode,
     onViewModeChange: (SearchViewMode) -> Unit,
     hasActiveFilters: Boolean,

@@ -145,7 +145,13 @@ fun GalleryApp(
     val ocrEnginePref by prefs.ocrEngine.collectAsStateWithLifecycle(initialValue = "tesseract")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
+    // Keep Home's position independent from folder and album browsing. The collection
+    // state is keyed by the selected collection so each newly opened collection starts
+    // at the top, while returning from the viewer preserves that collection's position.
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val collectionListState = key(albumFilter, albumFilterReturnDestination) {
+        androidx.compose.foundation.lazy.rememberLazyListState()
+    }
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
@@ -926,8 +932,11 @@ fun GalleryApp(
         visibleMedia = filtered
         completedVisibleMediaFilterKey = visibleMediaFilterKey
     }
-    // Keep the previous real media rows visible while the next batch/filter is prepared.
-    val visibleMediaLoading = completedVisibleMediaFilterKey !== visibleMediaFilterKey
+    // Never render the previous collection under the newly selected collection title.
+    // Expose media only after the matching filter has completed.
+    val visibleMediaIsCurrent = completedVisibleMediaFilterKey === visibleMediaFilterKey
+    val visibleMediaForCurrentFilter = if (visibleMediaIsCurrent) visibleMedia else emptyList()
+    val visibleMediaLoading = !visibleMediaIsCurrent
 
     var peopleMedia by remember {
         mutableStateOf(
@@ -1066,7 +1075,7 @@ fun GalleryApp(
                             albumFilter = it
                             navigateTo(Destination.HOME)
                         } } },
-                        onOpen = { openMediaInViewer(it, visibleMedia) },
+                        onOpen = { openMediaInViewer(it, visibleMediaForCurrentFilter) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
@@ -1126,8 +1135,8 @@ fun GalleryApp(
                     ) {
                         HomeScreen(
                             isVisible = homeVisible,
-                        listState = homeListState,
-                        media = visibleMedia,
+                        listState = if (activeCollectionMediaType != null) collectionListState else homeListState,
+                        media = visibleMediaForCurrentFilter,
                         loading = loading || visibleMediaLoading,
                         mediaLoadError = mediaLoadError,
                         isRefreshing = isRefreshing,
@@ -1965,17 +1974,17 @@ fun GalleryApp(
                     ) {
                         HomeSelectionToolbar(
                             selectedUris = homeSelectedUris,
-                            totalCount = visibleMedia.size,
+                            totalCount = visibleMediaForCurrentFilter.size,
                             onClose = { homeSelectedUris = emptySet() },
                             onSelectAllToggle = {
-                                homeSelectedUris = if (homeSelectedUris.size == visibleMedia.size) {
+                                homeSelectedUris = if (homeSelectedUris.size == visibleMediaForCurrentFilter.size) {
                                     emptySet()
                                 } else {
-                                    visibleMedia.map { it.uri }.toSet()
+                                    visibleMediaForCurrentFilter.map { it.uri }.toSet()
                                 }
                             },
                             onShare = {
-                                shareMultipleMediaItems(context, visibleMedia.filter { it.uri in homeSelectedUris })
+                                shareMultipleMediaItems(context, visibleMediaForCurrentFilter.filter { it.uri in homeSelectedUris })
                             },
                             onMoveToLocked = {
                                 val targets = homeSelectedUris
@@ -1985,12 +1994,12 @@ fun GalleryApp(
                             onMoveToBin = {
                                 val targets = homeSelectedUris
                                 homeSelectedUris = emptySet()
-                                moveToDeviceTrash(visibleMedia.filter { it.uri in targets })
+                                moveToDeviceTrash(visibleMediaForCurrentFilter.filter { it.uri in targets })
                             },
                             onAddToAlbum = {
                                 val targets = homeSelectedUris
                                 homeSelectedUris = emptySet()
-                                val first = visibleMedia.firstOrNull { it.uri in targets }
+                                val first = visibleMediaForCurrentFilter.firstOrNull { it.uri in targets }
                                 if (first != null) {
                                     mediaForAddToAlbum = first
                                     showAddToAlbumSheet = true

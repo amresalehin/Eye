@@ -253,9 +253,28 @@ fun HomeScreen(
     val predictivePrefetchIndex = gridData.predictivePrefetchIndex
     var observedScrollDirection by remember(listState) { mutableIntStateOf(1) }
 
+    // Background thumbnail preparation must never compete with active gallery scrolling.
+    // The manager also pauses whenever Coil starts a visible MediaStore thumbnail request.
+    LaunchedEffect(isVisible, listState, context) {
+        if (!isVisible) {
+            ThumbnailPrewarmManager.setScrolling(context.applicationContext, false)
+            return@LaunchedEffect
+        }
+        try {
+            snapshotFlow { listState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    ThumbnailPrewarmManager.setScrolling(context.applicationContext, scrolling)
+                }
+        } finally {
+            ThumbnailPrewarmManager.setScrolling(context.applicationContext, false)
+        }
+    }
+
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
         object : NestedScrollConnection {
             override suspend fun onPreFling(available: Velocity): Velocity {
+                ThumbnailPrewarmManager.setScrolling(context.applicationContext, true)
                 if (predictivePrefetchRows.isEmpty() || kotlin.math.abs(available.y) < 1200f) return Velocity.Zero
 
                 val forward = observedScrollDirection > 0

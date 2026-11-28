@@ -28,7 +28,9 @@ class MediaStoreThumbnailFetcher(
     private val options: Options
 ) : Fetcher {
 
-    override suspend fun fetch(): FetchResult? = withContext(Dispatchers.IO) {
+    override suspend fun fetch(): FetchResult? =
+        ThumbnailPrewarmManager.withVisibleRequest {
+            withContext(Dispatchers.IO) {
         val widthDim = options.size.width
         val heightDim = options.size.height
         if (widthDim !is Dimension.Pixels || heightDim !is Dimension.Pixels) {
@@ -55,7 +57,8 @@ class MediaStoreThumbnailFetcher(
             isSampled = true,
             dataSource = DataSource.DISK
         )
-    }
+            }
+        }
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {

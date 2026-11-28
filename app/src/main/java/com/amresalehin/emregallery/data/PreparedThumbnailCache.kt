@@ -261,15 +261,35 @@ object PreparedThumbnailCache {
  * Process-lifetime, single-worker prewarmer. It starts after gallery permission is granted,
  * skips files already prepared, and can safely resume from the first missing thumbnail next launch.
  */
+/**
+ * A single, low-priority thumbnail worker.
+ *
+ * It is always subordinate to interactive image loading: scrolling or any visible Coil
+ * request cancels the current background operation. The worker resumes only after scrolling
+ * stops and all visible fetches finish. The priority queue is bounded to 120 upcoming items.
+ */
 object ThumbnailPrewarmManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private var worker: Job? = null
-    private var priorityWorker: Job? = null
+    private var appContext: Context? = null
+
     private data class MediaIdentity(val size: Int, val fingerprint: Long)
+    private data class WorkItem(
+        val item: MediaItem,
+        val isPriority: Boolean,
+        val naturalIndex: Int,
+        val identity: MediaIdentity?
+    )
 
     private var activeMediaIdentity: MediaIdentity? = null
     private var completedMediaIdentity: MediaIdentity? = null
+    private var activeMedia: List<MediaItem> = emptyList()
+    private var nextNaturalIndex = 0
+    private var isScrolling = false
+    private var activeVisibleRequests = 0
+    private var storageBlocked = false
+
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
 
@@ -283,144 +303,185 @@ object ThumbnailPrewarmManager {
         return MediaIdentity(media.size, fingerprint)
     }
 
+    private fun canRunLocked(): Boolean =
+        shouldAllowBackgroundThumbnailPreparation(isScrolling, activeVisibleRequests)
+
+    private fun hasWorkLocked(): Boolean =
+        priorityQueue.isNotEmpty() || nextNaturalIndex < activeMedia.size
+
     /**
-     * Queue only predicted future rows. This works during the initial MediaStore scan too:
-     * the bounded priority worker can prepare thumbnails before the full gallery snapshot exists.
-     * Visible rows are deliberately left to Coil's on-screen requests to avoid lock contention.
+     * A scroll transition pauses and cancels any in-flight prewarm request. The gallery's
+     * visible Coil fetches then get exclusive access to MediaStore/decode/encoding resources.
+     */
+    fun setScrolling(context: Context, scrolling: Boolean) {
+        synchronized(lock) {
+            appContext = context.applicationContext
+            isScrolling = scrolling
+            if (scrolling) {
+                worker?.cancel()
+            } else {
+                ensureWorkerLocked()
+            }
+        }
+    }
+
+    /**
+     * Wrap a visible MediaStore/Coil fetch. Starting a visible request cancels background
+     * preparation immediately; the worker resumes only when the final visible fetch completes.
+     */
+    suspend fun <T> withVisibleRequest(block: suspend () -> T): T {
+        synchronized(lock) {
+            activeVisibleRequests++
+            worker?.cancel()
+        }
+        try {
+            return block()
+        } finally {
+            synchronized(lock) {
+                activeVisibleRequests = (activeVisibleRequests - 1).coerceAtLeast(0)
+                ensureWorkerLocked()
+            }
+        }
+    }
+
+    /**
+     * Keep only the latest bounded look-ahead window. This also works during the initial
+     * MediaStore scan, before the full-library natural prewarm pass has started.
      */
     fun prioritize(context: Context, items: List<MediaItem>) {
         if (items.isEmpty()) return
-        val appContext = context.applicationContext
         synchronized(lock) {
+            appContext = context.applicationContext
             priorityQueue.clear()
             queuedPriorityUris.clear()
             items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
                 if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
             }
-            startPriorityWorkerLocked(appContext)
-        }
-    }
-
-    private fun startPriorityWorkerLocked(appContext: Context) {
-        if (priorityQueue.isEmpty() || worker?.isActive == true || priorityWorker?.isActive == true) return
-        priorityWorker = scope.launch {
-            var processedCount = 0
-            try {
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    val item = synchronized(lock) {
-                        if (priorityQueue.isEmpty()) {
-                            null
-                        } else {
-                            priorityQueue.removeFirst().also { queuedPriorityUris.remove(it.uri) }
-                        }
-                    } ?: break
-
-                    if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
-                        if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
-                            synchronized(lock) {
-                                priorityQueue.clear()
-                                queuedPriorityUris.clear()
-                            }
-                            break
-                        }
-                        try {
-                            PreparedThumbnailCache.prepareIfMissing(appContext, item.uri)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // A failed background prewarm must not block the visible Coil request.
-                        }
-                    }
-                    processedCount++
-                    if (processedCount % 8 == 0) yield()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } finally {
-                synchronized(lock) {
-                    priorityWorker = null
-                    if (priorityQueue.isNotEmpty() && worker?.isActive != true) {
-                        startPriorityWorkerLocked(appContext)
-                    }
-                }
-            }
+            storageBlocked = false
+            ensureWorkerLocked()
         }
     }
 
     fun start(context: Context, media: List<MediaItem>) {
-        val appContext = context.applicationContext
         val identity = mediaIdentity(media)
-
         synchronized(lock) {
+            appContext = context.applicationContext
             if (media.isEmpty()) {
                 worker?.cancel()
-                worker = null
-                priorityWorker?.cancel()
-                priorityWorker = null
                 priorityQueue.clear()
                 queuedPriorityUris.clear()
+                activeMedia = emptyList()
+                nextNaturalIndex = 0
                 activeMediaIdentity = identity
                 completedMediaIdentity = identity
+                storageBlocked = false
                 return
             }
-            if (activeMediaIdentity == identity && worker?.isActive == true) return
-            if (completedMediaIdentity == identity) return
 
-            worker?.cancel()
-            // Keep any currently prioritized look-ahead rows. The new natural pass will
-            // consume them before continuing through the full media snapshot.
-            activeMediaIdentity = identity
-            completedMediaIdentity = null
-            worker = scope.launch {
-                var completedAll = true
-                var naturalIndex = 0
-                var processedCount = 0
-                try {
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val item = synchronized(lock) {
-                            when {
-                                activeMediaIdentity != identity -> null
-                                priorityQueue.isNotEmpty() -> {
-                                    val prioritized = priorityQueue.removeFirst()
-                                    queuedPriorityUris.remove(prioritized.uri)
-                                    prioritized
-                                }
-                                naturalIndex < media.size -> media[naturalIndex++]
-                                else -> null
-                            }
-                        } ?: break
+            if (activeMediaIdentity != identity) {
+                worker?.cancel()
+                activeMediaIdentity = identity
+                activeMedia = media
+                nextNaturalIndex = 0
+                completedMediaIdentity = null
+            } else {
+                activeMedia = media
+            }
+            storageBlocked = false
+            if (completedMediaIdentity != identity) ensureWorkerLocked()
+        }
+    }
 
-                        if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
-                            if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
-                                completedAll = false
-                                break
-                            }
-                            val prepared = try {
-                                PreparedThumbnailCache.prepareIfMissing(appContext, item.uri)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                false
-                            }
-                            if (!prepared) completedAll = false
-                        }
-                        processedCount++
-                        // Yield regularly so visible requests and other IO work can run promptly.
-                        if (processedCount % 8 == 0) yield()
+    /**
+     * Launch exactly one worker. A cancelled worker remains registered until its finally block
+     * runs, preventing a replacement from overlapping the cancellation teardown.
+     */
+    private fun ensureWorkerLocked() {
+        val context = appContext ?: return
+        if (!canRunLocked() || storageBlocked || worker != null || !hasWorkLocked()) return
+
+        val launched = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            runWorker(context)
+        }
+        worker = launched
+        launched.start()
+    }
+
+    private suspend fun runWorker(context: Context) {
+        val thisJob = currentCoroutineContext()[Job]
+        var completedAll = true
+        var processedCount = 0
+
+        try {
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val work = synchronized(lock) {
+                    if (!canRunLocked()) {
+                        null
+                    } else if (priorityQueue.isNotEmpty()) {
+                        WorkItem(priorityQueue.peekFirst(), true, -1, activeMediaIdentity)
+                    } else if (nextNaturalIndex < activeMedia.size) {
+                        WorkItem(activeMedia[nextNaturalIndex], false, nextNaturalIndex, activeMediaIdentity)
+                    } else {
+                        null
                     }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } finally {
-                    synchronized(lock) {
-                        if (activeMediaIdentity == identity) {
-                            worker = null
-                            if (completedAll) completedMediaIdentity = identity
-                            if (priorityQueue.isNotEmpty()) startPriorityWorkerLocked(appContext)
+                } ?: break
+
+                if (!PreparedThumbnailCache.hasPrepared(context, work.item.uri)) {
+                    if (!PreparedThumbnailCache.hasStorageHeadroom(context)) {
+                        completedAll = false
+                        synchronized(lock) {
+                            storageBlocked = true
+                            priorityQueue.clear()
+                            queuedPriorityUris.clear()
                         }
+                        break
+                    }
+
+                    val prepared = try {
+                        PreparedThumbnailCache.prepareIfMissing(context, work.item.uri)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!prepared) completedAll = false
+                }
+
+                synchronized(lock) {
+                    if (work.isPriority) {
+                        if (priorityQueue.peekFirst()?.uri == work.item.uri) {
+                            priorityQueue.removeFirst()
+                            queuedPriorityUris.remove(work.item.uri)
+                        }
+                    } else if (
+                        activeMediaIdentity == work.identity &&
+                        nextNaturalIndex == work.naturalIndex &&
+                        activeMedia.getOrNull(nextNaturalIndex)?.uri == work.item.uri
+                    ) {
+                        nextNaturalIndex++
                     }
                 }
+
+                processedCount++
+                // Keep the single worker cooperative even when it is operating during idle time.
+                if (processedCount % 2 == 0) yield()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } finally {
+            synchronized(lock) {
+                if (worker === thisJob) worker = null
+                val identity = activeMediaIdentity
+                if (
+                    completedAll &&
+                    identity != null &&
+                    priorityQueue.isEmpty() &&
+                    nextNaturalIndex >= activeMedia.size
+                ) {
+                    completedMediaIdentity = identity
+                }
+                ensureWorkerLocked()
             }
         }
     }

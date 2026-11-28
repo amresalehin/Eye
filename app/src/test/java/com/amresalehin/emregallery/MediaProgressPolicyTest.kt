@@ -12,7 +12,7 @@ class MediaProgressPolicyTest {
                 hasPublishedProgress = false,
                 pendingItemCount = 72,
                 isAtLoadedEnd = false,
-                elapsedSinceLastPublishMillis = 0L
+                isScrollingNearLoadedEnd = false
             )
         )
     }
@@ -24,31 +24,31 @@ class MediaProgressPolicyTest {
                 hasPublishedProgress = true,
                 pendingItemCount = MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD,
                 isAtLoadedEnd = false,
-                elapsedSinceLastPublishMillis = 1_000L
+                isScrollingNearLoadedEnd = false
             )
         )
     }
 
     @Test
-    fun publishesSmallerBatchesWhenUserReachesLoadedEnd() {
+    fun publishesImmediatelyWhileScrollingNearLoadedEnd() {
+        assertTrue(
+            shouldPublishMediaProgress(
+                hasPublishedProgress = true,
+                pendingItemCount = MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD,
+                isAtLoadedEnd = false,
+                isScrollingNearLoadedEnd = true
+            )
+        )
+    }
+
+    @Test
+    fun publishesImmediatelyAtLoadedEndEvenAfterFingerStops() {
         assertTrue(
             shouldPublishMediaProgress(
                 hasPublishedProgress = true,
                 pendingItemCount = MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD,
                 isAtLoadedEnd = true,
-                elapsedSinceLastPublishMillis = MEDIA_TAIL_PROGRESS_MIN_INTERVAL_MILLIS
-            )
-        )
-    }
-
-    @Test
-    fun rateLimitsTailUpdates() {
-        assertFalse(
-            shouldPublishMediaProgress(
-                hasPublishedProgress = true,
-                pendingItemCount = MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD,
-                isAtLoadedEnd = true,
-                elapsedSinceLastPublishMillis = MEDIA_TAIL_PROGRESS_MIN_INTERVAL_MILLIS - 1L
+                isScrollingNearLoadedEnd = false
             )
         )
     }
@@ -60,7 +60,19 @@ class MediaProgressPolicyTest {
                 hasPublishedProgress = true,
                 pendingItemCount = MEDIA_PROGRESS_PUBLISH_THRESHOLD,
                 isAtLoadedEnd = false,
-                elapsedSinceLastPublishMillis = 0L
+                isScrollingNearLoadedEnd = false
+            )
+        )
+    }
+
+    @Test
+    fun doesNotPublishBeforeOneTailBatchArrives() {
+        assertFalse(
+            shouldPublishMediaProgress(
+                hasPublishedProgress = true,
+                pendingItemCount = MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD - 1,
+                isAtLoadedEnd = true,
+                isScrollingNearLoadedEnd = true
             )
         )
     }

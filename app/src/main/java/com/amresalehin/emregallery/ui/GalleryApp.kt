@@ -223,7 +223,6 @@ fun GalleryApp(
                 var firstPageSnapshotWritten = false
                 var hasPublishedProgress = false
                 var lastPublishedCount = 0
-                var lastProgressPublishedAt = 0L
                 var loadedResult: MediaLoadResult? = null
 
                 try {
@@ -241,28 +240,31 @@ fun GalleryApp(
                                 loading = false
                                 mediaLoadError = false
 
-                                // Keep normal background publication coarse to avoid repeatedly
-                                // sorting/grouping a large library. When the user reaches the
-                                // currently loaded end, publish smaller chunks so scrolling does
-                                // not stop at an artificial bottom while MediaStore is still scanning.
+                                // Keep ordinary background publication coarse. While the user
+                                // scrolls near the currently loaded boundary, publish each small
+                                // incoming batch immediately so new thumbnails keep appearing ahead.
                                 val shouldPublishProgress = previousMedia.isEmpty() || seededSnapshot.isNotEmpty()
                                 val layoutInfo = homeListState.layoutInfo
                                 val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                val totalVisibleRows = layoutInfo.totalItemsCount
                                 val isAtLoadedEnd = destination == Destination.HOME &&
-                                    layoutInfo.totalItemsCount > 0 &&
-                                    lastVisibleIndex >= layoutInfo.totalItemsCount - 4
-                                val now = android.os.SystemClock.uptimeMillis()
+                                    totalVisibleRows > 0 &&
+                                    lastVisibleIndex >= totalVisibleRows - 4
+                                val isScrollingNearLoadedEnd = destination == Destination.HOME &&
+                                    homeListState.isScrollInProgress &&
+                                    totalVisibleRows > 0 &&
+                                    (totalVisibleRows <= MEDIA_TAIL_NEAR_END_ROWS ||
+                                        lastVisibleIndex >= totalVisibleRows - MEDIA_TAIL_NEAR_END_ROWS)
                                 val shouldPublishBatch = shouldPublishMediaProgress(
                                     hasPublishedProgress = hasPublishedProgress,
                                     pendingItemCount = progressiveItems.size - lastPublishedCount,
                                     isAtLoadedEnd = isAtLoadedEnd,
-                                    elapsedSinceLastPublishMillis = now - lastProgressPublishedAt
+                                    isScrollingNearLoadedEnd = isScrollingNearLoadedEnd
                                 )
                                 if (shouldPublishProgress && shouldPublishBatch) {
                                     media = progressiveItems.toList()
                                     hasPublishedProgress = true
                                     lastPublishedCount = progressiveItems.size
-                                    lastProgressPublishedAt = now
                                 }
 
                                 // Persist a small, bounded recent snapshot without sorting and

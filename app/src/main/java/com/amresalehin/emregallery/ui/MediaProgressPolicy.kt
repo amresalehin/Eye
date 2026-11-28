@@ -1,22 +1,21 @@
 package com.amresalehin.emregallery.ui
 
 internal const val MEDIA_PROGRESS_PUBLISH_THRESHOLD = 3072
-internal const val MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD = 512
-internal const val MEDIA_TAIL_PROGRESS_MIN_INTERVAL_MILLIS = 250L
+internal const val MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD = 128
+internal const val MEDIA_TAIL_NEAR_END_ROWS = 80
 
 /**
- * Publishes the initial page immediately, keeps ordinary background updates coarse, and
- * temporarily switches to smaller updates when the user reaches the currently loaded end.
+ * Publishes the initial page immediately, keeps background updates coarse, and switches
+ * to immediate small-batch publication when the user scrolls near the loaded boundary.
  */
 internal fun shouldPublishMediaProgress(
     hasPublishedProgress: Boolean,
     pendingItemCount: Int,
     isAtLoadedEnd: Boolean,
-    elapsedSinceLastPublishMillis: Long
+    isScrollingNearLoadedEnd: Boolean
 ): Boolean {
     if (!hasPublishedProgress) return true
     if (pendingItemCount >= MEDIA_PROGRESS_PUBLISH_THRESHOLD) return true
-    return isAtLoadedEnd &&
-        pendingItemCount >= MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD &&
-        elapsedSinceLastPublishMillis >= MEDIA_TAIL_PROGRESS_MIN_INTERVAL_MILLIS
+    return (isAtLoadedEnd || isScrollingNearLoadedEnd) &&
+        pendingItemCount >= MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD
 }

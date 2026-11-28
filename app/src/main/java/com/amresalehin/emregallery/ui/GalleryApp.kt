@@ -929,7 +929,7 @@ fun GalleryApp(
         }
     }
 
-    val visibleMediaFilterKey = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
+    val visibleMediaFilterKey = remember(media, hidden, inBin, archive, favourites, albumFilter, albumFilterReturnDestination, customAlbums) {
         Any()
     }
     // Track collection identity separately from media refreshes. A different collection

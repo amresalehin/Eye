@@ -56,7 +56,7 @@ object PreparedThumbnailCache {
     }
 
     fun hasStorageHeadroom(context: Context): Boolean = runCatching {
-        StatFs(context.applicationContext.cacheDir.absolutePath).availableBytes > FREE_SPACE_RESERVE_BYTES
+        StatFs(context.applicationContext.filesDir.absolutePath).availableBytes > FREE_SPACE_RESERVE_BYTES
     }.getOrDefault(false)
 
     /**
@@ -127,13 +127,37 @@ object PreparedThumbnailCache {
         return hasPrepared(context, uri)
     }
 
+    /**
+     * Prepared thumbnails are reusable app data, not disposable temporary files. Store them
+     * under filesDir so Android does not evict the entire library cache under storage pressure.
+     * Older versions used cacheDir; promote those entries lazily without rebuilding them.
+     */
     private fun cacheDirectory(context: Context): File =
-        File(context.cacheDir, DIRECTORY_NAME)
+        File(context.filesDir, DIRECTORY_NAME)
 
     private fun cacheFile(context: Context, uri: String, widthPx: Int, heightPx: Int): File {
         val (normalizedWidth, normalizedHeight) = normalizedDimensions(widthPx, heightPx)
         val key = cacheKey(uri, normalizedWidth, normalizedHeight)
-        return File(cacheDirectory(context), "$key.webp")
+        val persistentFile = File(cacheDirectory(context), "$key.webp")
+        if (persistentFile.isFile && persistentFile.length() > 0L) return persistentFile
+
+        val legacyFile = File(File(context.cacheDir, DIRECTORY_NAME), "$key.webp")
+        if (legacyFile.isFile && legacyFile.length() > 0L) {
+            val parent = persistentFile.parentFile
+            if (parent != null && (parent.isDirectory || parent.mkdirs())) {
+                // renameTo is same-volume and normally constant-time. Copy is a safe fallback.
+                val promoted = runCatching {
+                    legacyFile.renameTo(persistentFile) ||
+                        runCatching {
+                            legacyFile.copyTo(persistentFile, overwrite = false)
+                            legacyFile.delete()
+                            true
+                        }.getOrDefault(false)
+                }.getOrDefault(false)
+                if (!promoted && legacyFile.isFile) return legacyFile
+            }
+        }
+        return persistentFile
     }
 
     /**
@@ -269,12 +293,18 @@ object PreparedThumbnailCache {
  * stops and all visible fetches finish. The priority queue is bounded to 120 upcoming items.
  */
 object ThumbnailPrewarmManager {
+    private const val CHECKPOINT_FILE_NAME = "prepared_thumbnail_checkpoint.properties"
+    private const val CHECKPOINT_VERSION = 1
+    private const val CHECKPOINT_INTERVAL = 32
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
+    private val checkpointIoLock = Any()
     private var worker: Job? = null
     private var appContext: Context? = null
 
     private data class MediaIdentity(val size: Int, val fingerprint: Long)
+    private data class SavedProgress(val nextIndex: Int, val completed: Boolean)
     private data class WorkItem(
         val item: MediaItem,
         val isPriority: Boolean,
@@ -285,6 +315,7 @@ object ThumbnailPrewarmManager {
     private var activeMediaIdentity: MediaIdentity? = null
     private var completedMediaIdentity: MediaIdentity? = null
     private var activeMedia: List<MediaItem> = emptyList()
+    private var activeMediaIsCompleteSnapshot = false
     private var nextNaturalIndex = 0
     private var isScrolling = false
     private var activeVisibleRequests = 0
@@ -293,14 +324,74 @@ object ThumbnailPrewarmManager {
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
 
-    // Compare gallery snapshots without retaining a second full list of every URI.
+    // Include file metadata so a changed library produces a different checkpoint identity.
     private fun mediaIdentity(media: List<MediaItem>): MediaIdentity {
         var fingerprint = -3750763034362895579L
         for (item in media) {
             fingerprint = (fingerprint xor item.id) * 1099511628211L
             fingerprint = (fingerprint xor item.uri.hashCode().toLong()) * 1099511628211L
+            fingerprint = (fingerprint xor item.sizeBytes) * 1099511628211L
+            fingerprint = (fingerprint xor item.dateAddedSeconds) * 1099511628211L
+            fingerprint = (fingerprint xor item.dateTakenMillis) * 1099511628211L
+            fingerprint = (fingerprint xor item.width.toLong()) * 1099511628211L
+            fingerprint = (fingerprint xor item.height.toLong()) * 1099511628211L
         }
         return MediaIdentity(media.size, fingerprint)
+    }
+
+    private fun checkpointFile(context: Context): File =
+        File(context.filesDir, CHECKPOINT_FILE_NAME)
+
+    private fun readCheckpoint(context: Context, identity: MediaIdentity): SavedProgress? =
+        runCatching {
+            val file = checkpointFile(context)
+            if (!file.isFile || file.length() <= 0L) return@runCatching null
+            val properties = java.util.Properties()
+            file.inputStream().use { properties.load(it) }
+            if (properties.getProperty("version")?.toIntOrNull() != CHECKPOINT_VERSION) {
+                return@runCatching null
+            }
+            if (properties.getProperty("media_count")?.toIntOrNull() != identity.size ||
+                properties.getProperty("media_fingerprint")?.toLongOrNull() != identity.fingerprint
+            ) {
+                return@runCatching null
+            }
+            val nextIndex = properties.getProperty("next_index")?.toIntOrNull()
+                ?: return@runCatching null
+            if (nextIndex !in 0..identity.size) return@runCatching null
+            SavedProgress(
+                nextIndex = nextIndex,
+                completed = properties.getProperty("completed").toBoolean()
+            )
+        }.getOrNull()
+
+    private fun writeCheckpoint(
+        context: Context,
+        identity: MediaIdentity,
+        progress: SavedProgress
+    ) {
+        synchronized(checkpointIoLock) {
+            runCatching {
+                val destination = checkpointFile(context)
+                val temporary = File(context.filesDir, "$CHECKPOINT_FILE_NAME.tmp")
+                val properties = java.util.Properties().apply {
+                    setProperty("version", CHECKPOINT_VERSION.toString())
+                    setProperty("media_count", identity.size.toString())
+                    setProperty("media_fingerprint", identity.fingerprint.toString())
+                    setProperty("next_index", progress.nextIndex.coerceIn(0, identity.size).toString())
+                    setProperty("completed", progress.completed.toString())
+                }
+                temporary.delete()
+                temporary.outputStream().use { properties.store(it, "Thumbnail preparation progress") }
+                if (!temporary.renameTo(destination)) {
+                    if (destination.exists() && !destination.delete()) {
+                        temporary.delete()
+                        return@runCatching
+                    }
+                    if (!temporary.renameTo(destination)) temporary.delete()
+                }
+            }
+        }
     }
 
     private fun canRunLocked(): Boolean =
@@ -362,8 +453,17 @@ object ThumbnailPrewarmManager {
         }
     }
 
-    fun start(context: Context, media: List<MediaItem>) {
+    /**
+     * A partial snapshot (the small launch-time snapshot) may be used for immediate warming,
+     * but it must never replace the full-library durable progress marker.
+     */
+    fun start(
+        context: Context,
+        media: List<MediaItem>,
+        isCompleteSnapshot: Boolean = true
+    ) {
         val identity = mediaIdentity(media)
+        val savedProgress = if (isCompleteSnapshot) readCheckpoint(context.applicationContext, identity) else null
         synchronized(lock) {
             appContext = context.applicationContext
             if (media.isEmpty()) {
@@ -371,10 +471,14 @@ object ThumbnailPrewarmManager {
                 priorityQueue.clear()
                 queuedPriorityUris.clear()
                 activeMedia = emptyList()
+                activeMediaIsCompleteSnapshot = isCompleteSnapshot
                 nextNaturalIndex = 0
                 activeMediaIdentity = identity
-                completedMediaIdentity = identity
+                completedMediaIdentity = if (isCompleteSnapshot) identity else null
                 storageBlocked = false
+                if (isCompleteSnapshot) {
+                    writeCheckpoint(context.applicationContext, identity, SavedProgress(0, true))
+                }
                 return
             }
 
@@ -382,10 +486,18 @@ object ThumbnailPrewarmManager {
                 worker?.cancel()
                 activeMediaIdentity = identity
                 activeMedia = media
-                nextNaturalIndex = 0
-                completedMediaIdentity = null
+                activeMediaIsCompleteSnapshot = isCompleteSnapshot
+                nextNaturalIndex = savedProgress?.nextIndex ?: 0
+                completedMediaIdentity = if (savedProgress?.completed == true) identity else null
             } else {
                 activeMedia = media
+                if (isCompleteSnapshot) {
+                    if (!activeMediaIsCompleteSnapshot) {
+                        nextNaturalIndex = savedProgress?.nextIndex ?: nextNaturalIndex
+                        completedMediaIdentity = if (savedProgress?.completed == true) identity else null
+                    }
+                    activeMediaIsCompleteSnapshot = true
+                }
             }
             storageBlocked = false
             if (completedMediaIdentity != identity) ensureWorkerLocked()
@@ -448,6 +560,7 @@ object ThumbnailPrewarmManager {
                     if (!prepared) completedAll = false
                 }
 
+                var checkpointToWrite: Pair<MediaIdentity, SavedProgress>? = null
                 synchronized(lock) {
                     if (work.isPriority) {
                         if (priorityQueue.peekFirst()?.uri == work.item.uri) {
@@ -460,7 +573,18 @@ object ThumbnailPrewarmManager {
                         activeMedia.getOrNull(nextNaturalIndex)?.uri == work.item.uri
                     ) {
                         nextNaturalIndex++
+                        if (
+                            activeMediaIsCompleteSnapshot &&
+                            (nextNaturalIndex % CHECKPOINT_INTERVAL == 0 || nextNaturalIndex == activeMedia.size)
+                        ) {
+                            checkpointToWrite = work.identity?.let {
+                                it to SavedProgress(nextNaturalIndex, completed = false)
+                            }
+                        }
                     }
+                }
+                checkpointToWrite?.let { (checkpointIdentity, progress) ->
+                    writeCheckpoint(context, checkpointIdentity, progress)
                 }
 
                 processedCount++
@@ -470,17 +594,26 @@ object ThumbnailPrewarmManager {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } finally {
+            var checkpointToWrite: Pair<MediaIdentity, SavedProgress>? = null
             synchronized(lock) {
                 if (worker === thisJob) worker = null
                 val identity = activeMediaIdentity
-                if (
-                    completedAll &&
+                val isComplete = completedAll &&
                     identity != null &&
+                    activeMediaIsCompleteSnapshot &&
                     priorityQueue.isEmpty() &&
                     nextNaturalIndex >= activeMedia.size
-                ) {
+                if (isComplete && identity != null) {
                     completedMediaIdentity = identity
                 }
+                if (identity != null && activeMediaIsCompleteSnapshot) {
+                    checkpointToWrite = identity to SavedProgress(nextNaturalIndex, isComplete)
+                }
+            }
+            checkpointToWrite?.let { (checkpointIdentity, progress) ->
+                writeCheckpoint(context, checkpointIdentity, progress)
+            }
+            synchronized(lock) {
                 ensureWorkerLocked()
             }
         }

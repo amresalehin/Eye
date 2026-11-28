@@ -345,7 +345,8 @@ fun GalleryApp(
                 // Coil then serves its visible AsyncImage requests without bulk RAM preloading.
                 ThumbnailPrewarmManager.start(
                     context.applicationContext,
-                    cachedMedia.take(36)
+                    cachedMedia.take(36),
+                    isCompleteSnapshot = false
                 )
             }
             refreshMedia()

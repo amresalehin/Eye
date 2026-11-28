@@ -1499,7 +1499,7 @@ private fun CustomDateRangeDialog(
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = textColor,
-                    contentColor = if (isDark) SearchColors.DarkBg else Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
                 Text("Apply")

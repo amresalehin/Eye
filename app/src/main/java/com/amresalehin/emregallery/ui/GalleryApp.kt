@@ -223,6 +223,7 @@ fun GalleryApp(
                 var firstPageSnapshotWritten = false
                 var hasPublishedProgress = false
                 var lastPublishedCount = 0
+                var lastProgressPublishedAt = 0L
                 var loadedResult: MediaLoadResult? = null
 
                 try {
@@ -240,16 +241,28 @@ fun GalleryApp(
                                 loading = false
                                 mediaLoadError = false
 
-                                // Avoid rebuilding Home's sorted/grouped grid for every small
-                                // cursor chunk. The first page remains immediate; later updates
-                                // are published in larger increments.
+                                // Keep normal background publication coarse to avoid repeatedly
+                                // sorting/grouping a large library. When the user reaches the
+                                // currently loaded end, publish smaller chunks so scrolling does
+                                // not stop at an artificial bottom while MediaStore is still scanning.
                                 val shouldPublishProgress = previousMedia.isEmpty() || seededSnapshot.isNotEmpty()
-                                if (shouldPublishProgress &&
-                                    (!hasPublishedProgress || progressiveItems.size - lastPublishedCount >= 3072)
-                                ) {
+                                val layoutInfo = homeListState.layoutInfo
+                                val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                val isAtLoadedEnd = destination == Destination.HOME &&
+                                    layoutInfo.totalItemsCount > 0 &&
+                                    lastVisibleIndex >= layoutInfo.totalItemsCount - 4
+                                val now = android.os.SystemClock.uptimeMillis()
+                                val shouldPublishBatch = shouldPublishMediaProgress(
+                                    hasPublishedProgress = hasPublishedProgress,
+                                    pendingItemCount = progressiveItems.size - lastPublishedCount,
+                                    isAtLoadedEnd = isAtLoadedEnd,
+                                    elapsedSinceLastPublishMillis = now - lastProgressPublishedAt
+                                )
+                                if (shouldPublishProgress && shouldPublishBatch) {
                                     media = progressiveItems.toList()
                                     hasPublishedProgress = true
                                     lastPublishedCount = progressiveItems.size
+                                    lastProgressPublishedAt = now
                                 }
 
                                 // Persist a small, bounded recent snapshot without sorting and

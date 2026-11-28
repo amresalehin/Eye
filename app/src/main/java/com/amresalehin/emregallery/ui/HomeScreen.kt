@@ -158,7 +158,7 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
-    // The collection toolbar overlays the gallery without painting an opaque full-width strip.
+    // Keep collection media clear of the solid search-and-filter header overlay.
     val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 42.dp else topContentPadding
     var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
     var collectionFilterState by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf(SearchFilterState()) }
@@ -591,6 +591,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background)
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)

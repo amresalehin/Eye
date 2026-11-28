@@ -1839,7 +1839,7 @@ fun GalleryApp(
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && activeCollectionMediaType == null
         if (showSearchBar) {
             Box(
                 modifier = Modifier

@@ -161,7 +161,7 @@ fun HomeScreen(
     // The collection toolbar overlays the gallery without painting an opaque full-width strip.
     val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 42.dp else topContentPadding
     var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
-    var collectionFilterState by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf(SearchFilterState()) }
+    var collectionFilterState by remember(collectionMediaType, albumTitle) { mutableStateOf(SearchFilterState()) }
     var showCollectionViewOptions by remember { mutableStateOf(false) }
     val collectionSearchFocusRequester = remember(collectionMediaType, albumTitle) { FocusRequester() }
     val collectionDisplayMedia = remember(media, collectionSearchQuery, collectionFilterState, isCollectionMediaView) {

@@ -207,40 +207,57 @@ fun GalleryApp(
                 }
             }
             if (hasMediaPermission(context)) {
-                // Publish real MediaStore rows progressively. The first small batch is
-                // rendered immediately; later bounded batches keep the UI responsive while
-                // the remaining cursor rows are still being read.
-                val progressiveItems = LinkedHashMap<String, MediaItem>(media.size + 128)
-                media.forEach { progressiveItems[it.uri] = it }
+                // Keep an existing full gallery visible during refresh. For an empty
+                // startup, publish the first 72 rows immediately; when only the small
+                // persistent snapshot is present, merge it into the first live batches.
+                // MediaStore.Files returns each row once, so an append-only list is enough.
+                val previousMedia = media
+                val seededSnapshot = previousMedia.takeIf { it.size <= 180 }.orEmpty()
+                val progressiveItems = ArrayList<MediaItem>(seededSnapshot.size + 128)
+                progressiveItems.addAll(seededSnapshot)
+                // Only the at-most-180 cached snapshot rows need URI reconciliation. Do not
+                // retain a full-library URI map alongside the full media list.
+                val seededIndices = HashMap<String, Int>(seededSnapshot.size)
+                seededSnapshot.forEachIndexed { index, item -> seededIndices[item.uri] = index }
+
                 var firstPageSnapshotWritten = false
+                var hasPublishedProgress = false
+                var lastPublishedCount = 0
                 var loadedResult: MediaLoadResult? = null
 
                 try {
                     mediaRepository.loadMediaBatches().collect { event ->
                         when (event) {
                             is MediaLoadEvent.Batch -> {
-                                event.items.forEach { progressiveItems[it.uri] = it }
-                                media = progressiveItems.values.toList()
+                                event.items.forEach { item ->
+                                    val cachedIndex = seededIndices.remove(item.uri)
+                                    if (cachedIndex != null) {
+                                        progressiveItems[cachedIndex] = item
+                                    } else {
+                                        progressiveItems.add(item)
+                                    }
+                                }
                                 loading = false
                                 mediaLoadError = false
 
-                                // Save the first real page as soon as it arrives. Even if the
-                                // app is killed before the full catalogue scan completes, the
-                                // next cold launch has a usable snapshot to render immediately.
+                                // Avoid rebuilding Home's sorted/grouped grid for every small
+                                // cursor chunk. The first page remains immediate; later updates
+                                // are published in larger increments.
+                                val shouldPublishProgress = previousMedia.isEmpty() || seededSnapshot.isNotEmpty()
+                                if (shouldPublishProgress &&
+                                    (!hasPublishedProgress || progressiveItems.size - lastPublishedCount >= 3072)
+                                ) {
+                                    media = progressiveItems.toList()
+                                    hasPublishedProgress = true
+                                    lastPublishedCount = progressiveItems.size
+                                }
+
+                                // Persist a small, bounded recent snapshot without sorting and
+                                // copying the entire library into another temporary list.
                                 if (!firstPageSnapshotWritten) {
                                     firstPageSnapshotWritten = true
-                                    val firstPageSnapshot = withContext(Dispatchers.Default) {
-                                        progressiveItems.values
-                                            .sortedWith(
-                                                compareByDescending<MediaItem> {
-                                                    if (it.dateTakenMillis > 0L) it.dateTakenMillis
-                                                    else it.dateAddedSeconds * 1000L
-                                                }.thenByDescending { it.id }
-                                            )
-                                            .take(180)
-                                    }
                                     withContext(Dispatchers.IO) {
-                                        MediaSnapshotCache.write(mediaSnapshotContext, firstPageSnapshot)
+                                        MediaSnapshotCache.writeRecent(mediaSnapshotContext, progressiveItems)
                                     }
                                 }
                             }
@@ -254,22 +271,18 @@ fun GalleryApp(
                 }
 
                 if (loadedResult != null && loadedResult!!.successfulCollections > 0) {
-                    val loadedMedia = loadedResult!!.items
+                    // Cached snapshot rows that were not returned by MediaStore are stale.
+                    // Remove only those bounded seed rows; all live rows are already in place.
+                    seededIndices.values.sortedDescending().forEach { index ->
+                        progressiveItems.removeAt(index)
+                    }
+                    val loadedMedia = progressiveItems.toList()
                     media = loadedMedia
                     loading = false
                     mediaLoadError = false
 
-                    // Persist the most recent metadata page from the authoritative final result.
-                    val recentSnapshot = withContext(Dispatchers.Default) {
-                        loadedMedia.sortedWith(
-                            compareByDescending<MediaItem> {
-                                if (it.dateTakenMillis > 0L) it.dateTakenMillis
-                                else it.dateAddedSeconds * 1000L
-                            }.thenByDescending { it.id }
-                        ).take(180)
-                    }
                     withContext(Dispatchers.IO) {
-                        MediaSnapshotCache.write(mediaSnapshotContext, recentSnapshot)
+                        MediaSnapshotCache.writeRecent(mediaSnapshotContext, loadedMedia)
                     }
 
                     // Continue background preparation after the initial visible batches were shown.
@@ -277,8 +290,11 @@ fun GalleryApp(
                         ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                     }
                 } else {
-                    // A failed query is not proof that the library is empty. Keep the last
-                    // valid cached/progressively received rows and expose retry only when none exist.
+                    // A failed query is not proof that the library is empty. Restore the last
+                    // known-good snapshot/list instead of replacing it with a partial scan.
+                    if (previousMedia.isNotEmpty()) {
+                        media = previousMedia
+                    }
                     mediaLoadError = media.isEmpty()
                     if (media.isNotEmpty()) loading = false
                 }

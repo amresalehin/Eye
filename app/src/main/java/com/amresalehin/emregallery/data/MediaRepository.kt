@@ -43,7 +43,7 @@ class MediaRepository(private val resolver: ContentResolver) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun loadMediaBatches(
         firstBatchSize: Int = 72,
-        batchSize: Int = 1536
+        batchSize: Int = 4096
     ): Flow<MediaLoadEvent> = channelFlow {
         val firstSize = firstBatchSize.coerceAtLeast(1)
         val laterSize = batchSize.coerceAtLeast(firstSize)
@@ -51,6 +51,7 @@ class MediaRepository(private val resolver: ContentResolver) {
             limitPerCollection = null,
             firstBatchSize = firstSize,
             batchSize = laterSize,
+            retainRows = false,
             onBatch = { batch -> send(MediaLoadEvent.Batch(batch)) }
         )
         send(MediaLoadEvent.Completed(result))
@@ -60,9 +61,14 @@ class MediaRepository(private val resolver: ContentResolver) {
         limitPerCollection: Int?,
         firstBatchSize: Int? = null,
         batchSize: Int? = null,
+        retainRows: Boolean = true,
         onBatch: (suspend (List<MediaItem>) -> Unit)? = null
     ): MediaLoadResult = withContext(Dispatchers.IO) {
-        val rows = ArrayList<MediaItem>(if (limitPerCollection != null) limitPerCollection * 2 else 256)
+        // Non-streaming callers receive a complete list. The progressive path hands each
+        // bounded batch to its consumer and must not also retain a second full-library list.
+        val rows = if (retainRows) {
+            ArrayList<MediaItem>(if (limitPerCollection != null) limitPerCollection * 2 else 256)
+        } else null
         val collection = MediaStore.Files.getContentUri("external")
         val projection = buildList {
             add(MediaStore.MediaColumns._ID)
@@ -167,7 +173,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                         durationMillis = if (isVideo && durationCol >= 0 && !c.isNull(durationCol)) c.getLong(durationCol) else 0L,
                         isTrashed = trashedCol >= 0 && !c.isNull(trashedCol) && c.getInt(trashedCol) != 0
                     )
-                    rows.add(item)
+                    rows?.add(item)
                     if (isVideo) videoCount++ else imageCount++
                     pendingBatch?.add(item)
 
@@ -181,7 +187,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                     onBatch?.invoke(pendingBatch.toList())
                 }
             }
-            MediaLoadResult(rows, 1)
+            MediaLoadResult(rows ?: emptyList(), 1)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: SecurityException) {

@@ -8,6 +8,7 @@ import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.util.PriorityQueue
 
 /**
  * Small persistent first-page snapshot of MediaStore metadata.
@@ -34,6 +35,34 @@ object MediaSnapshotCache {
             if (item.isTrashed) hash += 1L
         }
         return hash
+    }
+
+    private fun timestampMillis(item: MediaItem): Long =
+        if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
+
+    private val oldestFirst = compareBy<MediaItem> { timestampMillis(it) }.thenBy { it.id }
+    private val newestFirst = compareByDescending<MediaItem> { timestampMillis(it) }.thenByDescending { it.id }
+
+    /**
+     * Selects the newest [MAX_ITEMS] rows with bounded memory. Sorting the complete library
+     * just to persist a 180-row startup snapshot creates a needless full-size temporary list.
+     */
+    fun mostRecent(media: Iterable<MediaItem>): List<MediaItem> {
+        val newest = PriorityQueue<MediaItem>(MAX_ITEMS, oldestFirst)
+        for (item in media) {
+            if (newest.size < MAX_ITEMS) {
+                newest.add(item)
+            } else if (oldestFirst.compare(item, newest.peek()) > 0) {
+                newest.poll()
+                newest.add(item)
+            }
+        }
+        return newest.sortedWith(newestFirst)
+    }
+
+    @Synchronized
+    fun writeRecent(context: Context, media: Iterable<MediaItem>) {
+        write(context, mostRecent(media))
     }
 
     private fun snapshotFile(context: Context): File =

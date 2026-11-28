@@ -265,10 +265,22 @@ object ThumbnailPrewarmManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private var worker: Job? = null
-    private var activeUris: List<String>? = null
-    private var completedUris: List<String>? = null
+    private data class MediaIdentity(val size: Int, val fingerprint: Long)
+
+    private var activeMediaIdentity: MediaIdentity? = null
+    private var completedMediaIdentity: MediaIdentity? = null
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
+
+    // Compare gallery snapshots without retaining a second full list of every URI.
+    private fun mediaIdentity(media: List<MediaItem>): MediaIdentity {
+        var fingerprint = -3750763034362895579L
+        for (item in media) {
+            fingerprint = (fingerprint xor item.id) * 1099511628211L
+            fingerprint = (fingerprint xor item.uri.hashCode().toLong()) * 1099511628211L
+        }
+        return MediaIdentity(media.size, fingerprint)
+    }
 
     /**
      * Promote only the bounded set of media rows predicted by Home's scroll position.
@@ -278,7 +290,7 @@ object ThumbnailPrewarmManager {
     fun prioritize(items: List<MediaItem>) {
         if (items.isEmpty()) return
         synchronized(lock) {
-            if (worker?.isActive != true || activeUris.isNullOrEmpty()) return
+            if (worker?.isActive != true || (activeMediaIdentity?.size ?: 0) == 0) return
             priorityQueue.clear()
             queuedPriorityUris.clear()
             items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
@@ -289,26 +301,26 @@ object ThumbnailPrewarmManager {
 
     fun start(context: Context, media: List<MediaItem>) {
         val appContext = context.applicationContext
-        val uris = media.map { it.uri }
+        val identity = mediaIdentity(media)
 
         synchronized(lock) {
-            if (uris.isEmpty()) {
+            if (media.isEmpty()) {
                 worker?.cancel()
                 worker = null
                 priorityQueue.clear()
                 queuedPriorityUris.clear()
-                activeUris = emptyList()
-                completedUris = emptyList()
+                activeMediaIdentity = identity
+                completedMediaIdentity = identity
                 return
             }
-            if (activeUris == uris && worker?.isActive == true) return
-            if (completedUris == uris) return
+            if (activeMediaIdentity == identity && worker?.isActive == true) return
+            if (completedMediaIdentity == identity) return
 
             worker?.cancel()
             priorityQueue.clear()
             queuedPriorityUris.clear()
-            activeUris = uris
-            completedUris = null
+            activeMediaIdentity = identity
+            completedMediaIdentity = null
             worker = scope.launch {
                 var completedAll = true
                 var naturalIndex = 0
@@ -318,7 +330,7 @@ object ThumbnailPrewarmManager {
                         currentCoroutineContext().ensureActive()
                         val item = synchronized(lock) {
                             when {
-                                activeUris !== uris -> null
+                                activeMediaIdentity != identity -> null
                                 priorityQueue.isNotEmpty() -> {
                                     val prioritized = priorityQueue.removeFirst()
                                     queuedPriorityUris.remove(prioritized.uri)
@@ -351,11 +363,11 @@ object ThumbnailPrewarmManager {
                     throw cancelled
                 } finally {
                     synchronized(lock) {
-                        if (activeUris === uris) {
+                        if (activeMediaIdentity == identity) {
                             worker = null
                             priorityQueue.clear()
                             queuedPriorityUris.clear()
-                            if (completedAll) completedUris = uris
+                            if (completedAll) completedMediaIdentity = identity
                         }
                     }
                 }

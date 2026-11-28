@@ -149,7 +149,8 @@ fun GalleryApp(
     // state is keyed by the selected collection so each newly opened collection starts
     // at the top, while returning from the viewer preserves that collection's position.
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val collectionListState = key(albumFilter, albumFilterReturnDestination) {
+    var collectionOpenGeneration by remember { mutableIntStateOf(0) }
+    val collectionListState = key(albumFilter, albumFilterReturnDestination, collectionOpenGeneration) {
         androidx.compose.foundation.lazy.rememberLazyListState()
     }
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
@@ -707,6 +708,16 @@ fun GalleryApp(
         inboxInitialStack = newInboxInitialStack
     }
 
+    // Capture the current screen/filter in the back stack before applying the new
+    // collection filter. The generation also gives repeated opens of the same
+    // folder or album a fresh scroll state.
+    fun openCollection(filter: String, returnDestination: Destination) {
+        collectionOpenGeneration += 1
+        navigateTo(Destination.HOME)
+        albumFilterReturnDestination = returnDestination
+        albumFilter = filter
+    }
+
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
         val safeList = if (list.any { it.uri == item.uri }) list else listOf(item)
         selectedMedia = item
@@ -1068,12 +1079,7 @@ fun GalleryApp(
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
                         }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> {
-                            val isCustomAlbumFilter = customAlbums.any { album ->
-                                album.id == it || album.fullPath == it || album.name == it
-                            }
-                            albumFilterReturnDestination = Destination.ALBUMS
-                            albumFilter = it
-                            navigateTo(Destination.HOME)
+                            openCollection(it, Destination.ALBUMS)
                         } } },
                         onOpen = { openMediaInViewer(it, visibleMediaForCurrentFilter) },
                         onOpenPerson = { personId ->
@@ -1412,7 +1418,7 @@ fun GalleryApp(
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onBack = { performBackNavigation() },
-                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.DEVICE_FOLDERS; albumFilter = folderPath; navigateTo(Destination.HOME) }
+                        onOpenFolder = { folderPath -> openCollection(folderPath, Destination.DEVICE_FOLDERS) }
                     )
                     Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
                         albums = customAlbums,
@@ -1425,9 +1431,7 @@ fun GalleryApp(
                             showCreateAlbumDialog = true
                         },
                         onOpenAlbum = { album ->
-                            albumFilterReturnDestination = Destination.ALBUM_CATALOG
-                            albumFilter = album.id
-                            navigateTo(Destination.HOME)
+                            openCollection(album.id, Destination.ALBUM_CATALOG)
                         }
                     )
                     Destination.SETTINGS -> SettingsScreen(
@@ -1677,11 +1681,9 @@ fun GalleryApp(
                                     SuggestionType.ALBUM -> {
                                         val albumId = suggestion.targetFilter?.selectedAlbumId
                                         if (!albumId.isNullOrBlank()) {
-                                            albumFilterReturnDestination = Destination.SEARCH
-                                            albumFilter = albumId
+                                            openCollection(albumId, Destination.SEARCH)
                                             searchQuery = ""
                                             searchStage = SearchStage.DISCOVERY
-                                            navigateTo(Destination.HOME)
                                         }
                                     }
                                     else -> Unit

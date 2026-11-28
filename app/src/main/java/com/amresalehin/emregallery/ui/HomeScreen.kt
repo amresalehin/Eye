@@ -44,6 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.SearchFilterState
+import com.amresalehin.emregallery.data.MediaTypeFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -156,19 +158,25 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
-    // The fixed collection toolbar now occupies the global search bar area, with its item count below.
-    val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 26.dp else topContentPadding
+    // The collection toolbar overlays the gallery without painting an opaque full-width strip.
+    val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 42.dp else topContentPadding
     var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
+    var collectionFilterState by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf(SearchFilterState()) }
     var showCollectionViewOptions by remember { mutableStateOf(false) }
     val collectionSearchFocusRequester = remember(collectionMediaType, albumTitle) { FocusRequester() }
-    val collectionDisplayMedia = remember(media, collectionSearchQuery, isCollectionMediaView) {
-        if (!isCollectionMediaView || collectionSearchQuery.isBlank()) {
-            media
-        } else {
+    val collectionDisplayMedia = remember(media, collectionSearchQuery, collectionFilterState, isCollectionMediaView) {
+        if (!isCollectionMediaView) media else {
             val query = collectionSearchQuery.trim()
             media.filter { item ->
-                item.name.contains(query, ignoreCase = true) ||
+                val matchesQuery = query.isBlank() || item.name.contains(query, ignoreCase = true) ||
                     item.relativePath.contains(query, ignoreCase = true)
+                val matchesType = when (collectionFilterState.mediaType) {
+                    MediaTypeFilter.ALL -> true
+                    MediaTypeFilter.PHOTOS -> !item.isVideo && !item.name.endsWith(".gif", ignoreCase = true)
+                    MediaTypeFilter.VIDEOS -> item.isVideo
+                    MediaTypeFilter.GIFS -> item.name.endsWith(".gif", ignoreCase = true)
+                }
+                matchesQuery && matchesType
             }
         }
     }
@@ -584,9 +592,8 @@ fun HomeScreen(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .background(MaterialTheme.colorScheme.background)
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CollectionBrowserSearchBar(
                     query = collectionSearchQuery,
@@ -597,12 +604,12 @@ fun HomeScreen(
                     focusRequester = collectionSearchFocusRequester,
                     onAdd = if (collectionMediaType == "album") onAddPhotosToAlbum else null
                 )
-                Text(
-                    collectionDisplayMedia.size.toString() +
-                        if (collectionDisplayMedia.size == 1) " item" else " items",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp)
+                SearchFilterChipsRow(
+                    filterState = collectionFilterState,
+                    onFilterChange = { collectionFilterState = it },
+                    dynamicChips = emptyList(),
+                    onToggleDynamicChip = {},
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }

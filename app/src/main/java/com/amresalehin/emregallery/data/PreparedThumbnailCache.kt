@@ -294,6 +294,7 @@ object PreparedThumbnailCache {
  * stops and all visible fetches finish. The priority queue is bounded to 120 upcoming items.
  */
 object ThumbnailPrewarmManager {
+    private const val TAG = "ThumbnailPrewarm"
     private const val CHECKPOINT_FILE_NAME = "prepared_thumbnail_checkpoint.properties"
     private const val CHECKPOINT_VERSION = 1
     private const val CHECKPOINT_INTERVAL = 32
@@ -461,6 +462,23 @@ object ThumbnailPrewarmManager {
         media: List<MediaItem>,
         isCompleteSnapshot: Boolean = true
     ) {
+        // Snapshot fingerprinting and checkpoint restoration are auxiliary work. A failure
+        // here must never escape the Compose startup coroutine and close the gallery.
+        try {
+            startInternal(context, media, isCompleteSnapshot)
+        } catch (error: Exception) {
+            android.util.Log.e(TAG, "Could not initialize thumbnail preparation; gallery startup will continue", error)
+            synchronized(lock) {
+                storageBlocked = true
+            }
+        }
+    }
+
+    private fun startInternal(
+        context: Context,
+        media: List<MediaItem>,
+        isCompleteSnapshot: Boolean
+    ) {
         val identity = mediaIdentity(media)
         val savedProgress = if (isCompleteSnapshot) readCheckpoint(context.applicationContext, identity) else null
         val restoredIndex = restoreThumbnailPrewarmIndex(
@@ -603,6 +621,19 @@ object ThumbnailPrewarmManager {
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (error: Exception) {
+            // The prewarmer is optional background work. Contain unexpected provider,
+            // filesystem, or decoding failures instead of allowing an uncaught coroutine
+            // exception to terminate the application process.
+            completedAll = false
+            android.util.Log.e(TAG, "Thumbnail preparation worker stopped after an unexpected error", error)
+            synchronized(lock) {
+                if (workerIdentity == activeMediaIdentity) {
+                    storageBlocked = true
+                    priorityQueue.clear()
+                    queuedPriorityUris.clear()
+                }
+            }
         } finally {
             var checkpointToWrite: Pair<MediaIdentity, SavedProgress>? = null
             synchronized(lock) {

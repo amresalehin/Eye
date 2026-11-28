@@ -594,8 +594,8 @@ fun HomeScreen(
         AnimatedVisibility(
             visible = showCollectionBackToTop,
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = bottomContentPadding),
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomContentPadding),
             enter = fadeIn(tween(160)) + scaleIn(tween(160)),
             exit = fadeOut(tween(120)) + scaleOut(tween(120))
         ) {

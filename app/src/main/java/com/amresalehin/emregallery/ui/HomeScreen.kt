@@ -329,10 +329,10 @@ fun HomeScreen(
                     val forwardCount = if (moving) PREFETCH_LOOK_AHEAD_ROWS else PREFETCH_IDLE_LOOK_AHEAD_ROWS
                     val backwardCount = if (moving) 4 else 6
                     val targetIndices = if (direction > 0) {
-                        (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
+                        (anchor + 1..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
                             (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
                     } else {
-                        (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
+                        (anchor - 1 downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
                             (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
                     }
                     val lookAheadItems = targetIndices.flatMap { rowsSnapshot[it].second }

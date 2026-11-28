@@ -1337,7 +1337,7 @@ private fun SubmittedResultsContent(
                     resultsScope.launch { resultsListState.scrollToItem(0) }
                 },
                 shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ) {
                 Icon(

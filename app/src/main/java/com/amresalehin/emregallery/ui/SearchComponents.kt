@@ -43,45 +43,35 @@ import com.amresalehin.emregallery.data.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-// One UI / Samsung Gallery-inspired neutral color tokens
-object SearchColors {
-    val LightBg = Color(0xFFF1F2F4)
-    val LightBarSurface = Color(0xFFE7E9ED)
-    val LightCardSurface = Color(0xFFFAFAFB)
-    val LightPrimaryText = Color(0xFF26313D)
-    val LightSecondaryText = Color(0xFF77808C)
-    val LightSelectedSurface = Color(0xFFDCE1E7)
-    val LightDivider = Color(0xFFD9DDE2)
-
-    val DarkBg = Color(0xFF131518)
-    val DarkBarSurface = Color(0xFF1E2228)
-    val DarkCardSurface = Color(0xFF23272F)
-    val DarkPrimaryText = Color(0xFFE3E5E8)
-    val DarkSecondaryText = Color(0xFF939AA3)
-    val DarkSelectedSurface = Color(0xFF2E343D)
-    val DarkDivider = Color(0xFF2C3038)
-}
+// Search reuses the app-wide Material 3 color scheme so light/dark mode,
+// surfaces, text, selection, and borders stay consistent with Home and Albums.
+@Composable
+fun searchBgColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.background
 
 @Composable
-fun searchBgColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkBg else SearchColors.LightBg
+fun searchBarSurfaceColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.surfaceContainerHigh
 
 @Composable
-fun searchBarSurfaceColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkBarSurface else SearchColors.LightBarSurface
+fun searchCardSurfaceColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.surfaceContainer
 
 @Composable
-fun searchCardSurfaceColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkCardSurface else SearchColors.LightCardSurface
+fun searchPrimaryTextColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.onSurface
 
 @Composable
-fun searchPrimaryTextColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkPrimaryText else SearchColors.LightPrimaryText
+fun searchSecondaryTextColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.onSurfaceVariant
 
 @Composable
-fun searchSecondaryTextColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkSecondaryText else SearchColors.LightSecondaryText
+fun searchSelectedSurfaceColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.secondaryContainer
 
 @Composable
-fun searchSelectedSurfaceColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkSelectedSurface else SearchColors.LightSelectedSurface
-
-@Composable
-fun searchDividerColor(isDark: Boolean): Color = if (isDark) SearchColors.DarkDivider else SearchColors.LightDivider
+fun searchDividerColor(@Suppress("UNUSED_PARAMETER") isDark: Boolean): Color =
+    MaterialTheme.colorScheme.outlineVariant
 
 /**
  * Compact, single-row rounded capsule search bar.
@@ -278,15 +268,12 @@ fun SearchFilterChipsRow(
     isDark: Boolean? = null
 ) {
     val scrollState = rememberScrollState()
-    // Respect an explicit caller override; otherwise follow the active app theme,
-    // including the user's in-app light/dark preference.
-    val useDarkColors = isDark ?: (MaterialTheme.colorScheme.background.luminance() < 0.5f)
-
-    val textColor = searchPrimaryTextColor(useDarkColors)
-    val secondaryText = searchSecondaryTextColor(useDarkColors)
-    val cardSurface = searchCardSurfaceColor(useDarkColors)
-    val selectedSurface = searchSelectedSurfaceColor(useDarkColors)
-    val dividerCol = searchDividerColor(useDarkColors)
+    // Use the same semantic Material 3 roles as the Home and Albums screens.
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val secondaryText = MaterialTheme.colorScheme.onSurfaceVariant
+    val cardSurface = MaterialTheme.colorScheme.surfaceContainer
+    val selectedSurface = MaterialTheme.colorScheme.secondaryContainer
+    val dividerCol = MaterialTheme.colorScheme.outlineVariant
 
     Row(
         modifier = modifier
@@ -1216,8 +1203,8 @@ fun SearchAdvancedFilterSheet(
                     .testTag("filter_sheet_apply_button"),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = textColor,
-                    contentColor = if (isDark) SearchColors.DarkBg else Color.White
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
                 Text(

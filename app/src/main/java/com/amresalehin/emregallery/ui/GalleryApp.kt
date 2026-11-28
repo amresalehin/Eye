@@ -340,14 +340,8 @@ fun GalleryApp(
                 // Keep the reconciliation flag active until MediaStore confirms this snapshot.
                 // Non-empty cached rows still render immediately; only an empty filtered result
                 // remains on the skeleton instead of flashing the empty-library message.
-                // Warm the first visible rows from the persistent snapshot before the live
-                // MediaStore query finishes. This prepares the shared disk thumbnail files;
-                // Coil then serves its visible AsyncImage requests without bulk RAM preloading.
-                ThumbnailPrewarmManager.start(
-                    context.applicationContext,
-                    cachedMedia.take(36),
-                    isCompleteSnapshot = false
-                )
+                // Defer background thumbnail preparation until MediaStore reconciliation
+                // completes. Visible Coil requests load their own thumbnails on demand.
             }
             refreshMedia()
         }

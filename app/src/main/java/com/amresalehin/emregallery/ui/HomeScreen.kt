@@ -596,7 +596,7 @@ fun HomeScreen(
             visible = showCollectionBackToTop,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = bottomContentPadding),
+                .padding(bottom = 16.dp),
             enter = fadeIn(tween(160)) + scaleIn(tween(160)),
             exit = fadeOut(tween(120)) + scaleOut(tween(120))
         ) {
@@ -611,7 +611,7 @@ fun HomeScreen(
                     focusedElevation = 0.dp,
                     hoveredElevation = 0.dp
                 ),
-                containerColor = Color.Transparent,
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
                 contentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 Icon(

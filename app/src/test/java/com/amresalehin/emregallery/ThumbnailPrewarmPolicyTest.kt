@@ -11,6 +11,26 @@ class ThumbnailPrewarmPolicyTest {
     }
 
     @Test
+    fun resumesIncompleteCheckpointAtSavedCursor() {
+        assertTrue(restoreThumbnailPrewarmIndex(1000, 640, false) == 640)
+    }
+
+    @Test
+    fun retriesFromBeginningWhenIncompletePassReachedEnd() {
+        assertTrue(restoreThumbnailPrewarmIndex(1000, 1000, false) == 0)
+    }
+
+    @Test
+    fun skipsCompletedLibraryCheckpoint() {
+        assertTrue(restoreThumbnailPrewarmIndex(1000, 1000, true) == 1000)
+    }
+
+    @Test
+    fun rejectsOutOfRangeCheckpoint() {
+        assertTrue(restoreThumbnailPrewarmIndex(1000, 1500, true) == 0)
+    }
+
+    @Test
     fun pausesPrewarmDuringScrolling() {
         assertFalse(shouldAllowBackgroundThumbnailPreparation(isScrolling = true, activeVisibleRequests = 0))
     }

@@ -9,6 +9,7 @@ import android.os.CancellationSignal
 import android.os.OperationCanceledException
 import android.os.StatFs
 import android.provider.MediaStore
+import android.util.AtomicFile
 import android.util.Size
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -347,7 +348,7 @@ object ThumbnailPrewarmManager {
             val file = checkpointFile(context)
             if (!file.isFile || file.length() <= 0L) return@runCatching null
             val properties = java.util.Properties()
-            file.inputStream().use { properties.load(it) }
+            AtomicFile(file).openRead().use { properties.load(it) }
             if (properties.getProperty("version")?.toIntOrNull() != CHECKPOINT_VERSION) {
                 return@runCatching null
             }
@@ -372,23 +373,21 @@ object ThumbnailPrewarmManager {
     ) {
         synchronized(checkpointIoLock) {
             runCatching {
-                val destination = checkpointFile(context)
-                val temporary = File(context.filesDir, "$CHECKPOINT_FILE_NAME.tmp")
-                val properties = java.util.Properties().apply {
-                    setProperty("version", CHECKPOINT_VERSION.toString())
-                    setProperty("media_count", identity.size.toString())
-                    setProperty("media_fingerprint", identity.fingerprint.toString())
-                    setProperty("next_index", progress.nextIndex.coerceIn(0, identity.size).toString())
-                    setProperty("completed", progress.completed.toString())
-                }
-                temporary.delete()
-                temporary.outputStream().use { properties.store(it, "Thumbnail preparation progress") }
-                if (!temporary.renameTo(destination)) {
-                    if (destination.exists() && !destination.delete()) {
-                        temporary.delete()
-                        return@runCatching
+                val atomicFile = AtomicFile(checkpointFile(context))
+                val stream = atomicFile.startWrite()
+                try {
+                    val properties = java.util.Properties().apply {
+                        setProperty("version", CHECKPOINT_VERSION.toString())
+                        setProperty("media_count", identity.size.toString())
+                        setProperty("media_fingerprint", identity.fingerprint.toString())
+                        setProperty("next_index", progress.nextIndex.coerceIn(0, identity.size).toString())
+                        setProperty("completed", progress.completed.toString())
                     }
-                    if (!temporary.renameTo(destination)) temporary.delete()
+                    properties.store(stream, "Thumbnail preparation progress")
+                    atomicFile.finishWrite(stream)
+                } catch (error: Throwable) {
+                    atomicFile.failWrite(stream)
+                    throw error
                 }
             }
         }

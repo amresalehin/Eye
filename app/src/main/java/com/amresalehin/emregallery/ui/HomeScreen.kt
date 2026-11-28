@@ -158,6 +158,11 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
+    val showCollectionBackToTop by remember(listState, isCollectionMediaView) {
+        derivedStateOf {
+            isCollectionMediaView && (listState.firstVisibleItemIndex > 4 || listState.firstVisibleItemScrollOffset > 1200)
+        }
+    }
     // Keep collection media clear of the solid search-and-filter header overlay.
     val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 42.dp else topContentPadding
     var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
@@ -585,6 +590,29 @@ fun HomeScreen(
             bottomContentPadding = bottomContentPadding,
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        AnimatedVisibility(
+            visible = showCollectionBackToTop,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = bottomContentPadding),
+            enter = fadeIn(tween(160)) + scaleIn(tween(160)),
+            exit = fadeOut(tween(120)) + scaleOut(tween(120))
+        ) {
+            SmallFloatingActionButton(
+                onClick = {
+                    homeScope.launch { listState.animateScrollToItem(0) }
+                },
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Back to top"
+                )
+            }
+        }
 
         if (isCollectionMediaView) {
             Column(

@@ -397,7 +397,7 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (albumTitle != null) {
+            if (!isCollectionMediaView && albumTitle != null) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
                 val collectionIcon = when (albumTitle) {
                     "Favourites" -> Icons.Default.Favorite

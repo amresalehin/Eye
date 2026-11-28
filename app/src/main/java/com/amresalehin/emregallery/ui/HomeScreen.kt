@@ -601,7 +601,7 @@ fun HomeScreen(
         ) {
             SmallFloatingActionButton(
                 onClick = {
-                    homeScope.launch { listState.animateScrollToItem(0) }
+                    homeScope.launch { listState.scrollToItem(0) }
                 },
                 shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primaryContainer,

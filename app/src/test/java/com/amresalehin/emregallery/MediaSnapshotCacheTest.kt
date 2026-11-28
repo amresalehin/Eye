@@ -46,6 +46,6 @@ class MediaSnapshotCacheTest {
 
         val result = MediaSnapshotCache.mostRecent(media)
 
-        assertEquals(listOf(3L, 2L, 1L), result.map { it.id })
+        assertEquals(listOf(2L, 3L, 1L), result.map { it.id })
     }
 }

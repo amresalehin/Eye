@@ -932,8 +932,13 @@ fun GalleryApp(
     val visibleMediaFilterKey = remember(media, hidden, inBin, archive, favourites, albumFilter, customAlbums) {
         Any()
     }
+    // Track collection identity separately from media refreshes. A different collection
+    // must not briefly show the previous collection's rows, but refreshing the same
+    // collection can keep its already-rendered media visible until the new batch is ready.
+    val activeMediaFilterIdentity = remember(albumFilter, albumFilterReturnDestination) { Any() }
     var visibleMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var completedVisibleMediaFilterKey by remember { mutableStateOf<Any?>(null) }
+    var completedMediaFilterIdentity by remember { mutableStateOf<Any?>(null) }
     LaunchedEffect(visibleMediaFilterKey) {
         val filtered = if (media.size <= 150) {
             filterVisibleMedia()
@@ -942,12 +947,11 @@ fun GalleryApp(
         }
         visibleMedia = filtered
         completedVisibleMediaFilterKey = visibleMediaFilterKey
+        completedMediaFilterIdentity = activeMediaFilterIdentity
     }
-    // Never render the previous collection under the newly selected collection title.
-    // Expose media only after the matching filter has completed.
-    val visibleMediaIsCurrent = completedVisibleMediaFilterKey === visibleMediaFilterKey
-    val visibleMediaForCurrentFilter = if (visibleMediaIsCurrent) visibleMedia else emptyList()
-    val visibleMediaLoading = !visibleMediaIsCurrent
+    val visibleMediaForCurrentFilter =
+        if (completedMediaFilterIdentity === activeMediaFilterIdentity) visibleMedia else emptyList()
+    val visibleMediaLoading = completedVisibleMediaFilterKey !== visibleMediaFilterKey
 
     var peopleMedia by remember {
         mutableStateOf(

@@ -529,6 +529,8 @@ object ThumbnailPrewarmManager {
 
     private suspend fun runWorker(context: Context) {
         val thisJob = currentCoroutineContext()[Job]
+        // A cancelled worker must never persist progress for a newer snapshot that replaced it.
+        val workerIdentity = synchronized(lock) { activeMediaIdentity }
         var completedAll = true
         var processedCount = 0
 
@@ -604,7 +606,10 @@ object ThumbnailPrewarmManager {
         } finally {
             var checkpointToWrite: Pair<MediaIdentity, SavedProgress>? = null
             synchronized(lock) {
-                val identity = activeMediaIdentity
+                // Only the snapshot this worker actually processed may be checkpointed here.
+                // A newer complete list can replace the manager state while this job is being
+                // cancelled; using activeMediaIdentity alone would let this stale job overwrite it.
+                val identity = workerIdentity?.takeIf { it == activeMediaIdentity }
                 val isComplete = completedAll &&
                     identity != null &&
                     activeMediaIsCompleteSnapshot &&

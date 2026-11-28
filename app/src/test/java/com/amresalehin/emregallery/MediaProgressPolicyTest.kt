@@ -30,7 +30,7 @@ class MediaProgressPolicyTest {
     }
 
     @Test
-    fun publishesImmediatelyWhileScrollingNearLoadedEnd() {
+    fun publishesAheadOfTheEndWhileFastScrollingWithinTheLookaheadBuffer() {
         assertTrue(
             shouldPublishMediaProgress(
                 hasPublishedProgress = true,
@@ -42,7 +42,7 @@ class MediaProgressPolicyTest {
     }
 
     @Test
-    fun publishesImmediatelyAtLoadedEndEvenAfterFingerStops() {
+    fun publishesImmediatelyAtLoadedEndEvenAfterScrollingStops() {
         assertTrue(
             shouldPublishMediaProgress(
                 hasPublishedProgress = true,

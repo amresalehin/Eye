@@ -43,7 +43,7 @@ class MediaRepository(private val resolver: ContentResolver) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun loadMediaBatches(
         firstBatchSize: Int = 72,
-        batchSize: Int = 128
+        batchSize: Int = 64
     ): Flow<MediaLoadEvent> = channelFlow {
         val firstSize = firstBatchSize.coerceAtLeast(1)
         val laterSize = batchSize.coerceAtLeast(firstSize)

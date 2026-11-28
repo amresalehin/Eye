@@ -265,6 +265,7 @@ object ThumbnailPrewarmManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private var worker: Job? = null
+    private var priorityWorker: Job? = null
     private data class MediaIdentity(val size: Int, val fingerprint: Long)
 
     private var activeMediaIdentity: MediaIdentity? = null
@@ -283,18 +284,66 @@ object ThumbnailPrewarmManager {
     }
 
     /**
-     * Promote only the bounded set of media rows predicted by Home's scroll position.
-     * Visible thumbnails are requested by their AsyncImage composables; this queue is for
-     * background disk preparation and does not create competing Coil memory-cache requests.
+     * Queue only predicted future rows. This works during the initial MediaStore scan too:
+     * the bounded priority worker can prepare thumbnails before the full gallery snapshot exists.
+     * Visible rows are deliberately left to Coil's on-screen requests to avoid lock contention.
      */
-    fun prioritize(items: List<MediaItem>) {
+    fun prioritize(context: Context, items: List<MediaItem>) {
         if (items.isEmpty()) return
+        val appContext = context.applicationContext
         synchronized(lock) {
-            if (worker?.isActive != true || (activeMediaIdentity?.size ?: 0) == 0) return
             priorityQueue.clear()
             queuedPriorityUris.clear()
             items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
                 if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
+            }
+            startPriorityWorkerLocked(appContext)
+        }
+    }
+
+    private fun startPriorityWorkerLocked(appContext: Context) {
+        if (priorityQueue.isEmpty() || worker?.isActive == true || priorityWorker?.isActive == true) return
+        priorityWorker = scope.launch {
+            var processedCount = 0
+            try {
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val item = synchronized(lock) {
+                        if (priorityQueue.isEmpty()) {
+                            null
+                        } else {
+                            priorityQueue.removeFirst().also { queuedPriorityUris.remove(it.uri) }
+                        }
+                    } ?: break
+
+                    if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
+                        if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
+                            synchronized(lock) {
+                                priorityQueue.clear()
+                                queuedPriorityUris.clear()
+                            }
+                            break
+                        }
+                        try {
+                            PreparedThumbnailCache.prepareIfMissing(appContext, item.uri)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A failed background prewarm must not block the visible Coil request.
+                        }
+                    }
+                    processedCount++
+                    if (processedCount % 8 == 0) yield()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } finally {
+                synchronized(lock) {
+                    priorityWorker = null
+                    if (priorityQueue.isNotEmpty() && worker?.isActive != true) {
+                        startPriorityWorkerLocked(appContext)
+                    }
+                }
             }
         }
     }
@@ -307,6 +356,8 @@ object ThumbnailPrewarmManager {
             if (media.isEmpty()) {
                 worker?.cancel()
                 worker = null
+                priorityWorker?.cancel()
+                priorityWorker = null
                 priorityQueue.clear()
                 queuedPriorityUris.clear()
                 activeMediaIdentity = identity
@@ -317,8 +368,8 @@ object ThumbnailPrewarmManager {
             if (completedMediaIdentity == identity) return
 
             worker?.cancel()
-            priorityQueue.clear()
-            queuedPriorityUris.clear()
+            // Keep any currently prioritized look-ahead rows. The new natural pass will
+            // consume them before continuing through the full media snapshot.
             activeMediaIdentity = identity
             completedMediaIdentity = null
             worker = scope.launch {
@@ -365,9 +416,8 @@ object ThumbnailPrewarmManager {
                     synchronized(lock) {
                         if (activeMediaIdentity == identity) {
                             worker = null
-                            priorityQueue.clear()
-                            queuedPriorityUris.clear()
                             if (completedAll) completedMediaIdentity = identity
+                            if (priorityQueue.isNotEmpty()) startPriorityWorkerLocked(appContext)
                         }
                     }
                 }

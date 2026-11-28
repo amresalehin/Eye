@@ -1,8 +1,8 @@
 package com.amresalehin.emregallery.ui
 
 internal const val MEDIA_PROGRESS_PUBLISH_THRESHOLD = 3072
-internal const val MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD = 128
-internal const val MEDIA_TAIL_NEAR_END_ROWS = 80
+internal const val MEDIA_TAIL_PROGRESS_PUBLISH_THRESHOLD = 64
+internal const val MEDIA_TAIL_NEAR_END_ROWS = 240
 
 /**
  * Publishes the initial page immediately, keeps background updates coarse, and switches

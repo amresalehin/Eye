@@ -56,8 +56,8 @@ import kotlinx.coroutines.flow.debounce
 import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
-private const val PREFETCH_LOOK_AHEAD_ROWS = 14
-private const val PREFETCH_IDLE_LOOK_AHEAD_ROWS = 6
+private const val PREFETCH_LOOK_AHEAD_ROWS = 36
+private const val PREFETCH_IDLE_LOOK_AHEAD_ROWS = 12
 private const val PREFETCH_MAX_MEDIA_ITEMS = 120
 
 @Immutable
@@ -268,18 +268,18 @@ fun HomeScreen(
                 val rowsSnapshot = predictivePrefetchRows
                 homeScope.launch(Dispatchers.Default) {
                     val lastIndex = rowsSnapshot.lastIndex
-                    val predictedRows = (kotlin.math.abs(available.y) * 0.32f / 180f)
-                        .toInt().coerceIn(4, PREFETCH_LOOK_AHEAD_ROWS)
+                    val predictedRows = (kotlin.math.abs(available.y) * 0.45f / 180f)
+                        .toInt().coerceIn(6, PREFETCH_LOOK_AHEAD_ROWS)
                     val targetRange = if (forward) {
                         (anchor + 1)..(anchor + predictedRows).coerceAtMost(lastIndex)
                     } else {
                         (anchor - 1) downTo (anchor - predictedRows).coerceAtLeast(0)
                     }
-                    val visibleItems = visibleIndices.flatMap { rowsSnapshot[it].second }
                     val lookAheadItems = targetRange.flatMap { rowsSnapshot[it].second }
                         .asSequence().distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS).toList()
                     ThumbnailPrewarmManager.prioritize(
-                        (visibleItems + lookAheadItems).distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS)
+                        context.applicationContext,
+                        lookAheadItems
                     )
                 }
                 return Velocity.Zero
@@ -297,7 +297,7 @@ fun HomeScreen(
         snapshotFlow {
             val info = listState.layoutInfo.visibleItemsInfo
             if (info.isEmpty()) -1 to -1 else info.first().index to info.last().index
-        }.distinctUntilChanged().debounce(75).collect { (firstItemIdx, lastItemIdx) ->
+        }.distinctUntilChanged().debounce(32).collect { (firstItemIdx, lastItemIdx) ->
             if (firstItemIdx < 0 || predictivePrefetchRows.isEmpty()) {
                 previousFirstItem = firstItemIdx
                 return@collect
@@ -327,7 +327,7 @@ fun HomeScreen(
                     val lastIndex = rowsSnapshot.lastIndex
                     val moving = listState.isScrollInProgress
                     val forwardCount = if (moving) PREFETCH_LOOK_AHEAD_ROWS else PREFETCH_IDLE_LOOK_AHEAD_ROWS
-                    val backwardCount = if (moving) 2 else 4
+                    val backwardCount = if (moving) 4 else 6
                     val targetIndices = if (direction > 0) {
                         (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
                             (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
@@ -335,11 +335,11 @@ fun HomeScreen(
                         (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
                             (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
                     }
-                    val visibleItems = visibleRows.flatMap { rowsSnapshot[it].second }
                     val lookAheadItems = targetIndices.flatMap { rowsSnapshot[it].second }
                         .asSequence().distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS).toList()
                     ThumbnailPrewarmManager.prioritize(
-                        (visibleItems + lookAheadItems).distinctBy { it.uri }.take(PREFETCH_MAX_MEDIA_ITEMS)
+                        context.applicationContext,
+                        lookAheadItems
                     )
                 }
                 previousAnchor = anchor

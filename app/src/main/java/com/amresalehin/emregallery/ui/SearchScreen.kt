@@ -1337,8 +1337,14 @@ private fun SubmittedResultsContent(
                     resultsScope.launch { resultsListState.scrollToItem(0) }
                 },
                 shape = CircleShape,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 0.dp,
+                    pressedElevation = 0.dp,
+                    focusedElevation = 0.dp,
+                    hoveredElevation = 0.dp
+                ),
                 containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowUp,

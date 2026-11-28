@@ -1328,7 +1328,7 @@ private fun SubmittedResultsContent(
             visible = showResultsBackToTop,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 88.dp),
+                .padding(bottom = 16.dp),
             enter = fadeIn(tween(160)) + scaleIn(tween(160)),
             exit = fadeOut(tween(120)) + scaleOut(tween(120))
         ) {
@@ -1343,7 +1343,7 @@ private fun SubmittedResultsContent(
                     focusedElevation = 0.dp,
                     hoveredElevation = 0.dp
                 ),
-                containerColor = Color.Transparent,
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
                 contentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 Icon(

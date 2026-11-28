@@ -1146,6 +1146,13 @@ private fun SubmittedResultsContent(
 
     // Share the same lazy-list state and fast scrollbar behaviour as Home.
     val resultsListState = rememberLazyListState()
+    val resultsScope = rememberCoroutineScope()
+    val showResultsBackToTop by remember(resultsListState) {
+        derivedStateOf {
+            resultsListState.firstVisibleItemIndex > 4 ||
+                resultsListState.firstVisibleItemScrollOffset > 1200
+        }
+    }
     val homeGridColumns = gridColumns.coerceIn(1, 6)
 
     // Search used to regroup and chunk its results synchronously during composition.
@@ -1316,6 +1323,29 @@ private fun SubmittedResultsContent(
             bottomContentPadding = 32.dp,
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        AnimatedVisibility(
+            visible = showResultsBackToTop,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 32.dp),
+            enter = fadeIn(tween(160)) + scaleIn(tween(160)),
+            exit = fadeOut(tween(120)) + scaleOut(tween(120))
+        ) {
+            SmallFloatingActionButton(
+                onClick = {
+                    resultsScope.launch { resultsListState.scrollToItem(0) }
+                },
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Back to top"
+                )
+            }
+        }
     }
 }
 

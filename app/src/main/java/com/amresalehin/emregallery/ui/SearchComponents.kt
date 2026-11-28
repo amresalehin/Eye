@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -274,15 +275,18 @@ fun SearchFilterChipsRow(
     onToggleDynamicChip: (DynamicEntityChip) -> Unit,
     onRequestCustomDatePicker: () -> Unit = {},
     modifier: Modifier = Modifier,
-    isDark: Boolean = false
+    isDark: Boolean? = null
 ) {
     val scrollState = rememberScrollState()
+    // Respect an explicit caller override; otherwise follow the active app theme,
+    // including the user's in-app light/dark preference.
+    val useDarkColors = isDark ?: (MaterialTheme.colorScheme.background.luminance() < 0.5f)
 
-    val textColor = searchPrimaryTextColor(isDark)
-    val secondaryText = searchSecondaryTextColor(isDark)
-    val cardSurface = searchCardSurfaceColor(isDark)
-    val selectedSurface = searchSelectedSurfaceColor(isDark)
-    val dividerCol = searchDividerColor(isDark)
+    val textColor = searchPrimaryTextColor(useDarkColors)
+    val secondaryText = searchSecondaryTextColor(useDarkColors)
+    val cardSurface = searchCardSurfaceColor(useDarkColors)
+    val selectedSurface = searchSelectedSurfaceColor(useDarkColors)
+    val dividerCol = searchDividerColor(useDarkColors)
 
     Row(
         modifier = modifier

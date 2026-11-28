@@ -156,6 +156,8 @@ fun HomeScreen(
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val isCollectionMediaView = collectionMediaType == "album" || collectionMediaType == "folder"
+    // The fixed collection toolbar now occupies the global search bar area, with its item count below.
+    val listTopContentPadding = if (isCollectionMediaView) topContentPadding + 26.dp else topContentPadding
     var collectionSearchQuery by rememberSaveable(collectionMediaType, albumTitle) { mutableStateOf("") }
     var showCollectionViewOptions by remember { mutableStateOf(false) }
     val collectionSearchFocusRequester = remember(collectionMediaType, albumTitle) { FocusRequester() }
@@ -350,7 +352,7 @@ fun HomeScreen(
                 isRefreshing = isRefreshing,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = topContentPadding)
+                    .padding(top = listTopContentPadding)
             )
         }
     ) {
@@ -390,39 +392,12 @@ fun HomeScreen(
             contentPadding = PaddingValues(
                 start = 12.dp,
                 end = 12.dp,
-                top = topContentPadding,
+                top = listTopContentPadding,
                 bottom = bottomContentPadding
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (isCollectionMediaView) {
-                stickyHeader(key = "opened-collection-search-header") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.background)
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        CollectionBrowserSearchBar(
-                            query = collectionSearchQuery,
-                            onQueryChange = { collectionSearchQuery = it },
-                            placeholder = "Search in " + (albumTitle ?: if (collectionMediaType == "album") "album" else "folder") + "…",
-                            onBack = onClearAlbumFilter,
-                            onOpenViewOptions = { showCollectionViewOptions = true },
-                            focusRequester = collectionSearchFocusRequester,
-                            onAdd = if (collectionMediaType == "album") onAddPhotosToAlbum else null
-                        )
-                        Text(
-                            collectionDisplayMedia.size.toString() +
-                                if (collectionDisplayMedia.size == 1) " item" else " items",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 12.dp)
-                        )
-                    }
-                }
-            } else if (albumTitle != null) {
+            if (albumTitle != null) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
                 val collectionIcon = when (albumTitle) {
                     "Favourites" -> Icons.Default.Favorite
@@ -598,10 +573,39 @@ fun HomeScreen(
 
         HomeFastScrollbar(
             listState = listState,
-            topContentPadding = topContentPadding,
+            topContentPadding = listTopContentPadding,
             bottomContentPadding = bottomContentPadding,
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        if (isCollectionMediaView) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                CollectionBrowserSearchBar(
+                    query = collectionSearchQuery,
+                    onQueryChange = { collectionSearchQuery = it },
+                    placeholder = "Search in " + (albumTitle ?: if (collectionMediaType == "album") "album" else "folder") + "…",
+                    onBack = onClearAlbumFilter,
+                    onOpenViewOptions = { showCollectionViewOptions = true },
+                    focusRequester = collectionSearchFocusRequester,
+                    onAdd = if (collectionMediaType == "album") onAddPhotosToAlbum else null
+                )
+                Text(
+                    collectionDisplayMedia.size.toString() +
+                        if (collectionDisplayMedia.size == 1) " item" else " items",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp)
+                )
+            }
+        }
     }
     }
 

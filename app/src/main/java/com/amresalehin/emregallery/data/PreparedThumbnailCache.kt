@@ -463,6 +463,11 @@ object ThumbnailPrewarmManager {
     ) {
         val identity = mediaIdentity(media)
         val savedProgress = if (isCompleteSnapshot) readCheckpoint(context.applicationContext, identity) else null
+        val restoredIndex = restoreThumbnailPrewarmIndex(
+            mediaSize = media.size,
+            savedNextIndex = savedProgress?.nextIndex,
+            savedCompleted = savedProgress?.completed == true
+        )
         synchronized(lock) {
             appContext = context.applicationContext
             if (media.isEmpty()) {
@@ -486,14 +491,18 @@ object ThumbnailPrewarmManager {
                 activeMediaIdentity = identity
                 activeMedia = media
                 activeMediaIsCompleteSnapshot = isCompleteSnapshot
-                nextNaturalIndex = savedProgress?.nextIndex ?: 0
-                completedMediaIdentity = if (savedProgress?.completed == true) identity else null
+                nextNaturalIndex = restoredIndex
+                completedMediaIdentity = if (
+                    savedProgress?.completed == true && restoredIndex == media.size
+                ) identity else null
             } else {
                 activeMedia = media
                 if (isCompleteSnapshot) {
                     if (!activeMediaIsCompleteSnapshot) {
-                        nextNaturalIndex = savedProgress?.nextIndex ?: nextNaturalIndex
-                        completedMediaIdentity = if (savedProgress?.completed == true) identity else null
+                        nextNaturalIndex = restoredIndex
+                        completedMediaIdentity = if (
+                            savedProgress?.completed == true && restoredIndex == media.size
+                        ) identity else null
                     }
                     activeMediaIsCompleteSnapshot = true
                 }
@@ -595,7 +604,6 @@ object ThumbnailPrewarmManager {
         } finally {
             var checkpointToWrite: Pair<MediaIdentity, SavedProgress>? = null
             synchronized(lock) {
-                if (worker === thisJob) worker = null
                 val identity = activeMediaIdentity
                 val isComplete = completedAll &&
                     identity != null &&
@@ -609,10 +617,13 @@ object ThumbnailPrewarmManager {
                     checkpointToWrite = identity to SavedProgress(nextNaturalIndex, isComplete)
                 }
             }
+            // Keep this worker registered until its checkpoint is committed. Otherwise a
+            // scroll/priority callback can launch a replacement that races this final write.
             checkpointToWrite?.let { (checkpointIdentity, progress) ->
                 writeCheckpoint(context, checkpointIdentity, progress)
             }
             synchronized(lock) {
+                if (worker === thisJob) worker = null
                 ensureWorkerLocked()
             }
         }

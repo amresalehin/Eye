@@ -1327,8 +1327,8 @@ private fun SubmittedResultsContent(
         AnimatedVisibility(
             visible = showResultsBackToTop,
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 32.dp),
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 88.dp),
             enter = fadeIn(tween(160)) + scaleIn(tween(160)),
             exit = fadeOut(tween(120)) + scaleOut(tween(120))
         ) {

@@ -3,6 +3,9 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import android.util.Log
 import androidx.datastore.preferences.preferencesDataStore
 import com.amresalehin.emregallery.data.preferences.AiConfig
 import com.amresalehin.emregallery.data.preferences.AiProviderProfile
@@ -16,7 +19,15 @@ import com.amresalehin.emregallery.data.preferences.UiPreferencesManager
 import com.amresalehin.emregallery.data.preferences.VaultPreferencesManager
 import kotlinx.coroutines.flow.Flow
 
-val Context.galleryDataStore: DataStore<Preferences> by preferencesDataStore(name = "emre_gallery")
+val Context.galleryDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "emre_gallery",
+    corruptionHandler = ReplaceFileCorruptionHandler { error ->
+        // Recover from a corrupted DataStore file with default preferences instead of
+        // crashing the Activity while the first theme/settings flow is collected.
+        Log.e("GalleryDataStore", "Preferences file is corrupted; restoring defaults", error)
+        emptyPreferences()
+    }
+)
 
 /**
  * Unified facade providing access to domain-specific preference managers:

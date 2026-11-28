@@ -2,6 +2,7 @@ package com.amresalehin.emregallery
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
@@ -66,8 +67,18 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         // Restore face coordinator state and download history off the startup main thread.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this@GalleryApplication)
-            com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
+            // These are optional state restorations. A damaged history/preferences file
+            // or a transient storage failure must not terminate the whole app process.
+            try {
+                com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this@GalleryApplication)
+            } catch (error: Exception) {
+                Log.e("GalleryApplication", "Face-processing state restoration failed", error)
+            }
+            try {
+                com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
+            } catch (error: Exception) {
+                Log.e("GalleryApplication", "Download-history restoration failed", error)
+            }
         }
 
     }

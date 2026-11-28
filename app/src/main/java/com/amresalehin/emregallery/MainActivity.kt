@@ -7,19 +7,20 @@ import android.os.Bundle
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.util.Log
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.GalleryApp
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.catch
 
 class MainActivity : FragmentActivity() {
 
@@ -35,25 +36,26 @@ class MainActivity : FragmentActivity() {
         handleBrowserOpenIntent(intent)
 
         val preferences = PreferencesRepository(applicationContext)
-        lifecycleScope.launch {
-            // Resolve the saved theme before the first Compose frame. Starting with
-            // "system" here causes a dark-mode flash when the saved app theme is light.
-            val initialTheme = preferences.theme.first()
-            if (isFinishing || isDestroyed) return@launch
-
-            applyStartupTheme(initialTheme)
-            setContent {
-                val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
-                EmreGalleryTheme(theme) {
-                    GalleryApp(
-                        externalBrowserOpenRequest = incomingBrowserRequest.value,
-                        onExternalBrowserOpenRequestConsumed = { requestId ->
-                            if (incomingBrowserRequest.value?.requestId == requestId) {
-                                incomingBrowserRequest.value = null
-                            }
-                        }
-                    )
+        // Install Compose immediately. Waiting for DataStore before setContent meant a
+        // preference-read failure could leave the Activity without its home UI at all.
+        setContent {
+            val themeFlow = remember(preferences) {
+                preferences.theme.catch { error ->
+                    Log.e("MainActivity", "Unable to read saved theme; using system theme", error)
+                    emit("system")
                 }
+            }
+            val theme by themeFlow.collectAsStateWithLifecycle(initialValue = "system")
+            SideEffect { applyStartupTheme(theme) }
+            EmreGalleryTheme(theme) {
+                GalleryApp(
+                    externalBrowserOpenRequest = incomingBrowserRequest.value,
+                    onExternalBrowserOpenRequestConsumed = { requestId ->
+                        if (incomingBrowserRequest.value?.requestId == requestId) {
+                            incomingBrowserRequest.value = null
+                        }
+                    }
+                )
             }
         }
     }
